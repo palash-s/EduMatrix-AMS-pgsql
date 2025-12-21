@@ -63,7 +63,7 @@ jobs:
 
       - name: Validate docker-compose.prod.yml
         env:
-          GHCR_IMAGE_REPO: palash-s/EduMatrix-AMS-pgsql
+          GHCR_IMAGE_REPO: palash-s/edumatrix-ams-pgsql
           IMAGE_TAG: ci
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: dummy

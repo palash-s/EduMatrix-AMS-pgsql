@@ -22,16 +22,25 @@ jobs:
 
     env:
       REGISTRY: ghcr.io
-      IMAGE_REPO: ${{ github.repository }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set image tag
-        id: tag
+      - name: Connect to Tailscale (if configured)
+        if: ${{ secrets.TAILSCALE_AUTHKEY != '' }}
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          args: --accept-dns=false
+
+      - name: Compute image metadata
+        id: meta
         shell: bash
         run: |
+          # GHCR image names must be lowercase.
+          image_repo_lower=$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "image_repo=${image_repo_lower}" >> "$GITHUB_OUTPUT"
           if [ -n "${{ inputs.image_tag }}" ]; then
             echo "tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
           else
@@ -55,10 +64,21 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ steps.tag.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:latest
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.image_repo }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Ensure deploy folders exist
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            set -e
+            mkdir -p "${{ secrets.DEPLOY_PATH }}" "${{ secrets.DEPLOY_PATH }}/nginx"
 
       - name: Upload deploy files to server
         uses: appleboy/scp-action@v0.1.7
@@ -82,18 +102,9 @@ jobs:
           script: |
             set -e
 
-            mkdir -p "${{ secrets.DEPLOY_PATH }}/secrets" "${{ secrets.DEPLOY_PATH }}/nginx"
-
-            # Optional: write Firebase service account JSON from GitHub Secret
-            if [ -n "${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}" ]; then
-              cat > "${{ secrets.DEPLOY_PATH }}/secrets/firebase-service-account.json" <<'EOF'
-            ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-            EOF
-            fi
-
             cat > "${{ secrets.DEPLOY_PATH }}/.env" <<EOF
-            GHCR_IMAGE_REPO=${{ github.repository }}
-            IMAGE_TAG=${{ steps.tag.outputs.tag }}
+            GHCR_IMAGE_REPO=${{ steps.meta.outputs.image_repo }}
+            IMAGE_TAG=${{ steps.meta.outputs.tag }}
             POSTGRES_USER=${{ secrets.POSTGRES_USER }}
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_DB=${{ secrets.POSTGRES_DB }}

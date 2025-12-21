@@ -21,10 +21,7 @@ services:
     command: gunicorn -w 4 -b 0.0.0.0:5000 app:app
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-school_system}
-      FIREBASE_CREDENTIALS_FILE: /app/secrets/firebase-service-account.json
       SECRET_KEY: ${SECRET_KEY}
-    volumes:
-      - ./secrets/firebase-service-account.json:/app/secrets/firebase-service-account.json:ro
     networks:
       - ams_network
 

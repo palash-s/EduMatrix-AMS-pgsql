@@ -6,11 +6,9 @@ services:
     image: postgres:13
     restart: always
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: AdminPassword123
-      POSTGRES_DB: school_system
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-AdminPassword123}
+      POSTGRES_DB: ${POSTGRES_DB:-school_system}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -24,10 +22,9 @@ services:
       - db
     command: gunicorn -w 4 -b 0.0.0.0:5000 --reload app:app
     environment: 
-      FIREBASE_CREDENTIALS_FILE: /app/secrets/edumatrix-ams-firebase-adminsdk-fbsvc-7c1040553f.json
-      DATABASE_URL: postgresql://admin:AdminPassword123@db:5432/school_system
+      DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-AdminPassword123}@db:5432/${POSTGRES_DB:-school_system}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-me}
     volumes: 
-      - ./secrets/edumatrix-ams-firebase-adminsdk-fbsvc-7c1040553f.json:/app/secrets/edumatrix-ams-firebase-adminsdk-fbsvc-7c1040553f.json:ro
       - .:/app
     networks:
       - ams_network

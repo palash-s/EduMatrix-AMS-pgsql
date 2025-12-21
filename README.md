@@ -206,16 +206,22 @@ In your GitHub repo: Settings → Secrets and variables → Actions → New repo
 - `SSH_PRIVATE_KEY` → private key for SSH (multi-line)
 - `DEPLOY_PATH` → e.g. `/opt/ams`
 
+If your server is not publicly reachable (example: you access it only via Tailscale), add:
+- `TAILSCALE_AUTHKEY` → Tailscale auth key for GitHub Actions runner
+  - Create it in Tailscale Admin Console → Settings/Keys → Generate auth key
+  - Prefer an **ephemeral** key, and rotate it if leaked
+  - Set `SSH_HOST` to your server’s **Tailscale IP** (example: `100.100.x.x`)
+
 - `GHCR_USERNAME` → usually your GitHub username or org name
-- `GHCR_TOKEN` → a GitHub PAT with at least `read:packages` (to pull images on the server)
+- `GHCR_TOKEN` → a GitHub PAT used by the server to pull images from GHCR
+  - For private images: needs at least `read:packages` and access to the repo/package (commonly `repo` for classic PATs)
 
 - `POSTGRES_USER` → e.g. `admin`
 - `POSTGRES_PASSWORD` → strong password
 - `POSTGRES_DB` → e.g. `school_system`
 - `SECRET_KEY` → strong random string
 
-Optional (recommended):
-- `FIREBASE_SERVICE_ACCOUNT_JSON` → contents of your Firebase service account JSON
+Firebase (push notifications) is optional. If you don't configure Firebase, the app will run normally but push notifications will be skipped.
 
 ### 4) How to deploy (manual)
 Go to GitHub → Actions → **Deploy (Manual)** → Run workflow.
