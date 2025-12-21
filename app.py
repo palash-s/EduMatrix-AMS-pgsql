@@ -1045,53 +1045,60 @@ def get_students_by_section():
 # ==========================================
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.json
-    username = data.get('username') # This could be Email OR Employee Code
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()  # This could be Email OR Employee Code
     password = data.get('password')
-    
-    # 1. Try finding by Username (Email/Phone) - Case Insensitive
-    user = UserMaster.query.filter(UserMaster.username.ilike(username)).first()
-    
-    # 2. If not found, try finding by Employee Code (Staff)
-    if not user:
-        staff = StaffProfile.query.filter(StaffProfile.employee_code.ilike(username)).first()
-        if staff:
-            # If Staff found, get their User account (staff_id maps to user_id)
-            user = db.session.get(UserMaster, staff.staff_id)
-    
-    # 3. If STILL not found, try Student Admission Number (Optional Bonus)
-    if not user:
-        student = StudentProfile.query.filter(StudentProfile.admission_number.ilike(username)).first()
-        if student:
-            user = db.session.get(UserMaster, student.student_id)
 
-    # 4. Verify Password
-    if not user or not check_password_hash(user.password_hash, password):
-        return jsonify({"error": "Invalid credentials"}), 401
+    if not username or not password:
+        return jsonify({"error": "username and password are required"}), 400
+
+    try:
+        # 1. Try finding by Username (Email/Phone) - Case Insensitive
+        user = UserMaster.query.filter(UserMaster.username.ilike(username)).first()
         
-    if not user.is_active:
-        return jsonify({"error": "Account Deactivated."}), 403
+        # 2. If not found, try finding by Employee Code (Staff)
+        if not user:
+            staff = StaffProfile.query.filter(StaffProfile.employee_code.ilike(username)).first()
+            if staff:
+                # If Staff found, get their User account (staff_id maps to user_id)
+                user = db.session.get(UserMaster, staff.staff_id)
+        
+        # 3. If STILL not found, try Student Admission Number (Optional Bonus)
+        if not user:
+            student = StudentProfile.query.filter(StudentProfile.admission_number.ilike(username)).first()
+            if student:
+                user = db.session.get(UserMaster, student.student_id)
 
-    role = user.user_type.capitalize()
-    
-    # Zombie Check (Safety)
-    if role == 'Staff' and not StaffProfile.query.filter_by(staff_id=user.user_id).first():
-         db.session.delete(user); db.session.commit()
-         return jsonify({"error": "Corrupted Account. Please contact Admin."}), 403
-         
-    redirect_map = { 
-        'Student': '/student/dashboard', 
-        'Staff': '/staff/dashboard', 
-        'Parent': '/parent/dashboard', 
-        'Admin': '/admin/dashboard' 
-    }
-    
-    return jsonify({
-        "message": "Success", 
-        "user_id": user.user_id, 
-        "role": role, 
-        "redirect_url": redirect_map.get(role, '/')
-    }), 200
+        # 4. Verify Password
+        if not user or not check_password_hash(user.password_hash, password):
+            return jsonify({"error": "Invalid credentials"}), 401
+            
+        if not user.is_active:
+            return jsonify({"error": "Account Deactivated."}), 403
+
+        role = user.user_type.capitalize()
+        
+        # Zombie Check (Safety)
+        if role == 'Staff' and not StaffProfile.query.filter_by(staff_id=user.user_id).first():
+             db.session.delete(user); db.session.commit()
+             return jsonify({"error": "Corrupted Account. Please contact Admin."}), 403
+             
+        redirect_map = { 
+            'Student': '/student/dashboard', 
+            'Staff': '/staff/dashboard', 
+            'Parent': '/parent/dashboard', 
+            'Admin': '/admin/dashboard' 
+        }
+        
+        return jsonify({
+            "message": "Success", 
+            "user_id": user.user_id, 
+            "role": role, 
+            "redirect_url": redirect_map.get(role, '/')
+        }), 200
+    except Exception:
+        app.logger.exception("/api/login failed")
+        return jsonify({"error": "Server error"}), 500
 
 
 # ==========================================
