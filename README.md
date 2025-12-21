@@ -155,6 +155,80 @@ docker compose up --build
 ```
 Access the app at http://localhost
 
+## 🚢 Click-to-Deploy (GitHub Actions + GHCR + Ubuntu)
+
+This repo includes a manual (“click to deploy”) pipeline that:
+- builds the Docker image on GitHub Actions
+- pushes it to GitHub Container Registry (GHCR)
+- SSHes into your Ubuntu server and runs Docker Compose
+
+### 1) Server prerequisites (one-time)
+On your Ubuntu server:
+
+```bash
+# Docker
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Allow your deploy user to run docker without sudo (optional)
+sudo usermod -aG docker $USER
+```
+
+Pick a deploy folder, for example:
+```bash
+sudo mkdir -p /opt/ams
+sudo chown -R $USER:$USER /opt/ams
+mkdir -p /opt/ams/secrets
+```
+
+### 2) GitHub Container Registry (GHCR)
+The workflow builds and pushes these tags:
+- `ghcr.io/<owner>/<repo>:<sha>`
+- `ghcr.io/<owner>/<repo>:latest`
+
+### 3) GitHub Secrets you must add
+In your GitHub repo: Settings → Secrets and variables → Actions → New repository secret:
+
+- `SSH_HOST` → server IP / hostname
+- `SSH_PORT` → usually `22`
+- `SSH_USER` → ubuntu user (e.g. `ubuntu`)
+- `SSH_PRIVATE_KEY` → private key for SSH (multi-line)
+- `DEPLOY_PATH` → e.g. `/opt/ams`
+
+- `GHCR_USERNAME` → usually your GitHub username or org name
+- `GHCR_TOKEN` → a GitHub PAT with at least `read:packages` (to pull images on the server)
+
+- `POSTGRES_USER` → e.g. `admin`
+- `POSTGRES_PASSWORD` → strong password
+- `POSTGRES_DB` → e.g. `school_system`
+- `SECRET_KEY` → strong random string
+
+Optional (recommended):
+- `FIREBASE_SERVICE_ACCOUNT_JSON` → contents of your Firebase service account JSON
+
+### 4) How to deploy (manual)
+Go to GitHub → Actions → **Deploy (Manual)** → Run workflow.
+
+- Leave `image_tag` empty to deploy the current commit SHA.
+- Or set `image_tag=latest` to force deploy latest.
+
+The server runs using [docker-compose.prod.yml](docker-compose.prod.yml).
+
+### Notes
+- The dev compose file `docker-compose.yml` uses bind mounts + `--reload` for development.
+- Production uses `docker-compose.prod.yml` (no source bind-mounts, no `--reload`).
+
 ### 3. Initialize Database (First Run Only)
 Use migrations to create/update schema in Postgres.
 
