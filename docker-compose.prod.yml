@@ -20,11 +20,7 @@ services:
       - db
     command: gunicorn -w 4 -b 0.0.0.0:5000 app:app
     environment:
-      POSTGRES_HOST: db
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-school_system}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-school_system}
       SECRET_KEY: ${SECRET_KEY}
     networks:
       - ams_network
