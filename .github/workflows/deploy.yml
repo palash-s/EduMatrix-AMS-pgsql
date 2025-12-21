@@ -22,16 +22,17 @@ jobs:
 
     env:
       REGISTRY: ghcr.io
+      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Connect to Tailscale (if configured)
-        if: ${{ secrets.TAILSCALE_AUTHKEY != '' }}
+        if: ${{ env.TAILSCALE_AUTHKEY != '' }}
         uses: tailscale/github-action@v2
         with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          authkey: ${{ env.TAILSCALE_AUTHKEY }}
           args: --accept-dns=false
 
       - name: Compute image metadata
