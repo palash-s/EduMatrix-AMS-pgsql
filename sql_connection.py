@@ -3,6 +3,7 @@ import uuid
 from flask_sqlalchemy import SQLAlchemy
 
 from sqlalchemy import MetaData
+from sqlalchemy.engine import URL
 
 convention = {
     "ix": 'ix_%(column_0_label)s',
@@ -16,9 +17,29 @@ metadata = MetaData(naming_convention=convention)
 db = SQLAlchemy(metadata=metadata)
 
 def get_db_uri(app):
+    # Prefer discrete Postgres env vars when present so passwords with special
+    # characters (e.g. '@', ':', '/') are safely escaped.
+    pg_password = os.environ.get('POSTGRES_PASSWORD')
+    pg_user = os.environ.get('POSTGRES_USER')
+    pg_db = os.environ.get('POSTGRES_DB')
+    pg_host = os.environ.get('POSTGRES_HOST')
+    pg_port = os.environ.get('POSTGRES_PORT')
+
+    if pg_password and (pg_user or pg_db or pg_host or pg_port):
+        url = URL.create(
+            drivername=os.environ.get('POSTGRES_DRIVER', 'postgresql+psycopg2'),
+            username=pg_user or 'admin',
+            password=pg_password,
+            host=pg_host or 'db',
+            port=int(pg_port or '5432'),
+            database=pg_db or 'school_system',
+        )
+        return str(url)
+
     db_url = os.environ.get('DATABASE_URL')
     if db_url:
         return db_url
+
     return 'sqlite:///school_system.db'
 
 
