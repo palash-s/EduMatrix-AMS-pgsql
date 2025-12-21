@@ -118,9 +118,8 @@ jobs:
           username: ${{ env.SSH_USER }}
           key: ${{ env.SSH_PRIVATE_KEY }}
           port: ${{ env.SSH_PORT }}
-          source: |
-            docker-compose.prod.yml
-            nginx/default.conf
+          # scp-action expects comma-separated globs/paths; newline-delimited strings can result in no matches.
+          source: docker-compose.prod.yml,nginx/default.conf
           target: ${{ env.DEPLOY_PATH }}
 
       - name: Deploy on server
