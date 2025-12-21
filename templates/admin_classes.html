@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Manage Classes - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; }
+        .bg-mit-purple { background-color: #48166d; }
+        .mit-gold { color: #bf9d55; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+        <!-- SIDEBAR -->
+    <aside class="w-64 bg-mit-purple text-white flex flex-col fixed h-full z-20 shadow-xl">
+        <div class="p-6 border-b border-white/10 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-10 w-auto brightness-0 invert" onerror="this.style.display='none'">
+            <span class="font-bold tracking-wider text-sm">ADMIN</span>
+        </div>
+        <nav class="flex-grow p-4 space-y-1 overflow-y-auto custom-scroll">
+            <a href="/admin/dashboard" class="flex items-center gap-3 px-4 py-3 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="arrow-left" class="w-4 h-4"></i> Back</a>
+            <div class="mt-4 px-4 text-xs font-bold text-purple-300 uppercase tracking-wider">Class Teachers</div>
+            <a href="#" class="flex items-center gap-3 px-4 py-3 bg-white/10 rounded-lg text-white font-medium"><i data-lucide="heart-handshake" class="w-4 h-4 text-teal-400"></i> Manage Class Teachers</a>
+        </nav>
+    </aside>
+
+
+
+    <main class="max-w-5xl mx-auto p-6">
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+        <div class="flex items-center gap-4">
+            <!-- <button onclick="history.back()" class="p-2 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-5 h-5"></i></button> -->
+            <h1 class="text-xl font-bold text-gray-900 mit-purple" style="font-family: 'Merriweather', serif;">Manage Class Teachers</h1>
+        </div>
+        <div class="text-sm text-gray-500">
+            Total Classes: <span id="class-count" class="font-bold text-gray-900">0</span>
+        </div>
+    </header>
+
+        <div class="mb-6 relative">
+            <i data-lucide="search" class="absolute left-3 top-3 w-5 h-5 text-gray-400"></i>
+            <input type="text" id="search-box" onkeyup="filterTable()" placeholder="Search by class name (e.g. SY-DA)..." 
+                class="w-full pl-10 p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#48166d] outline-none shadow-sm">
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-500 font-semibold">
+                        <th class="p-4">Class Section</th>
+                        <th class="p-4">Current Teacher</th>
+                        <th class="p-4 w-72">Assign New</th>
+                        <th class="p-4 w-24">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="class-table-body" class="divide-y divide-gray-100">
+                    <tr><td colspan="4" class="p-8 text-center text-gray-400">Loading data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        let staffList = [];
+        let classList = [];
+
+        document.addEventListener('DOMContentLoaded', loadData);
+
+        async function loadData() {
+            const response = await fetch('/api/admin/classes');
+            const data = await response.json();
+            staffList = data.staff_directory;
+            classList = data.classes;
+            document.getElementById('class-count').innerText = classList.length;
+            renderTable(classList);
+        }
+
+        function renderTable(classes) {
+            const tbody = document.getElementById('class-table-body');
+            const staffOptions = staffList.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+
+            tbody.innerHTML = classes.map(cls => `
+                <tr class="hover:bg-gray-50 group transition-colors">
+                    <td class="p-4 font-bold text-gray-800">${cls.display_name}</td>
+                    <td class="p-4">
+                        <span class="text-sm ${cls.teacher_name === 'Not Assigned' ? 'text-red-500 font-bold' : 'text-gray-700'}">${cls.teacher_name}</span>
+                    </td>
+                    <td class="p-4">
+                        <select id="select-${cls.section_id}" class="w-full p-2 border border-gray-200 rounded text-sm focus:border-[#48166d] outline-none bg-white">
+                            <option value="">-- Select Teacher --</option>
+                            ${staffList.map(s => `<option value="${s.id}" ${s.id === cls.teacher_id ? 'selected' : ''}>${s.name}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td class="p-4">
+                        <button onclick="saveAssignment(${cls.section_id})" 
+                            class="bg-[#48166d] hover:bg-[#350f50] text-white px-4 py-1.5 rounded text-xs font-bold transition-colors shadow-sm">Save</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function saveAssignment(sectionId) {
+            const selectEl = document.getElementById(`select-${sectionId}`);
+            const btn = selectEl.parentElement.nextElementSibling.querySelector('button');
+            const originalText = btn.innerText;
+            btn.innerText = "..."; btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/admin/assign_teacher', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ section_id: sectionId, staff_id: selectEl.value })
+                });
+                if (res.ok) {
+                    btn.innerText = "Done"; btn.classList.replace('bg-[#48166d]', 'bg-green-600');
+                    setTimeout(() => { btn.innerText = "Save"; btn.classList.replace('bg-green-600', 'bg-[#48166d]'); btn.disabled = false; loadData(); }, 1000);
+                } else throw new Error();
+            } catch (e) { showToast("Failed", "error"); btn.disabled = false; btn.innerText = originalText; }
+        }
+
+        function filterTable() {
+            const term = document.getElementById('search-box').value.toLowerCase();
+            renderTable(classList.filter(c => c.display_name.toLowerCase().includes(term)));
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Event Coordinator - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-50 px-6 h-16 flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-3">
+            <button onclick="window.location.href='/staff/dashboard'" class="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <h1 class="font-bold text-lg mit-purple" style="font-family: 'Merriweather', serif;">Event Manager</h1>
+        </div>
+        <div class="flex items-center gap-2">
+            {% include '_notifications.html' %}
+            <button onclick="openCreateModal()" class="px-4 py-2 bg-mit-purple text-white text-sm font-bold rounded-lg hover:bg-[#350f50] flex items-center gap-2">
+                <i data-lucide="plus" class="w-4 h-4"></i> New Event
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- LEFT: Event List -->
+        <div class="lg:col-span-1 space-y-4">
+            <h2 class="text-sm font-bold text-gray-500 uppercase">My Events</h2>
+            <div id="event-list" class="space-y-3">
+                <div class="animate-pulse h-20 bg-gray-200 rounded-lg"></div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Details & Participants -->
+        <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col h-[80vh] hidden" id="detail-panel">
+            <div class="p-6 border-b border-gray-100">
+                <div class="flex justify-between items-start mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-900" id="detail-title">Select Event</h2>
+                        <div class="flex gap-4 mt-2 text-sm text-gray-500">
+                            <p class="flex items-center gap-1"><i data-lucide="calendar" class="w-4 h-4"></i> <span id="detail-date">...</span></p>
+                            <p class="flex items-center gap-1"><i data-lucide="clock" class="w-4 h-4"></i> <span id="detail-time">...</span></p>
+                        </div>
+                    </div>
+                    
+                    <!-- NEW: Add Button triggers Modal -->
+                    <button onclick="openAddModal()" class="bg-gray-900 text-white px-4 py-2.5 rounded-lg text-sm font-bold hover:bg-black flex items-center gap-2 shadow-md">
+                        <i data-lucide="user-plus" class="w-4 h-4"></i> Add Participants
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-grow overflow-y-auto p-0">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10 shadow-sm">
+                        <tr>
+                            <th class="p-4 border-b">Student Name</th>
+                            <th class="p-4 border-b">Role</th>
+                            <th class="p-4 border-b text-center">OD Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="participant-list" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Placeholder State -->
+        <div class="lg:col-span-2 flex items-center justify-center h-[60vh] bg-white rounded-xl border border-dashed border-gray-300 text-gray-400" id="empty-state">
+            <div class="text-center">
+                <i data-lucide="calendar" class="w-12 h-12 mx-auto mb-2 opacity-20"></i>
+                <p>Select an event to manage participants</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- CREATE EVENT MODAL -->
+    <div id="create-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold mit-purple serif">Create New Event</h2>
+                <button onclick="document.getElementById('create-modal').classList.add('hidden')" class="p-1 hover:bg-gray-100 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            
+            <div class="space-y-4">
+                <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Event Name</label><input type="text" id="new-name" class="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:border-purple-500" placeholder="e.g. Tech Fest 2025"></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Start Date</label><input type="date" id="new-start-date" class="w-full p-2.5 border border-gray-300 rounded-lg outline-none"></div>
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">End Date</label><input type="date" id="new-end-date" class="w-full p-2.5 border border-gray-300 rounded-lg outline-none"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Start Time (Optional)</label><input type="time" id="new-start-time" class="w-full p-2.5 border border-gray-300 rounded-lg outline-none"></div>
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">End Time (Optional)</label><input type="time" id="new-end-time" class="w-full p-2.5 border rounded outline-none"></div>
+                </div>
+                <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Description</label><textarea id="new-desc" rows="2" class="w-full p-2.5 border border-gray-300 rounded-lg outline-none resize-none"></textarea></div>
+            </div>
+
+            <div class="mt-6 flex justify-end gap-2 pt-4 border-t border-gray-100">
+                <button onclick="document.getElementById('create-modal').classList.add('hidden')" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancel</button>
+                <button onclick="submitEvent()" class="px-6 py-2 bg-mit-purple text-white rounded-lg font-bold hover:bg-[#350f50]">Create Event</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD PARTICIPANT MODAL (NEW) -->
+    <div id="add-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl h-[80vh] flex flex-col overflow-hidden">
+            <!-- Header -->
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div><h2 class="text-xl font-bold mit-purple serif">Add Participants</h2><p class="text-xs text-gray-500">Select students to add to this event.</p></div>
+                <button onclick="closeAddModal()" class="p-1 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+
+            <!-- Filters -->
+            <div class="p-4 border-b border-gray-100 grid grid-cols-2 gap-4 bg-white z-10">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Select Class</label>
+                    <select id="class-select" onchange="loadClassStudents()" class="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:border-purple-500 bg-white">
+                        <option value="">-- Choose Class --</option>
+                        <!-- JS Populates -->
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Assign Role</label>
+                    <select id="role-select" class="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:border-purple-500 bg-white">
+                        <option value="Participant">Participant</option>
+                        <option value="Student Coordinator">Student Coordinator</option>
+                        <option value="Volunteer">Volunteer</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Student List -->
+            <div class="flex-grow overflow-y-auto p-0">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-50 text-gray-500 font-bold sticky top-0">
+                        <tr>
+                            <th class="p-4 w-10"><input type="checkbox" onchange="toggleAll(this)" class="rounded border-gray-300 text-purple-600 focus:ring-purple-500"></th>
+                            <th class="p-4">Student Name</th>
+                            <th class="p-4 text-right">Roll No</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modal-student-list" class="divide-y divide-gray-100">
+                        <tr><td colspan="3" class="p-8 text-center text-gray-400">Select a class to view students.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Footer -->
+            <div class="p-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                <span class="text-xs text-gray-500 font-medium"><span id="selected-count">0</span> students selected</span>
+                <button onclick="submitSelectedStudents()" id="add-btn" disabled class="px-6 py-2.5 bg-mit-purple text-white rounded-lg font-bold hover:bg-[#350f50] disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                    Add Selected
+                </button>
+            </div>
+        </div>
+    </div>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let currentEventId = null;
+        let currentClassList = [];
+        const AUTO_REFRESH_MS = 30000;
+
+        function shouldSkipAutoRefresh() {
+            if (document.hidden) return true;
+            if (window.__amsActionModalOpen) return true;
+            return !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        }
+
+        async function refreshEventDashboard() {
+            if (shouldSkipAutoRefresh()) return;
+            try {
+                await loadEvents();
+                if (currentEventId) await loadParticipants();
+            } catch (e) {
+                console.error('Auto-refresh failed:', e);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!userId) { window.location.href = '/'; return; }
+            loadEvents();
+            loadClasses(); // Pre-load class list for modal
+            // Auto-refresh is disabled globally.
+        });
+
+        async function loadClasses() {
+            try {
+                const res = await fetch('/api/core/classes');
+                const data = await res.json();
+                const select = document.getElementById('class-select');
+                select.innerHTML = '<option value="">-- Choose Class --</option>' + 
+                    data.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        async function loadClassStudents() {
+            const sectionId = document.getElementById('class-select').value;
+            const list = document.getElementById('modal-student-list');
+            
+            if(!sectionId) {
+                list.innerHTML = `<tr><td colspan="3" class="p-8 text-center text-gray-400">Select a class to view students.</td></tr>`;
+                return;
+            }
+
+            list.innerHTML = `<tr><td colspan="3" class="p-8 text-center text-gray-400">Loading...</td></tr>`;
+
+            try {
+                const res = await fetch(`/api/core/students?section_id=${sectionId}`);
+                const data = await res.json();
+                
+                if(data.students.length === 0) {
+                    list.innerHTML = `<tr><td colspan="3" class="p-8 text-center text-gray-400">No students in this class.</td></tr>`;
+                    return;
+                }
+
+                list.innerHTML = data.students.map(s => `
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="p-4"><input type="checkbox" value="${s.roll}" class="student-checkbox rounded border-gray-300 text-purple-600 focus:ring-purple-500 w-4 h-4" onchange="updateCount()"></td>
+                        <td class="p-4 font-medium text-gray-800">${s.name}</td>
+                        <td class="p-4 text-right font-mono text-gray-500 text-xs">${s.roll}</td>
+                    </tr>
+                `).join('');
+                updateCount(); // Reset count logic
+            } catch(e) { console.error(e); list.innerHTML = `<tr><td colspan="3" class="text-center p-4 text-red-500">Error loading students</td></tr>`; }
+        }
+
+        function updateCount() {
+            const checked = document.querySelectorAll('.student-checkbox:checked').length;
+            document.getElementById('selected-count').innerText = checked;
+            document.getElementById('add-btn').disabled = checked === 0;
+        }
+
+        function toggleAll(source) {
+            document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = source.checked);
+            updateCount();
+        }
+
+        async function submitSelectedStudents() {
+            const role = document.getElementById('role-select').value;
+            const checkboxes = document.querySelectorAll('.student-checkbox:checked');
+            const btn = document.getElementById('add-btn');
+            
+            btn.innerText = "Adding..."; btn.disabled = true;
+
+            // Process sequentially (simple implementation)
+            // Ideally, backend should accept an array of IDs for bulk add
+            let successCount = 0;
+            
+            for (const cb of checkboxes) {
+                try {
+                    await fetch('/api/events/add_student', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ event_id: currentEventId, roll_no: cb.value, role: role })
+                    });
+                    successCount++;
+                } catch(e) { console.error(e); }
+            }
+
+            showToast(`Added ${successCount} students successfully.`);
+            closeAddModal();
+            loadParticipants();
+            loadEvents(); // Update total count
+            btn.innerText = "Add Selected"; btn.disabled = false;
+        }
+
+        // --- EXISTING FUNCTIONS ---
+ async function loadEvents() {
+            const res = await fetch(`/api/events/my_events?user_id=${userId}`);
+            const data = await res.json();
+            const list = document.getElementById('event-list');
+            
+            if(data.events.length === 0) {
+                list.innerHTML = `<div class="text-gray-400 text-sm text-center py-8 bg-white rounded-lg border border-dashed border-gray-200">No events found.<br>Create your first event!</div>`;
+                return;
+            }
+
+            list.innerHTML = data.events.map(e => `
+                <div class="bg-white p-4 rounded-lg border border-gray-200 hover:border-purple-500 shadow-sm transition-all group relative mb-3">
+                    <!-- Clickable Area for Selecting -->
+                    <div onclick="selectEvent(${e.id}, '${e.name}', '${e.date}', '${e.time}')" class="cursor-pointer">
+                        <div class="absolute left-0 top-0 bottom-0 w-1 bg-transparent group-hover:bg-purple-500 rounded-l-lg transition-colors"></div>
+                        <h3 class="font-bold text-gray-800 group-hover:text-purple-700 pr-8">${e.name}</h3>
+                        <p class="text-xs text-gray-500 mt-1 font-mono">${e.date}</p>
+                        <div class="flex justify-between items-center mt-3">
+                            <span class="text-[10px] bg-gray-100 px-2 py-1 rounded text-gray-600 font-medium flex items-center gap-1">
+                                <i data-lucide="clock" class="w-3 h-3"></i> ${e.time}
+                            </span>
+                            <span class="text-xs font-bold ${e.student_count > 0 ? 'text-purple-600 bg-purple-50' : 'text-gray-400 bg-gray-100'} px-2 py-1 rounded-full">
+                                ${e.student_count} Students
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Delete Button (Only shows if count is 0) -->
+                    ${e.student_count === 0 
+                        ? `<button onclick="deleteEvent(${e.id}, event)" class="absolute top-3 right-3 p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors" title="Delete Event">
+                             <i data-lucide="trash-2" class="w-4 h-4"></i>
+                           </button>` 
+                        : ''}
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        // --- NEW DELETE FUNCTION ---
+        async function deleteEvent(eventId, eventObj) {
+            // Stop the click from triggering 'selectEvent'
+            eventObj.stopPropagation(); 
+
+            const btn = eventObj.currentTarget;
+
+            const doDelete = async () => {
+                btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>`;
+                lucide.createIcons();
+
+                try {
+                    const res = await fetch('/api/events/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ event_id: eventId, user_id: userId })
+                    });
+
+                    const data = await res.json();
+
+                    if (res.ok) {
+                        showToast('Event deleted.');
+                        loadEvents();
+                        if (currentEventId === eventId) {
+                            document.getElementById('detail-panel').classList.add('hidden');
+                            document.getElementById('empty-state').classList.remove('hidden');
+                        }
+                    } else {
+                        showToast(data.error || 'Delete failed.', 'error');
+                        loadEvents();
+                    }
+                } catch (e) {
+                    console.error(e);
+                    showToast('Network error', 'error');
+                    loadEvents();
+                }
+            };
+
+            return showConfirm(
+                'Confirm Delete',
+                'Are you sure you want to delete this empty event?',
+                doDelete,
+                'Event Manager'
+            );
+        }
+        
+        async function selectEvent(id, name, date, time) {
+            currentEventId = id;
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('detail-panel').classList.remove('hidden');
+            document.getElementById('detail-title').innerText = name;
+            document.getElementById('detail-date').innerText = date;
+            document.getElementById('detail-time').innerText = time;
+            loadParticipants();
+        }
+
+        async function loadParticipants() {
+            const res = await fetch(`/api/events/participants?event_id=${currentEventId}`);
+            const data = await res.json();
+            const tbody = document.getElementById('participant-list');
+            
+            if(data.participants.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" class="p-12 text-center text-gray-400">No participants added yet.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = data.participants.map(p => `
+                <tr class="hover:bg-gray-50 border-b border-gray-50 last:border-0">
+                    <td class="p-4"><p class="font-bold text-gray-800 text-sm">${p.name}</p><p class="text-xs text-gray-400 font-mono">${p.roll} • ${p.class}</p></td>
+                    <td class="p-4"><span class="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold border border-blue-100">${p.role}</span></td>
+                    <td class="p-4 text-center">
+                        <button onclick="toggleAttendance(${p.participation_id}, '${p.status}')" class="w-32 py-1.5 rounded-lg text-xs font-bold transition-colors border ${p.status === 'Attended' ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:text-gray-700'}">
+                            ${p.status === 'Attended' ? '✔ Marked OD' : 'Mark as OD'}
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function toggleAttendance(pId, currentStatus) {
+            await fetch('/api/events/mark_attendance', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ participation_id: pId, status: currentStatus !== 'Attended' })
+            });
+            loadParticipants();
+        }
+
+        async function submitEvent() {
+            const payload = {
+                user_id: userId,
+                name: document.getElementById('new-name').value,
+                start_date: document.getElementById('new-start-date').value,
+                end_date: document.getElementById('new-end-date').value,
+                start_time: document.getElementById('new-start-time').value,
+                end_time: document.getElementById('new-end-time').value,
+                description: document.getElementById('new-desc').value
+            };
+            if(!payload.name || !payload.start_date || !payload.end_date) {
+                showToast('Fill required fields', 'error');
+                return;
+            }
+            const res = await fetch('/api/events/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if(res.ok) {
+                document.getElementById('create-modal').classList.add('hidden');
+                showToast('Event created.');
+                loadEvents();
+            } else {
+                showToast('Failed to create', 'error');
+            }
+        }
+
+        function openCreateModal() { 
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('new-start-date').value = today; document.getElementById('new-end-date').value = today;
+            document.getElementById('create-modal').classList.remove('hidden'); 
+        }
+        function openAddModal() { document.getElementById('add-modal').classList.remove('hidden'); }
+        function closeAddModal() { document.getElementById('add-modal').classList.add('hidden'); }
+    </script>
+</body>
+</html>

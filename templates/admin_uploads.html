@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bulk Uploads - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Merriweather:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; }
+        .bg-mit-purple { background-color: #48166d; }
+    </style>
+</head>
+<body class="bg-gray-100 flex min-h-screen">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-mit-purple text-white flex flex-col fixed h-full z-20 shadow-xl">
+        <div class="p-6 border-b border-white/10 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-10 w-auto brightness-0 invert" onerror="this.style.display='none'">
+            <span class="font-bold tracking-wider text-sm">ADMIN CONSOLE</span>
+        </div>
+        <nav class="flex-grow p-4 space-y-2">
+            <a href="/admin/dashboard" class="flex items-center gap-3 px-4 py-3 text-purple-100 hover:bg-white/10 rounded-lg transition-colors"><i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard</a>
+            <a href="/admin/bulk_uploads" class="flex items-center gap-3 px-4 py-3 bg-white/10 rounded-lg text-white font-medium border border-white/10"><i data-lucide="upload-cloud" class="w-5 h-5 text-yellow-400"></i> Bulk Uploads</a>
+        </nav>
+        <div class="p-4 border-t border-white/10">
+            <button onclick="logout()" class="flex items-center gap-3 px-4 py-3 text-red-200 hover:bg-white/5 w-full rounded-lg transition-colors"><i data-lucide="log-out" class="w-5 h-5"></i> Sign Out</button>
+        </div>
+    </aside>
+
+    <main class="ml-64 flex-grow p-8">
+        <header class="flex items-center gap-4 mb-8">
+            <button onclick="history.back()" class="p-2 hover:bg-white rounded-full transition-colors"><i data-lucide="arrow-left" class="w-6 h-6 text-gray-500"></i></button>
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900" style="font-family: 'Merriweather', serif;">System Data Import</h1>
+                <p class="text-gray-500 text-sm">Upload CSV files to populate the database.</p>
+            </div>
+        </header>
+
+        <!-- Upload Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+            <!-- 1. Departments
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                <div class="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center mb-4 text-purple-700"><i data-lucide="library" class="w-5 h-5"></i></div>
+                <h3 class="font-bold text-gray-900">1. Departments & Subjects</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Master list of all courses.</p>
+                <div class="space-y-3">
+                    <input type="file" id="file-dept" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"/>
+                    <button onclick="uploadFile('file-dept', '/api/upload/master_dept_subject')" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Data</button>
+                </div>
+            </div> -->
+
+            <!-- 2. Classes -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                <div class="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center mb-4 text-blue-700"><i data-lucide="layout-grid" class="w-5 h-5"></i></div>
+                <h3 class="font-bold text-gray-900">1. Class Sections</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Physical divisions (e.g. SY-A).</p>
+                <a href="/api/admin/import_templates/master_class" class="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-blue-900 mb-3">
+                    <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
+                </a>
+                <div class="space-y-3">
+                    <input type="file" id="file-class" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                    <button onclick="uploadFile('file-class', '/api/upload/master_class')" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Data</button>
+                </div>
+            </div>
+
+            <!-- 3. Staff -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                <div class="w-10 h-10 bg-orange-50 rounded-lg flex items-center justify-center mb-4 text-orange-700"><i data-lucide="briefcase" class="w-5 h-5"></i></div>
+                <h3 class="font-bold text-gray-900">2. Faculty / Staff</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Creates user logins automatically.</p>
+                <a href="/api/admin/import_templates/staff" class="inline-flex items-center gap-1 text-[11px] font-bold text-orange-700 hover:text-orange-900 mb-3">
+                    <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
+                </a>
+                <div class="space-y-3">
+                    <input type="file" id="file-staff" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"/>
+                    <button onclick="uploadFile('file-staff', '/api/upload/staff')" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Data</button>
+                </div>
+            </div>
+
+            <!-- 4. Students -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                <div class="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center mb-4 text-green-700"><i data-lucide="users" class="w-5 h-5"></i></div>
+                <h3 class="font-bold text-gray-900">3. Students</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Creates Student & Parent logins.</p>
+                <a href="/api/admin/import_templates/students" class="inline-flex items-center gap-1 text-[11px] font-bold text-green-700 hover:text-green-900 mb-3">
+                    <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
+                </a>
+                <div class="space-y-3">
+                    <input type="file" id="file-student" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"/>
+                    <button onclick="uploadFile('file-student', '/api/upload/students')" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Data</button>
+                </div>
+            </div>
+
+            <!-- 5. Schedule -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                <div class="w-10 h-10 bg-teal-50 rounded-lg flex items-center justify-center mb-4 text-teal-700"><i data-lucide="calendar-clock" class="w-5 h-5"></i></div>
+                <h3 class="font-bold text-gray-900">4. Weekly Schedule</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Time slots for attendance.</p>
+                <a href="/api/admin/import_templates/weekly_schedule" class="inline-flex items-center gap-1 text-[11px] font-bold text-teal-700 hover:text-teal-900 mb-3">
+                    <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
+                </a>
+                <div class="space-y-3">
+                    <input type="file" id="file-schedule" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100"/>
+                    <button onclick="uploadFile('file-schedule', '/api/upload/schedule')" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Data</button>
+                </div>
+            </div>
+
+            <!-- 6. Class Teachers
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                <div class="w-10 h-10 bg-pink-50 rounded-lg flex items-center justify-center mb-4 text-pink-700"><i data-lucide="user-check" class="w-5 h-5"></i></div>
+                <h3 class="font-bold text-gray-900">5. Assign Class Teachers</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Links faculty to class sections.</p>
+                <div class="space-y-3">
+                    <input type="file" id="file-assign" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100"/>
+                    <button onclick="uploadFile('file-assign', '/api/upload/assign_class_teachers')" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Data</button>
+                </div>
+            </div> -->
+
+            <!-- 5. Semester Course Structure (Odd/Even) -->
+            <div class="bg-white p-6 rounded-xl border-2 border-dashed border-blue-200 hover:border-blue-400 transition-colors shadow-sm">
+                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mb-4 text-blue-800"><i data-lucide="layers" class="w-5 h-5"></i></div>
+                <h3 class="font-bold text-gray-900">5. Semester Course Structure</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-2">Source of truth for SEM + Section + buckets (independent of faculty allocation).</p>
+                <a href="/api/admin/import_templates/semester_course_structure" class="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-blue-900 mb-3">
+                    <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
+                </a>
+                <div class="space-y-3">
+                    <select id="sem-structure-parity" class="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white">
+                        <option value="">No parity validation</option>
+                        <option value="odd">Odd Sem (1,3,5,7)</option>
+                        <option value="even">Even Sem (2,4,6,8)</option>
+                    </select>
+                    <input type="file" id="file-sem-structure" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-800 hover:file:bg-blue-200"/>
+                    <button onclick="uploadSemesterStructure()" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Structure</button>
+                </div>
+            </div>
+
+            <!-- 6. Faculty Subject Allocation (Allocation-only) -->
+            <div class="bg-white p-6 rounded-xl border-2 border-dashed border-purple-200 hover:border-purple-400 transition-colors shadow-sm">
+                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mb-4 text-purple-800"><i data-lucide="book-open-check" class="w-5 h-5"></i></div>
+                <h3 class="font-bold text-gray-900">6. Faculty Subject Allocation</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-2">Assign faculty to subjects (requires structure first). Required: Course Code, Section, Class Level, SEM.</p>
+                <a href="/api/admin/import_templates/subject_allocation" class="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 hover:text-purple-900 mb-3">
+                    <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
+                </a>
+                <div class="space-y-3">
+                    <input type="file" id="file-alloc" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-purple-100 file:text-purple-800 hover:file:bg-purple-200"/>
+                    <button onclick="uploadFile('file-alloc', '/api/upload/subject_allocation')" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Allocation</button>
+                </div>
+            </div>
+
+
+            <!-- 7. Infrastructure / Rooms -->
+            <div class="bg-white p-6 rounded-xl border-2 border-dashed border-gray-300 hover:border-gray-500 transition-colors shadow-sm">
+                <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center mb-4 text-gray-700">
+                    <i data-lucide="building" class="w-5 h-5"></i>
+                </div>
+                <h3 class="font-bold text-gray-900">7. Infrastructure</h3>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Room No, Type, Capacity, Dept</p>
+                <a href="/api/admin/import_templates/rooms" class="inline-flex items-center gap-1 text-[11px] font-bold text-gray-700 hover:text-gray-900 mb-3">
+                    <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
+                </a>
+                <div class="space-y-3">
+                    <input type="file" id="file-rooms" class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"/>
+                    <button onclick="uploadFile('file-rooms', '/api/upload/rooms')" class="w-full py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors">Upload Rooms</button>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Status Modal -->
+    <div id="status-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl p-6 max-w-sm w-full text-center">
+            <div id="status-icon" class="mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4"></div>
+            <h3 id="status-title" class="font-bold text-lg mb-2"></h3>
+            <p id="status-msg" class="text-sm text-gray-500 mb-6"></p>
+            <button onclick="document.getElementById('status-modal').classList.add('hidden')" class="px-6 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold">Close</button>
+        </div>
+    </div>
+
+
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        function logout() {
+            sessionStorage.removeItem('user_id');
+            window.location.href = '/';
+        }
+
+        // async function uploadFile(inputId, apiUrl) {
+        //     const input = document.getElementById(inputId);
+        //     if (!input.files[0]) return alert("Please select a CSV file first.");
+
+        //     const btn = input.nextElementSibling;
+        //     const originalText = btn.innerText;
+        //     btn.innerText = "Uploading...";
+        //     btn.disabled = true;
+
+        //     const formData = new FormData();
+        //     formData.append('file', input.files[0]);
+
+        //     try {
+        //         const res = await fetch(apiUrl, { method: 'POST', body: formData });
+        //         const data = await res.json();
+        //         showStatus(res.ok, res.ok ? data.message : (data.error || "Upload failed"));
+        //     } catch (e) {
+        //         showStatus(false, "Network Error");
+        //     }
+
+        //     btn.innerText = originalText;
+        //     btn.disabled = false;
+        //     input.value = ""; 
+        // }
+
+        function showStatus(success, msg, errors=[]) {
+            const modal = document.getElementById('status-modal');
+            const icon = document.getElementById('status-icon');
+            const title = document.getElementById('status-title');
+            const text = document.getElementById('status-msg');
+
+            modal.classList.remove('hidden');
+            
+            if (success) {
+                icon.className = "mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-green-100 text-green-600";
+                icon.innerHTML = '<i data-lucide="check" class="w-6 h-6"></i>';
+                title.innerText = "Upload Complete";
+                title.className = "font-bold text-lg mb-2 text-green-700";
+                
+                // Show errors if partial success
+                if (errors && errors.length > 0) {
+                    let errorHtml = `<div class="mt-4 text-left max-h-48 overflow-y-auto bg-red-50 p-3 rounded text-xs text-red-600 border border-red-100 space-y-1">`;
+                    errors.forEach(e => errorHtml += `<p>• ${e}</p>`);
+                    errorHtml += `</div>`;
+                    text.innerHTML = `<strong>${msg}</strong>` + errorHtml;
+                } else {
+                    text.innerText = msg;
+                }
+            } else {
+                icon.className = "mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 bg-red-100 text-red-600";
+                icon.innerHTML = '<i data-lucide="x" class="w-6 h-6"></i>';
+                title.innerText = "Upload Failed";
+                title.className = "font-bold text-lg mb-2 text-red-700";
+                text.innerText = msg;
+            }
+            lucide.createIcons();
+        }
+
+        // Update uploadFile to pass errors
+        async function uploadFile(inputId, apiUrl) {
+            const input = document.getElementById(inputId);
+            if (!input.files[0]) return showToast("Please select a CSV file first.", "error");
+
+            const btn = input.nextElementSibling;
+            const originalText = btn.innerText;
+            btn.innerText = "Uploading..."; btn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+
+            try {
+                const res = await fetch(apiUrl, { method: 'POST', body: formData });
+                const data = await res.json();
+                // Pass data.errors to showStatus
+                showStatus(res.ok, res.ok ? data.message : (data.error || "Upload failed"), data.errors);
+            } catch (e) {
+                showStatus(false, "Network Error");
+            }
+
+            btn.innerText = originalText; btn.disabled = false;
+            input.value = ""; 
+        }
+
+        async function uploadSemesterStructure() {
+            const parity = document.getElementById('sem-structure-parity').value;
+            const url = parity ? `/api/upload/semester_course_structure?parity=${encodeURIComponent(parity)}` : '/api/upload/semester_course_structure';
+            return uploadFile('file-sem-structure', url);
+        }
+    </script>
+</body>
+</html>

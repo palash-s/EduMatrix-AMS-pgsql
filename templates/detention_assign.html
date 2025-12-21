@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Detention Management - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+        .tab-active { border-bottom: 2px solid #dc2626; color: #dc2626; font-weight: 700; }
+        .sticky-header { top: 0; background-color: #f9fafb; z-index: 10; border-bottom: 1px solid #e5e7eb; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-50 px-6 h-16 flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-3">
+            <button onclick="history.back()" class="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <h1 class="font-bold text-lg mit-purple" style="font-family: 'Merriweather', serif;">Detention Management</h1>
+        </div>
+        <div class="flex items-center gap-2 text-sm font-bold text-red-700 bg-red-50 px-3 py-1.5 rounded-lg border border-red-200">
+            Tasks in Review: <span id="review-count">0</span>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto mt-6 p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- LEFT PANEL: Watchlist / Review List -->
+        <div class="lg:col-span-1 max-h-[85vh] overflow-y-auto">
+            
+            <!-- Tabs -->
+            <div class="flex border-b border-gray-300 mb-4 bg-white rounded-t-xl shadow-sm overflow-hidden">
+                <button onclick="switchList('watchlist')" id="tab-watchlist" class="flex-1 py-3 text-sm tab-active transition-colors">Assign New Task</button>
+                <button onclick="switchList('review')" id="tab-review" class="flex-1 py-3 text-sm text-gray-500 hover:text-red-600 transition-colors">Review Submissions</button>
+            </div>
+            
+            <!-- Header for Watchlist (Hidden in Review Mode) -->
+            <div id="list-header" class="bg-gray-50 border-x border-gray-200 p-3 flex justify-between items-center text-xs font-semibold text-gray-600">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="select-all" onchange="toggleAll(this)" class="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                    <span>Select All</span>
+                </label>
+                <span id="list-info">Loading...</span>
+            </div>
+
+            <!-- Watchlist Container -->
+            <div id="watchlist-container" class="overflow-y-auto bg-white rounded-b-xl shadow-sm border border-gray-200 border-t-0 flex-grow custom-scroll space-y-0 divide-y divide-gray-100" style="min-height: 400px;">
+                <p class="p-6 text-center text-gray-400">Loading defaulters...</p>
+            </div>
+
+            <!-- Review List Container -->
+            <div id="review-list-container" class="overflow-y-auto bg-white rounded-b-xl shadow-sm border border-gray-200 border-t-0 flex-grow custom-scroll space-y-0 divide-y divide-gray-100 hidden" style="min-height: 400px;">
+                <p class="p-6 text-center text-gray-400">Loading submissions...</p>
+            </div>
+            
+        </div>
+
+        <!-- RIGHT PANEL: Assignment / Review Form -->
+        <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border border-gray-200 h-full" id="form-panel">
+            
+            <h2 class="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2" id="panel-title-text"><i data-lucide="user-x" class="w-6 h-6 text-red-500"></i> Task Creator</h2>
+            <p class="text-sm text-gray-500 mb-6 font-medium" id="form-header-text">Select students from the left panel to begin assignment.</p>
+
+            <!-- 1. ASSIGNMENT FORM (Default) -->
+            <form id="detention-form" class="space-y-4" onsubmit="assignDetention(event)">
+                <input type="hidden" id="staff-id">
+                <input type="hidden" id="selected-student-ids">
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Primary Reason</label>
+                    <select id="reason-select" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none bg-white" required>
+                        <option value="">-- Select Reason --</option>
+                        <option value="Low Subject Attendance">Low Subject Attendance</option>
+                        <option value="Missed Critical Assignment">Missed Critical Assignment</option>
+                        <option value="Disciplinary Action">Disciplinary Action</option>
+                        <option value="Chronic Tardiness">Chronic Tardiness</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Assignment / Task Details</label>
+                    <textarea id="task-details" rows="6" required placeholder="Specify the remedial task." class="w-full p-3 border rounded-lg resize-none focus:ring-2 focus:ring-red-500 outline-none"></textarea>
+                </div>
+
+                <button type="submit" id="assign-btn" disabled class="w-full py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 shadow-md disabled:opacity-50 transition-colors">
+                    Assign Task to <span id="assign-count">0</span> Selected
+                </button>
+            </form>
+
+            <!-- 2. REVIEW SUBMISSION UI (Hidden initially) -->
+            <div id="review-submission-ui" class="hidden space-y-4">
+                <input type="hidden" id="review-detention-id">
+
+                <div class="p-3 bg-gray-100 rounded-lg border border-gray-200">
+                    <p class="text-sm font-bold text-red-700 mb-1" id="review-student-info"></p> <!-- Empty initially -->
+                    <p class="text-xs text-gray-600">Reason: <span id="review-reason" class="font-medium"></span></p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Assigned Task</label>
+                    <p id="review-assigned-task" class="p-3 border rounded-lg bg-white text-sm max-h-24 overflow-y-auto"></p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Submitted Document Link</label>
+                    <a id="review-submission-link" target="_blank" class="block w-full py-2 px-3 bg-blue-50 text-blue-700 rounded-lg font-bold text-sm hover:bg-blue-100 transition-colors text-center">
+                        <i data-lucide="external-link" class="w-4 h-4 inline mr-2"></i> View Submitted Work
+                    </a>
+                </div>
+
+                <div class="mt-8 flex justify-between gap-3 pt-4 border-t border-gray-100">
+                    <button onclick="performReviewAction('Assigned')" class="px-4 py-2 bg-orange-100 text-orange-700 border border-orange-300 rounded-lg text-sm font-bold hover:bg-orange-200 transition-colors active:scale-95">
+                        Require Revision
+                    </button>
+                    <button onclick="performReviewAction('Released')" class="px-6 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 shadow-md transition-colors active:scale-95">
+                        <i data-lucide="check" class="w-4 h-4 inline mr-1"></i> Release Student
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. EMPTY STATE FOR REVIEW TAB (New) -->
+            <div id="review-empty-state" class="hidden flex flex-col items-center justify-center h-64 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+                <i data-lucide="inbox" class="w-12 h-12 mb-3 opacity-20"></i>
+                <p class="text-sm">Select a submission from the list to review details.</p>
+            </div>
+
+        </div>
+    </main>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        const staffId = sessionStorage.getItem('user_id');
+        document.getElementById('staff-id').value = staffId;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            loadWatchlist();
+            loadReviewInbox();
+            switchList('watchlist'); 
+        });
+
+        // --- CORE LIST LOADING ---
+
+        // ... (Keep existing script start) ...
+
+        async function loadWatchlist() {
+            document.getElementById('watchlist-container').innerHTML = `<p class="p-6 text-center text-gray-400">Loading defaulters...</p>`;
+            document.getElementById('form-panel').classList.remove('hidden'); 
+
+            try {
+                const res = await fetch(`/api/detention/watchlist?user_id=${staffId}`);
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || `Server responded with status ${res.status}`);
+                }
+
+                const data = await res.json();
+                
+                // --- NEW: INJECT PERIOD INTO HEADER ---
+                if (data.meta && data.meta.period) {
+                    const titleEl = document.getElementById('panel-title-text');
+                    // Check if badge already exists to avoid duplication
+                    let badge = document.getElementById('period-badge');
+                    
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.id = 'period-badge';
+                        badge.className = "ml-3 px-3 py-1 bg-red-50 text-red-600 text-xs font-bold rounded-full border border-red-100";
+                        titleEl.appendChild(badge);
+                    }
+                    badge.innerText = data.meta.period;
+                }
+                // --------------------------------------
+
+                renderWatchlist(data.watchlist);
+            } catch (e) {
+                console.error("Watchlist Fetch Failed:", e);
+                document.getElementById('watchlist-container').innerHTML = `<p class="p-6 text-center text-red-500">Error loading watchlist. (Check Console)</p>`;
+            }
+        }
+
+        // ... (Rest of the functions remain the same) ...
+        
+        async function loadReviewInbox() {
+            try {
+                const res = await fetch(`/api/detention/review_list?user_id=${staffId}`);
+                const data = await res.json();
+                renderReviewInbox(data.reviews);
+            } catch (e) {
+                document.getElementById('review-list-container').innerHTML = `<p class="p-6 text-center text-red-500">Error loading inbox.</p>`;
+            }
+        }
+
+        // --- RENDERING FUNCTIONS ---
+
+        function renderWatchlist(watchlist) {
+            const container = document.getElementById('watchlist-container');
+            if(document.getElementById('list-info')) document.getElementById('list-info').innerText = `${watchlist.length} Students Listed`;
+            if(document.getElementById('select-all')) document.getElementById('select-all').disabled = watchlist.length === 0;
+            if(document.getElementById('assign-btn')) document.getElementById('assign-btn').disabled = true;
+
+            if (watchlist.length === 0) {
+                container.innerHTML = `<p class="p-6 text-center text-green-600 bg-white">No students currently below 75% attendance.</p>`;
+                return;
+            }
+
+            container.innerHTML = watchlist.map(s => `
+                <div class="p-4 flex gap-4 items-start hover:bg-red-50 transition-colors border-b border-gray-100 last:border-0" data-id="${s.id}">
+                    <input type="checkbox" id="check-${s.id}" value="${s.id}" class="student-checkbox w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1" onchange="selectStudentForAssignment('${s.id}')">
+                    <div class="flex-1">
+                        <p class="font-bold text-gray-800">${s.name} <span class="text-xs text-gray-500 font-mono ml-2">(${s.roll})</span></p>
+                        <p class="text-[10px] text-gray-500 mb-1">${s.class}</p>
+                        <div class="mt-2 space-y-1">
+                            ${s.defaulter_in && s.defaulter_in.map(d => `
+                                <p class="text-[10px] text-gray-600 flex justify-between"><span class="font-medium">${d.subject || 'Unknown'}</span><span class="text-red-700 font-bold">${d.percentage}%</span></p>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            updateAssignmentCount();
+        }
+
+        function renderReviewInbox(reviews) {
+            const container = document.getElementById('review-list-container');
+            document.getElementById('review-count').innerText = reviews.length;
+
+            if (reviews.length === 0) {
+                container.innerHTML = `<p class="p-6 text-center text-green-600 bg-white">No tasks awaiting your review.</p>`;
+                return;
+            }
+
+            container.innerHTML = reviews.map(r => `
+                <div onclick="openReviewSubmission('${r.id}', '${r.student_name}', '${r.roll}', '${r.reason}', '${r.assigned_task}', '${r.submission_url}')"
+                     class="bg-white p-4 cursor-pointer hover:bg-yellow-50/50 transition-all border-b border-gray-100 last:border-0 flex justify-between items-center group">
+                    <div>
+                        <h4 class="font-bold text-gray-800 group-hover:text-red-700">${r.student_name} (${r.roll})</h4>
+                        <p class="text-xs text-gray-500 mt-1">Reason: ${r.reason}</p>
+                    </div>
+                    <span class="text-xs font-bold px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full">Review Now</span>
+                </div>
+            `).join('');
+        }
+        
+        // --- FORM STATE MANAGEMENT ---
+
+        function switchList(view) {
+            const isWatch = view === 'watchlist';
+            
+            // Left Panel
+            document.getElementById('watchlist-container').classList.toggle('hidden', !isWatch);
+            document.getElementById('list-header').classList.toggle('hidden', !isWatch);
+            document.getElementById('review-list-container').classList.toggle('hidden', isWatch);
+            
+            // Tabs
+            const tWatch = document.getElementById('tab-watchlist');
+            const tReview = document.getElementById('tab-review');
+            tWatch.className = isWatch ? "flex-1 py-3 text-sm tab-active transition-colors" : "flex-1 py-3 text-sm text-gray-500 hover:text-red-600 transition-colors";
+            tReview.className = !isWatch ? "flex-1 py-3 text-sm tab-active transition-colors" : "flex-1 py-3 text-sm text-gray-500 hover:text-red-600 transition-colors";
+
+            // Title
+            document.getElementById('panel-title-text').innerHTML = isWatch
+                ? '<i data-lucide="user-x" class="w-6 h-6 text-red-500"></i> Task Creator' 
+                : '<i data-lucide="inbox" class="w-6 h-6 text-yellow-600"></i> Submission Review';
+            lucide.createIcons();
+
+            // Right Panel Visibility
+            if (isWatch) {
+                // Show Assignment Form
+                document.getElementById('detention-form').classList.remove('hidden');
+                document.getElementById('review-submission-ui').classList.add('hidden');
+                document.getElementById('review-empty-state').classList.add('hidden');
+                document.getElementById('form-header-text').innerHTML = 'Select students from the left panel to begin assignment.';
+            } else {
+                // Show Empty Review State
+                document.getElementById('detention-form').classList.add('hidden');
+                document.getElementById('review-submission-ui').classList.add('hidden');
+                document.getElementById('review-empty-state').classList.remove('hidden');
+                document.getElementById('form-header-text').innerHTML = 'Review student submissions and release tasks.';
+                
+                // Clear checkboxes
+                document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = false);
+                updateAssignmentCount();
+            }
+        }
+        
+        function selectStudentForAssignment(id) { updateAssignmentCount(); }
+        function toggleAll(source) { document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = source.checked); updateAssignmentCount(); }
+
+        function updateAssignmentCount() {
+            const count = document.querySelectorAll('.student-checkbox:checked').length;
+            document.getElementById('assign-count').innerText = count;
+            document.getElementById('assign-btn').disabled = count === 0;
+            document.getElementById('form-header-text').innerHTML = count > 0 
+                ? `Assign task to <span class="text-red-700">${count} student(s)</span>.`
+                : 'Select students from the left panel to begin assignment.';
+        }
+
+        // --- REVIEW MODAL OPENER (FIXED) ---
+        function openReviewSubmission(id, name, roll, reason, task, submission) {
+            // Ensure Review Tab is active
+            if (document.getElementById('review-list-container').classList.contains('hidden')) {
+                switchList('review');
+            }
+
+            // Hide Empty State, Show Review Form
+            document.getElementById('review-empty-state').classList.add('hidden');
+            document.getElementById('review-submission-ui').classList.remove('hidden');
+            
+            // Populate Data
+            document.getElementById('review-detention-id').value = id;
+            document.getElementById('review-student-info').innerText = `Student: ${name} (${roll})`;
+            document.getElementById('review-reason').innerText = reason;
+            document.getElementById('review-assigned-task').innerText = task;
+            
+            const link = document.getElementById('review-submission-link');
+            const safeSubmission = submission && submission.startsWith('http') ? submission : '#';
+            link.href = safeSubmission;
+            link.title = submission || 'No link';
+            link.innerText = submission ? 'View Submitted Work' : 'No Link Provided';
+            
+            document.getElementById('form-panel').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // --- SUBMISSION LOGIC (Kept same) ---
+        async function assignDetention(e) {
+            e.preventDefault();
+            const selectedIds = Array.from(document.querySelectorAll('#watchlist-container .student-checkbox:checked')).map(cb => cb.value);
+            if (selectedIds.length === 0) {
+                showToast("Select students.", "error");
+                return;
+            }
+            const btn = document.getElementById('assign-btn');
+            btn.innerText = "Assigning..."; btn.disabled = true;
+            for(const sid of selectedIds) {
+                const payload = { student_id: sid, assigned_by_staff_id: staffId, reason: document.getElementById('reason-select').value, assignment_details: document.getElementById('task-details').value };
+                await fetch('/api/detention/assign', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+            }
+            showToast("Assigned!");
+            document.getElementById('detention-form').reset();
+            loadWatchlist();
+            btn.innerText = "Assign Task"; btn.disabled = false;
+        }
+
+        async function performReviewAction(finalStatus) {
+            const detId = document.getElementById('review-detention-id').value;
+            const doRequest = async () => {
+                const btn = document.querySelector(`#review-submission-ui button[onclick="performReviewAction('${finalStatus}')"]`);
+                btn.innerText = 'Updating...';
+                btn.disabled = true;
+                try {
+                    const res = await fetch('/api/detention/release', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ detention_id: detId, final_status: finalStatus })
+                    });
+                    if (res.ok) {
+                        document.getElementById('review-submission-ui').classList.add('hidden');
+                        document.getElementById('review-empty-state').classList.remove('hidden');
+                        loadReviewInbox();
+                        loadWatchlist();
+                        showToast('Status updated.');
+                    } else {
+                        showToast('Failed.', 'error');
+                    }
+                } catch (e) {
+                    showToast('Error.', 'error');
+                } finally {
+                    btn.innerText = finalStatus === 'Assigned' ? 'Require Revision' : 'Release Student';
+                    btn.disabled = false;
+                }
+            };
+
+            if (finalStatus === 'Assigned') {
+                return showConfirm('Confirm Action', 'Send back?', doRequest, 'Detention Review');
+            }
+            return doRequest();
+        }
+    </script>
+</body>
+</html>

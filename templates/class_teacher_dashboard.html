@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Class Analytics - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PDF Libs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; }
+        .serif { font-family: 'Merriweather', serif; }
+        .mit-purple { color: #48166d; }
+        .bg-mit-purple { background-color: #48166d; }
+        .mit-orange { color: #f17736; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-40 px-6 h-16 flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-3">
+            <button onclick="history.back()" class="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <div><h1 class="font-bold text-lg mit-purple serif tracking-tight">Class Analytics</h1><p class="text-xs text-gray-500" id="class-name-header">Loading...</p></div>
+        </div>
+        <div class="flex items-center gap-2">
+            <span id="current-term-badge" class="hidden sm:inline-flex px-3 py-1 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-600 shadow-sm">Loading term...</span>
+            {% include '_notifications.html' %}
+            <button onclick="openSummary()" class="px-4 py-2 bg-white text-gray-700 text-sm font-bold rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-2">
+                <i data-lucide="table" class="w-4 h-4"></i> Overall Report
+            </button>
+            <button onclick="window.location.href='/staff/leave_approvals'" class="px-4 py-2 bg-orange-50 text-[#f17736] text-sm font-bold rounded-lg border border-orange-200 hover:bg-orange-100 flex items-center gap-2">
+                Leaves <span id="leave-badge" class="bg-[#f17736] text-white text-[10px] px-1.5 py-0.5 rounded-full">0</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 space-y-6">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm"><p class="text-xs text-gray-400 font-bold uppercase">Class Strength</p><p class="text-2xl font-bold text-gray-800 mt-1" id="stat-strength">--</p></div>
+            <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm"><p class="text-xs text-gray-400 font-bold uppercase">Sessions Done</p><p class="text-2xl font-bold mit-purple mt-1" id="stat-sessions">--</p></div>
+            <div class="bg-red-50 p-4 rounded-xl border border-red-100 shadow-sm"><p class="text-xs text-red-400 font-bold uppercase">Defaulters (<75%)</p><p class="text-2xl font-bold text-red-700 mt-1" id="stat-defaulters">--</p></div>
+            <div class="bg-green-50 p-4 rounded-xl border border-green-100 shadow-sm"><p class="text-xs text-green-600 font-bold uppercase">Class Health</p><p class="text-xl font-bold text-green-800 mt-1" id="stat-health">--</p></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div class="p-5 border-b border-gray-50 flex justify-between items-center"><h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="book-open" class="w-4 h-4 text-gray-400"></i> Subject Performance</h2><span class="text-xs text-gray-400 italic">Click row for details</span></div>
+                <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-gray-50 text-gray-500 font-medium"><tr><th class="p-4">Subject</th><th class="p-4">Faculty</th><th class="p-4 text-center">Sessions</th><th class="p-4 text-right">Avg Att.</th></tr></thead><tbody id="subject-list" class="divide-y divide-gray-50"></tbody></table></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-red-100 overflow-hidden">
+                <div class="p-5 border-b border-red-50 bg-red-50/30 flex justify-between items-center"><h2 class="font-bold text-red-800 flex items-center gap-2"><i data-lucide="alert-triangle" class="w-4 h-4"></i> Critical Defaulters</h2></div>
+                <div id="defaulter-list" class="divide-y divide-gray-50 max-h-[400px] overflow-y-auto"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- REPORT MODAL -->
+    <div id="report-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-5xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div><h2 class="text-xl font-bold mit-purple serif" id="modal-title">Subject Report</h2><p class="text-xs text-gray-500">Detailed Attendance Log</p></div>
+                <button onclick="document.getElementById('report-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            <div class="flex-grow overflow-auto p-0">
+                <table class="w-full text-left text-sm border-collapse"><thead class="bg-gray-100 text-gray-600 font-bold sticky top-0 z-10 shadow-sm"><tr id="modal-header-row"></tr></thead><tbody id="modal-body" class="divide-y divide-gray-100"></tbody></table>
+            </div>
+        </div>
+    </div>
+
+    <!-- SUMMARY MODAL (Wider) -->
+    <div id="summary-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-[95%] h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div><h2 class="text-xl font-bold mit-purple serif">Overall Class Summary</h2><p class="text-xs text-gray-500">Cumulative Attendance Report</p></div>
+                <div class="flex gap-2">
+                    <button onclick="downloadSummaryPDF()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg flex items-center gap-2"><i data-lucide="file-down" class="w-4 h-4"></i> Download PDF</button>
+                    <button onclick="document.getElementById('summary-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+                </div>
+            </div>
+            <div class="flex-grow overflow-auto p-0">
+                <table class="w-full text-left text-sm border-collapse" id="summary-table">
+                    <thead class="bg-gray-100 text-gray-600 font-bold sticky top-0 z-10 shadow-sm"><tr id="summary-header"></tr></thead>
+                    <tbody id="summary-body" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Image for PDF -->
+    <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let currentClassName = "";
+        let summaryMeta = {}; 
+        const AUTO_REFRESH_MS = 30000;
+
+        async function loadCurrentTermBadge() {
+            const el = document.getElementById('current-term-badge');
+            if (!el) return;
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                const ay = data && data.academic_year ? data.academic_year : null;
+                const sem = data && data.semester ? data.semester : null;
+                el.textContent = (ay && sem) ? `AY ${ay} • ${sem}` : (data && data.current_term ? data.current_term : '-');
+            } catch (e) {
+                el.textContent = '-';
+            }
+        }
+
+        function shouldSkipAutoRefresh() {
+            if (document.hidden) return true;
+            if (window.__amsActionModalOpen) return true;
+            return !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        }
+
+        async function refreshClassTeacherDashboard() {
+            if (shouldSkipAutoRefresh()) return;
+            try {
+                const response = await fetch(`/api/class_teacher/analytics?user_id=${userId}`);
+                const data = await response.json();
+                if (!response.ok) return;
+                renderAnalytics(data);
+            } catch (e) {
+                console.error('Auto-refresh failed:', e);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (!userId) window.location.href = '/';
+            try {
+                loadCurrentTermBadge();
+                const response = await fetch(`/api/class_teacher/analytics?user_id=${userId}`);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error);
+                renderAnalytics(data);
+                // Auto-refresh is disabled globally.
+            } catch (e) { console.error(e); }
+        });
+
+        function renderAnalytics(data) {
+            document.getElementById('class-name-header').innerText = data.class_info.name;
+            currentClassName = data.class_info.name;
+            document.getElementById('stat-strength').innerText = data.class_info.total_students;
+            document.getElementById('stat-sessions').innerText = data.class_info.total_sessions;
+            document.getElementById('stat-defaulters').innerText = data.summary.defaulter_count;
+            document.getElementById('stat-health').innerText = data.summary.class_health;
+            document.getElementById('leave-badge').innerText = data.summary.pending_leaves;
+
+            const subList = document.getElementById('subject-list');
+            if (data.subjects.length === 0) subList.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-400">No Data</td></tr>`;
+            else subList.innerHTML = data.subjects.map(s => `
+                <tr onclick="openReport(${s.id})" class="hover:bg-purple-50 cursor-pointer transition-colors group">
+                    <td class="p-4 font-bold text-gray-700 group-hover:mit-purple">${s.subject}</td>
+                    <td class="p-4 text-gray-500">${s.teacher}</td>
+                    <td class="p-4 text-center"><span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">${s.conducted}</span></td>
+                    <td class="p-4 text-right font-bold ${s.avg_attendance < 75 ? 'text-red-600' : 'text-green-600'}">${s.avg_attendance}%</td>
+                </tr>`).join('');
+
+            const defList = document.getElementById('defaulter-list');
+            if (data.defaulters.length === 0) defList.innerHTML = `<div class="p-8 text-center text-green-600">No defaulters!</div>`;
+            else defList.innerHTML = data.defaulters.map(d => `<div class="p-4 hover:bg-red-50 flex justify-between items-center"><div><h4 class="font-bold text-gray-800 text-sm">${d.name}</h4><p class="text-xs text-gray-400">${d.roll}</p></div><div class="text-right"><span class="block text-lg font-bold text-red-600">${d.perc}%</span><span class="text-[10px] text-gray-400 font-bold">${d.attended}/${d.total}</span></div></div>`).join('');
+        }
+
+        async function openSummary() {
+            document.getElementById('summary-modal').classList.remove('hidden');
+            const header = document.getElementById('summary-header');
+            const body = document.getElementById('summary-body');
+            header.innerHTML = '<th class="p-4">Loading...</th>'; body.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/class_teacher/overall_summary?user_id=${userId}`);
+                const data = await res.json();
+                summaryMeta = data.meta;
+
+                let headersHTML = `<th class="p-4 bg-gray-50 border-r w-24 sticky left-0 z-20">Roll No</th>
+                                   <th class="p-4 bg-gray-50 border-r w-48 sticky left-24 z-20">Student Name</th>`;
+                data.headers.forEach(subj => {
+                    headersHTML += `<th class="p-4 text-center min-w-[100px] whitespace-nowrap bg-purple-50 text-purple-900 border-r border-purple-100">
+                        ${subj.name}<br><span class="text-[10px] text-purple-400 font-normal">${subj.code}</span>
+                    </th>`;
+                });
+                headersHTML += `<th class="p-4 text-center bg-gray-100 border-l sticky right-24 z-20">Total</th><th class="p-4 text-center bg-gray-100 border-l sticky right-0 z-20">%</th>`;
+                header.innerHTML = headersHTML;
+
+                body.innerHTML = data.rows.map(r => {
+                    let subjectCells = r.subjects.map(perc => {
+                        let num = parseInt(perc);
+                        let color = num < 75 ? 'text-red-500 font-bold' : 'text-gray-600';
+                        return `<td class="p-4 text-center border-b border-gray-50 border-r ${color}">${perc}</td>`;
+                    }).join('');
+                    return `<tr class="hover:bg-gray-50 transition-colors">
+                        <td class="p-4 border-r border-gray-100 font-mono text-xs text-gray-500 sticky left-0 bg-white">${r.roll}</td>
+                        <td class="p-4 border-r border-gray-100 font-bold text-gray-700 text-sm sticky left-24 bg-white whitespace-nowrap">${r.name}</td>
+                        ${subjectCells}
+                        <td class="p-4 text-center font-bold sticky right-24 bg-white border-l border-gray-100 text-xs uppercase">${r.total_attended}/${r.total_conducted}</td>
+                        <td class="p-4 text-center font-bold ${r.cumulative_perc < 75 ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'} sticky right-0 border-l border-gray-100">${r.cumulative_perc}%</td>
+                    </tr>`;
+                }).join('');
+            } catch (e) {
+                console.error(e);
+                showToast("Failed to load summary", "error");
+            }
+        }
+
+        function amsGetAcademicTermLine(meta) {
+            const ayRaw = (meta && meta.year) ? meta.year : null;
+            const semRaw = (meta && meta.semester) ? meta.semester : null;
+            const ay = (ayRaw || '').toString().trim();
+            const sem = (semRaw || '').toString().trim();
+            if (ay && sem) {
+                const semLabel = sem.toLowerCase().includes('sem') ? sem : `Sem ${sem}`;
+                return `Academic Year: ${ay} | ${semLabel}`;
+            }
+            return '';
+        }
+
+        function amsDrawPdfHeader(doc, title, subLines, metaLine) {
+            const margin = 14;
+            const pageW = doc.internal.pageSize.getWidth();
+            const logoImg = document.getElementById('mit-logo-img');
+
+            let logoH = 20;
+            let logoW = 20;
+            if (logoImg && logoImg.naturalWidth && logoImg.naturalHeight) {
+                logoW = logoH * (logoImg.naturalWidth / logoImg.naturalHeight);
+            }
+            const logoX = pageW - margin - logoW;
+            const logoY = 10;
+
+            const leftX = margin;
+            const maxW = Math.max(60, logoX - leftX - 6);
+
+            let y = 16;
+            doc.setTextColor(0, 0, 0);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            const uniLines = doc.splitTextToSize('MIT Art, Design and Technology University, Pune', maxW);
+            doc.text(uniLines, leftX, y);
+            y += uniLines.length * 6;
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(11);
+            (subLines || []).forEach((line) => {
+                const parts = doc.splitTextToSize(String(line || ''), maxW);
+                doc.text(parts, leftX, y);
+                y += parts.length * 5;
+            });
+
+            if (title) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(11);
+                const tLines = doc.splitTextToSize(String(title), maxW);
+                doc.text(tLines, leftX, y);
+                y += tLines.length * 5;
+            }
+
+            if (metaLine) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(10);
+                const mLines = doc.splitTextToSize(String(metaLine), maxW);
+                doc.text(mLines, leftX, y);
+                y += mLines.length * 5;
+            }
+
+            if (logoImg && logoImg.src) {
+                doc.addImage(logoImg, 'PNG', logoX, logoY, logoW, logoH);
+            }
+
+            const headerBottom = Math.max(y + 2, logoY + logoH + 2);
+            doc.setDrawColor(191, 157, 85);
+            doc.setLineWidth(0.6);
+            doc.line(margin, headerBottom, pageW - margin, headerBottom);
+            return headerBottom + 6;
+        }
+
+        // --- UPDATED PDF GENERATOR (STRICT HEADER) ---
+        function downloadSummaryPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('l', 'mm', 'a4');
+            const termLine = amsGetAcademicTermLine(summaryMeta);
+            const metaBits = [
+                `Department: ${summaryMeta.department}`,
+                `Class: ${summaryMeta.class_name}`,
+                `Class Teacher: ${summaryMeta.teacher}`,
+                termLine
+            ].filter(Boolean);
+
+            const gridY = amsDrawPdfHeader(
+                doc,
+                'Overall Class Summary',
+                ['School of Computing'],
+                metaBits.join(' | ')
+            );
+
+            doc.autoTable({
+                html: '#summary-table',
+                startY: gridY,
+                theme: 'grid',
+                styles: { fontSize: 7, cellPadding: 1.5, halign: 'center', valign: 'middle' },
+                headStyles: { fillColor: [72, 22, 109], textColor: 255, fontStyle: 'bold' },
+                columnStyles: { 
+                    0: { cellWidth: 30 }, 
+                    1: { cellWidth: 50, halign: 'left' } 
+                },
+                margin: { top: 10, bottom: 25 }
+            });
+
+            // FOOTER
+            const pageHeight = doc.internal.pageSize.height;
+            const footerY = pageHeight - 15;
+            doc.setFontSize(10);
+            doc.text("Class Teacher", 30, footerY);
+            doc.text("AMC Head", 140, footerY);
+            doc.text("HOD", 250, footerY);
+            doc.setLineWidth(0.5);
+            doc.line(30, footerY - 5, 60, footerY - 5);
+            doc.line(140, footerY - 5, 170, footerY - 5);
+            doc.line(250, footerY - 5, 280, footerY - 5);
+
+            doc.save(`Overall_Summary_${summaryMeta.class_name}.pdf`);
+        }
+
+        async function openReport(subjectId) {
+            // (Standard openReport logic - reuse if needed)
+        }
+        function closeModal() { document.getElementById('report-modal').classList.add('hidden'); document.getElementById('summary-modal').classList.add('hidden'); }
+    </script>
+</body>
+</html>

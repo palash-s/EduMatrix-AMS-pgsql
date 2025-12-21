@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Batch Promotion and Semester Rollover - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-sm">
+        <div class="flex items-center gap-4">
+            <button onclick="window.location.href='/admin/dashboard'" class="p-2 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+            <h1 class="text-xl font-bold text-gray-900 mit-purple" style="font-family: 'Merriweather', serif;">Batch Promotion and Semester Rollover</h1>
+        </div>
+        <div class="text-xs font-bold bg-yellow-50 text-yellow-700 px-3 py-1 rounded-lg border border-yellow-200 flex items-center gap-2">
+            <i data-lucide="alert-triangle" class="w-4 h-4"></i> Caution: Actions are irreversible
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto p-8">
+        
+        <div class="mb-8 text-center">
+            <h2 class="text-2xl font-bold text-gray-900">End of Year Processing</h2>
+            <p class="text-gray-500 mt-1">Promote batches and then roll over the active semester.</p>
+        </div>
+
+        <!-- Promotion Pipeline -->
+        <div class="space-y-6 relative">
+            <!-- Connecting Line -->
+            <div class="absolute left-8 top-10 bottom-10 w-0.5 bg-gray-200 -z-10"></div>
+
+            <!-- 1. LY -> Alumni -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between hover:border-purple-300 transition-all">
+                <div class="flex items-center gap-6">
+                    <div class="w-16 h-16 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold text-xl z-10 ring-4 ring-white">LY</div>
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-lg">Final Year (LY)</h3>
+                        <p class="text-sm text-gray-500" id="desc-LY">Loading...</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <i data-lucide="arrow-right" class="text-gray-300"></i>
+                    <div class="text-right mr-4">
+                        <p class="font-bold text-gray-800">Alumni</p>
+                        <p class="text-xs text-gray-400">Archive Batch</p>
+                    </div>
+                    <button onclick="promote('LY', 'Alumni')" class="px-6 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors shadow-md">
+                        Graduate Batch
+                    </button>
+                </div>
+            </div>
+
+            <!-- 2. TY -> LY -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between hover:border-purple-300 transition-all">
+                <div class="flex items-center gap-6">
+                    <div class="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xl z-10 ring-4 ring-white">TY</div>
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-lg">Third Year (TY)</h3>
+                        <p class="text-sm text-gray-500" id="desc-TY">Loading...</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <i data-lucide="arrow-right" class="text-gray-300"></i>
+                    <div class="text-right mr-4">
+                        <p class="font-bold text-gray-800">LY</p>
+                        <p class="text-xs text-gray-400">Next Level</p>
+                    </div>
+                    <button onclick="promote('TY', 'LY')" class="px-6 py-2 bg-mit-purple text-white rounded-lg text-sm font-bold hover:bg-[#350f50] transition-colors shadow-md">
+                        Promote to LY
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. SY -> TY -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between hover:border-purple-300 transition-all">
+                <div class="flex items-center gap-6">
+                    <div class="w-16 h-16 rounded-full bg-teal-50 flex items-center justify-center text-teal-600 font-bold text-xl z-10 ring-4 ring-white">SY</div>
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-lg">Second Year (SY)</h3>
+                        <p class="text-sm text-gray-500" id="desc-SY">Loading...</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <i data-lucide="arrow-right" class="text-gray-300"></i>
+                    <div class="text-right mr-4">
+                        <p class="font-bold text-gray-800">TY</p>
+                        <p class="text-xs text-gray-400">Next Level</p>
+                    </div>
+                    <button onclick="promote('SY', 'TY')" class="px-6 py-2 bg-mit-purple text-white rounded-lg text-sm font-bold hover:bg-[#350f50] transition-colors shadow-md">
+                        Promote to TY
+                    </button>
+                </div>
+            </div>
+
+            <!-- 4. FY -> SY -->
+            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between hover:border-purple-300 transition-all">
+                <div class="flex items-center gap-6">
+                    <div class="w-16 h-16 rounded-full bg-orange-50 flex items-center justify-center text-orange-600 font-bold text-xl z-10 ring-4 ring-white">FY</div>
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-lg">First Year (FY)</h3>
+                        <p class="text-sm text-gray-500" id="desc-FY">Loading...</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <i data-lucide="arrow-right" class="text-gray-300"></i>
+                    <div class="text-right mr-4">
+                        <p class="font-bold text-gray-800">SY</p>
+                        <p class="text-xs text-gray-400">Next Level</p>
+                    </div>
+                    <button onclick="promote('FY', 'SY')" class="px-6 py-2 bg-mit-purple text-white rounded-lg text-sm font-bold hover:bg-[#350f50] transition-colors shadow-md">
+                        Promote to SY
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Semester Rollover -->
+        <div class="mt-10 bg-white p-6 rounded-xl border border-red-200 shadow-sm">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h3 class="font-bold text-gray-900 text-lg flex items-center gap-2">
+                        <i data-lucide="refresh-ccw" class="w-5 h-5 text-red-600"></i>
+                        Semester Rollover
+                    </h3>
+                    <p class="text-sm text-gray-500 mt-1">Archives current allocations & timetables and resets live schedules for the new term.</p>
+                </div>
+                <button onclick="openRolloverModal()" class="px-6 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 transition-colors shadow-md whitespace-nowrap">
+                    Open Rollover
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- ROLLOVER MODAL -->
+    <div id="rollover-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-slate-800">End Semester</h2>
+                <button onclick="closeRolloverModal()" class="p-1 hover:bg-slate-100 rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 mb-6">
+                <p class="text-xs font-bold text-yellow-800 uppercase mb-1">Current Active Term</p>
+                <p class="text-lg font-mono text-yellow-900" id="current-term-display">Loading...</p>
+            </div>
+
+            <div class="space-y-4">
+                <div class="p-3 bg-slate-50 rounded border border-slate-200 text-xs text-slate-600">
+                    <p class="font-bold mb-1">What happens next?</p>
+                    <ul class="list-disc pl-4 space-y-1">
+                        <li>Current Allocations & Timetables will be <strong>Archived</strong>.</li>
+                        <li>The system will reset for the <strong>New Semester</strong>.</li>
+                        <li>Student profiles remain active.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Enter New Term (e.g. Sem 2)</label>
+                    <input type="text" id="new-term-name" placeholder="e.g. YYYY-YY Sem 2" class="w-full p-3 border rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none">
+                    <p class="mt-2 text-[11px] text-slate-400">Use the format <strong>YYYY-YY Sem N</strong> to enforce the convention.</p>
+                </div>
+                
+                <button id="rollover-confirm-btn" onclick="performRollover()" class="w-full py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 shadow-md flex justify-center items-center gap-2">
+                    <i data-lucide="archive" class="w-4 h-4"></i> Confirm & Reset System
+                </button>
+            </div>
+        </div>
+    </div>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        
+        document.addEventListener('DOMContentLoaded', loadStats);
+
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/admin/batch_stats');
+                const data = await res.json();
+                
+                data.stats.forEach(s => {
+                    const el = document.getElementById(`desc-${s.level}`);
+                    if(el) el.innerText = `${s.count} Students • Batch ${s.batches || 'Unknown'}`;
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        async function promote(from, to) {
+            const msg = to === 'Alumni' 
+                ? `Are you sure you want to GRADUATE the entire ${from} batch? This will archive their records.`
+                : `Are you sure you want to PROMOTE all ${from} students to ${to}? Ensure target classes (e.g. ${to}-A) exist.`;
+
+            return showConfirm(
+                "Confirm Action",
+                msg,
+                async () => {
+                    try {
+                        const res = await fetch('/api/admin/promote_batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ from_level: from, to_level: to })
+                        });
+
+                        const data = await res.json();
+                        if(res.ok) {
+                            showToast(data.message || "Done");
+                            loadStats();
+                        } else {
+                            showToast(data.error || "Failed", "error");
+                        }
+                    } catch(e) {
+                        showToast("Promotion failed. Check console.", "error");
+                        console.error(e);
+                    }
+                },
+                "Promotions"
+            );
+        }
+
+        // --- SEMESTER ROLLOVER ---
+        function closeRolloverModal() {
+            const modal = document.getElementById('rollover-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        async function openRolloverModal() {
+            const modal = document.getElementById('rollover-modal');
+            if (modal) modal.classList.remove('hidden');
+            if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
+
+            try {
+                const res = await fetch('/api/admin/system_config');
+                const data = await res.json();
+                document.getElementById('current-term-display').innerText = data.current_term || 'Not Set';
+            } catch (e) {
+                document.getElementById('current-term-display').innerText = 'Error';
+                showToast('Failed to load current term.', 'error');
+            }
+        }
+
+        async function performRollover() {
+            const input = document.getElementById('new-term-name');
+            const newName = (input ? input.value : '').trim();
+            if (!newName) {
+                showToast('Please enter the name for the NEW term.', 'error');
+                return;
+            }
+
+            // Enforce convention: must contain "Sem <number>".
+            if (!/\bSem\s*\d+\b/i.test(newName)) {
+                showToast('Term name must include "Sem" (e.g. YYYY-YY Sem 2).', 'error');
+                return;
+            }
+
+            showConfirm(
+                'Confirm Semester Rollover',
+                'CRITICAL WARNING:\n\nThis will archive current allocations & timetables, then delete live schedules/allocations to prepare for the new term.\n\nContinue?',
+                async () => {
+                    try {
+                        const btn = document.getElementById('rollover-confirm-btn');
+                        if (btn) btn.disabled = true;
+
+                        const res = await fetch('/api/admin/rollover_semester', { method: 'POST' });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error || 'Rollover Failed');
+
+                        const res2 = await fetch('/api/admin/system_config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ current_term: newName })
+                        });
+                        const data2 = await res2.json();
+                        if (!res2.ok) throw new Error(data2.error || 'Failed to set new term');
+
+                        closeRolloverModal();
+                        showToast(`System Reset Complete! You can now upload data for ${newName}`);
+                        // Auto-refresh is disabled globally. Manually refresh if needed.
+                    } catch (e) {
+                        showToast(e.message || 'Error', 'error');
+                    } finally {
+                        const btn = document.getElementById('rollover-confirm-btn');
+                        if (btn) btn.disabled = false;
+                    }
+                },
+                'MIT ADT'
+            );
+            setModalConfirmLabel('Confirm & Reset');
+        }
+    </script>
+</body>
+</html>
+

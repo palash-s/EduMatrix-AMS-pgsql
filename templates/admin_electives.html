@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Elective Management - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-sm">
+        <div class="flex items-center gap-4">
+            <button onclick="window.location.href='/admin/dashboard'" class="p-2 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i></button>
+            <h1 class="text-xl font-bold text-gray-900 mit-purple" style="font-family: 'Merriweather', serif;">Elective Management</h1>
+        </div>
+        <div class="flex gap-3">
+                <!-- Setup Dropdown remains for creating NEW configurations -->
+            <div>
+                <select id="class-select" onchange="onClassSelectionChanged()" class="p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white w-48">
+                    <option value="">-- Setup New Class --</option>
+                </select>
+                <div id="class-sem-hint" class="mt-1 text-[10px] text-gray-500 font-bold">Current Semester: -- • Suggested Target: --</div>
+            </div>
+            <button onclick="openSetupModal()" class="px-4 py-2 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-black flex items-center gap-2">
+                <i data-lucide="settings-2" class="w-4 h-4"></i> Setup Choices
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- LEFT: Live Status (Accordion) -->
+        <div class="lg:col-span-1 space-y-4 h-[85vh] overflow-y-auto pr-2">
+            <div class="flex justify-between items-end mb-2">
+                <h2 class="text-sm font-bold text-gray-500 uppercase">Live Dashboard</h2>
+                <button onclick="loadLiveDashboard()" class="text-xs text-purple-600 hover:underline"><i data-lucide="refresh-cw" class="w-3 h-3 inline"></i> Refresh</button>
+            </div>
+            <div id="live-dashboard-list" class="space-y-4">
+                <div class="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">Loading live data...</div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Student Management -->
+        <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col h-[85vh] hidden" id="detail-panel">
+            <div class="p-6 border-b border-gray-100">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900" id="detail-title">...</h2>
+                        <p class="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded inline-block mt-1" id="detail-type">...</p>
+                    </div>
+                    <button onclick="closeDetailPanel()" class="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+
+                <div class="flex gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200" id="move-controls">
+                    <span class="text-xs font-bold text-gray-500 self-center w-20">Move To:</span>
+                    <select id="target-subject" class="flex-1 p-2 border rounded text-xs bg-white"><option>Select Target Subject...</option></select>
+                    <button onclick="performAction('Move')" class="bg-mit-purple text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-[#350f50]">Move</button>
+                </div>
+            </div>
+            
+            <div class="flex-grow overflow-y-auto p-0">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10 shadow-sm">
+                        <tr>
+                            <th class="p-4 w-10 border-b"><input type="checkbox" onchange="toggleAll(this)"></th>
+                            <th class="p-4 border-b">Student Name</th>
+                            <th class="p-4 text-right border-b">Roll No</th>
+                            <th class="p-4 text-center w-24 border-b">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="student-list" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+
+            <!-- Footer: Approval Actions -->
+            <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
+                <span class="text-xs text-gray-500 font-bold"><span id="selected-count">0</span> selected</span>
+                <div class="flex gap-3">
+                    <button onclick="performAction('Reject')" class="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center gap-2">
+                        <i data-lucide="x" class="w-4 h-4"></i> Reject
+                    </button>
+                    <button onclick="performAction('Approve')" class="px-4 py-2 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 flex items-center gap-2 shadow-sm">
+                        <i data-lucide="check" class="w-4 h-4"></i> Approve Selection
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- SETUP MODAL -->
+    <div id="setup-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+            <h2 class="text-lg font-bold mb-2 mit-purple serif">Open Elective Choices</h2>
+            <p class="text-xs text-gray-500 mb-4">Select subjects to offer for this class.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Current Class</label>
+                    <div id="setup-current-class" class="p-2 border rounded-lg text-xs bg-gray-50 text-gray-700 font-bold">--</div>
+                    <div class="mt-1 text-[10px] text-gray-500 font-bold">
+                        Current Semester: <span id="setup-current-sem" class="text-gray-700">--</span>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Target Semester</label>
+                    <select id="target-semester-select" class="w-full p-2 border rounded-lg text-xs bg-white" onchange="reloadStructureElectives()">
+                        <option value="">-- Select --</option>
+                        <option value="1">Sem 1</option>
+                        <option value="2">Sem 2</option>
+                        <option value="3">Sem 3</option>
+                        <option value="4">Sem 4</option>
+                        <option value="5">Sem 5</option>
+                        <option value="6">Sem 6</option>
+                        <option value="7">Sem 7</option>
+                        <option value="8">Sem 8</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex items-center justify-between mb-2">
+                <p class="text-[10px] text-gray-500 font-bold uppercase">Elective Buckets (from uploaded structure)</p>
+                <div class="flex items-center gap-2">
+                    <label class="text-[10px] text-gray-500 font-bold uppercase">Min Batch</label>
+                    <input id="min-batch-size" type="number" min="1" value="12" class="w-20 p-2 border rounded-lg text-xs bg-white" />
+                </div>
+            </div>
+            <div id="subject-checkboxes" class="max-h-80 overflow-y-auto space-y-3 border p-3 rounded mb-4 bg-gray-50"></div>
+            <div class="flex justify-end gap-2">
+                <button onclick="document.getElementById('setup-modal').classList.add('hidden')" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium text-xs">Cancel</button>
+                <button onclick="submitSetup()" class="px-6 py-2 bg-mit-purple text-white rounded-lg font-bold text-xs hover:bg-[#350f50]">Open Selection</button>
+            </div>
+        </div>
+    </div>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        let currentLiveStats = []; // Store full data structure
+        let currentSubId = null;
+        let currentSectionId = null;
+        let currentWindowId = null;
+        let __amsAllClasses = [];
+        let __amsCachedTerm = null;
+
+        function amsExtractClassLevelFromDisplay(text) {
+            // Expected format: "SY - A" / "TY - DA" etc.
+            const parts = String(text || '').split(' - ');
+            return (parts[0] || '').trim().toUpperCase();
+        }
+
+        function amsProgramSemesterFromLevelAndTerm(level, termSemNo) {
+            // Mapping requested:
+            // FY: 1→1, 2→2
+            // SY: 1→3, 2→4
+            // TY: 1→5, 2→6
+            // LY: 1→7, 2→8
+            const offsets = { FY: 0, SY: 2, TY: 4, LY: 6 };
+            const off = offsets[String(level || '').toUpperCase()];
+            if (off === undefined) return null;
+            const t = parseInt(termSemNo, 10);
+            if (!t || t < 1) return null;
+            return off + t;
+        }
+
+        async function amsEnsureCurrentTermCached() {
+            if (__amsCachedTerm) return __amsCachedTerm;
+            try {
+                const termRes = await fetch('/api/current_term');
+                __amsCachedTerm = await termRes.json();
+                return __amsCachedTerm;
+            } catch (e) {
+                __amsCachedTerm = null;
+                return null;
+            }
+        }
+
+        function amsComputeProgramCurrentSemester(level, term) {
+            const termSemNo = term && term.semester_number ? parseInt(term.semester_number, 10) : null;
+            if (termSemNo && termSemNo > 2) return termSemNo; // already program-semester
+            return amsProgramSemesterFromLevelAndTerm(level, termSemNo);
+        }
+
+        async function onClassSelectionChanged() {
+            const sel = document.getElementById('class-select');
+            const className = (sel && sel.options[sel.selectedIndex]) ? sel.options[sel.selectedIndex].text : '';
+            const level = amsExtractClassLevelFromDisplay(className);
+            const hint = document.getElementById('class-sem-hint');
+            if (hint) hint.textContent = 'Current Semester: -- • Suggested Target: --';
+
+            if (!sel.value) {
+                return;
+            }
+
+            const term = await amsEnsureCurrentTermCached();
+            const programCur = amsComputeProgramCurrentSemester(level, term);
+            if (!programCur) {
+                if (hint) hint.textContent = 'Current Semester: -- • Suggested Target: --';
+                return;
+            }
+
+            const suggestedTarget = Math.min(8, programCur + 1);
+            if (hint) hint.textContent = `Current Semester: Sem ${programCur} • Suggested Target: Sem ${suggestedTarget}`;
+
+            // If setup modal is currently open, keep it in sync.
+            const modal = document.getElementById('setup-modal');
+            const modalVisible = modal && !modal.classList.contains('hidden');
+            if (modalVisible) {
+                const semEl = document.getElementById('setup-current-sem');
+                if (semEl) semEl.textContent = `Sem ${programCur}`;
+                const targetSel = document.getElementById('target-semester-select');
+                if (targetSel) targetSel.value = String(suggestedTarget);
+                await loadStructureElectives(sel.value);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadClasses(); // Populate dropdown
+            loadLiveDashboard(); // Populate Sidebar
+        });
+
+        async function loadClasses() {
+            const res = await fetch('/api/core/classes');
+            const data = await res.json();
+            __amsAllClasses = data.classes || [];
+            document.getElementById('class-select').innerHTML = '<option value="">-- Select Class --</option>' + data.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        }
+
+        function reloadStructureElectives() {
+            const sectionId = document.getElementById('class-select').value;
+            if (!sectionId) return;
+            return loadStructureElectives(sectionId);
+        }
+
+        async function loadStructureElectives(sectionId) {
+            const targetSemesterNo = document.getElementById('target-semester-select').value;
+            const container = document.getElementById('subject-checkboxes');
+            container.innerHTML = `<div class="p-6 text-center text-gray-400 text-sm">Loading electives...</div>`;
+
+            if (!targetSemesterNo) {
+                container.innerHTML = `<div class="text-center p-4 border-2 border-dashed border-gray-200 rounded-lg"><p class="text-xs text-gray-500 font-bold">Select Target Semester</p></div>`;
+                return;
+            }
+
+            const res = await fetch(`/api/admin/semester_structure/electives?section_id=${encodeURIComponent(sectionId)}&target_semester_no=${encodeURIComponent(targetSemesterNo)}`);
+            const data = await res.json();
+
+            const groups = data.groups || {};
+            const buckets = Object.keys(groups);
+            if (buckets.length === 0) {
+                container.innerHTML = `<div class="text-center p-4 border-2 border-dashed border-gray-200 rounded-lg"><p class="text-xs text-gray-500 font-bold">No elective buckets found for this semester</p><p class="text-[10px] text-gray-400 mt-1">Upload semester course structure first.</p></div>`;
+                return;
+            }
+
+            container.innerHTML = buckets.map(bucket => {
+                const items = groups[bucket] || [];
+                const list = items.map(s => `
+                    <label class="flex items-center gap-3 p-3 bg-white hover:bg-purple-50 rounded-lg cursor-pointer border border-gray-200 transition-colors mb-2">
+                        <input type="checkbox" class="setup-check w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500" value="${s.id}" data-bucket="${bucket}">
+                        <div class="flex-1">
+                            <div class="flex justify-between items-center">
+                                <p class="text-sm font-bold text-gray-800">${s.name}</p>
+                                <span class="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-bold">${bucket}</span>
+                            </div>
+                            <p class="text-[10px] text-gray-500 font-mono">${s.code}</p>
+                        </div>
+                    </label>
+                `).join('');
+
+                return `
+                    <div class="bg-white/60 rounded-lg border border-gray-200 overflow-hidden">
+                        <div class="px-3 py-2 bg-gray-100 border-b border-gray-200">
+                            <p class="text-xs font-bold text-gray-700">${bucket}</p>
+                        </div>
+                        <div class="p-2">
+                            ${list || `<div class="p-3 text-xs text-gray-500">No subjects</div>`}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadLiveDashboard() {
+            const list = document.getElementById('live-dashboard-list');
+            try {
+                const res = await fetch('/api/admin/elective_windows/live_dashboard');
+                const data = await res.json();
+                currentLiveStats = data.dashboard || [];
+
+                if(currentLiveStats.length === 0) {
+                    list.innerHTML = `<div class="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 rounded-xl"><p>No active elective cycles.</p><p class="text-xs mt-2">Use "Setup Choices" to start one.</p></div>`;
+                    return;
+                }
+
+                list.innerHTML = currentLiveStats.map(cls => {
+                    const windowsHTML = (cls.windows || []).map(w => {
+                        const badge = `<span class="text-[10px] font-bold uppercase tracking-wider text-white bg-gray-800 px-1.5 py-0.5 rounded">Sem ${w.target_semester_no} • ${w.bucket.replace('Elective-', 'E-')}</span>`;
+                        const items = (w.electives || []).map(e => `
+                            <div onclick="viewSubject(${cls.section_id}, ${w.window_id}, ${e.subject_id})" 
+                                 class="flex justify-between items-center p-3 bg-white border border-gray-100 rounded-lg hover:border-purple-300 cursor-pointer transition-all mb-2 group">
+                                <div class="flex-1 min-w-0 mr-2">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        ${badge}
+                                        ${e.is_danger ? '<i data-lucide="alert-triangle" class="w-3 h-3 text-red-500"></i>' : ''}
+                                    </div>
+                                    <h4 class="text-sm font-bold text-gray-800 truncate" title="${e.name}">${e.name}</h4>
+                                </div>
+                                <span class="text-xs font-bold ${e.is_danger ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'} px-2 py-1 rounded-full">
+                                    ${e.count}
+                                </span>
+                            </div>
+                        `).join('') || `<div class="p-3 text-xs text-gray-500">No offerings</div>`;
+                        return `<div class="mb-3">${items}</div>`;
+                    }).join('');
+
+                    return `
+                        <div class="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+                            <div class="px-4 py-3 border-b border-gray-200 bg-gray-100">
+                                <h3 class="font-bold text-gray-700">${cls.class_name}</h3>
+                            </div>
+                            <div class="p-3">
+                                ${windowsHTML}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                lucide.createIcons();
+            } catch(e) { console.error(e); }
+        }
+
+        async function viewSubject(sectionId, windowId, subId) {
+            currentSubId = subId;
+            currentSectionId = sectionId;
+            currentWindowId = windowId;
+
+            // Fetch detailed stats per window
+            const res = await fetch(`/api/elective_windows/live_stats?window_id=${windowId}`);
+            const detailedData = await res.json();
+            const detailedSub = (detailedData.stats || []).find(s => s.subject_id == subId);
+            const w = detailedData.window || {};
+            const subjectData = detailedSub || { subject_name: '...', type: w.bucket || '...' };
+
+            // 3. Update UI
+            document.getElementById('detail-panel').classList.remove('hidden');
+            document.getElementById('detail-title').innerText = subjectData.subject_name || subjectData.name || '...';
+            document.getElementById('detail-type').innerText = `Sem ${w.target_semester_no || '-'} • ${w.bucket || subjectData.type || '-'}`;
+            
+            // Populate Move Dropdown (Show other electives in same class)
+            const moveSelect = document.getElementById('target-subject');
+            moveSelect.innerHTML = (detailedData.stats || [])
+                .filter(e => e.subject_id != subId)
+                .map(e => `<option value="${e.subject_id}">${e.subject_name} (${e.count})</option>`).join('');
+            
+            // Populate Table
+            const tbody = document.getElementById('student-list');
+            if (!detailedSub || detailedSub.students.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400">No students enrolled yet.</td></tr>`;
+            } else {
+                tbody.innerHTML = detailedSub.students.map(s => `
+                    <tr class="hover:bg-gray-50 border-b border-gray-50 last:border-0">
+                        <td class="p-4"><input type="checkbox" class="stu-check w-4 h-4 text-purple-600 rounded" value="${s.id}" onchange="updateCount()"></td>
+                        <td class="p-4 font-bold text-gray-800 text-sm">${s.name}</td>
+                        <td class="p-4 text-right font-mono text-xs text-gray-500">${s.roll}</td>
+                        <td class="p-4 text-center">
+                            <span class="px-2 py-1 rounded-full text-[10px] font-bold ${s.status === 'Approved' ? 'bg-green-100 text-green-700' : (s.status === 'Rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700')}">
+                                ${s.status}
+                            </span>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+            updateCount();
+        }
+
+        function closeDetailPanel() {
+            document.getElementById('detail-panel').classList.add('hidden');
+            currentSubId = null;
+        }
+
+        // ... (Keep Setup Modal, Action Logic, etc. same as before) ...
+        async function openSetupModal() {
+            const sectionId = document.getElementById('class-select').value;
+            if(!sectionId) return showToast("Select a class to setup.", "error");
+            document.getElementById('setup-modal').classList.remove('hidden');
+
+            const className = (document.getElementById('class-select').options[document.getElementById('class-select').selectedIndex] || {}).text || '';
+            document.getElementById('setup-current-class').innerText = className || '--';
+            document.getElementById('setup-current-sem').innerText = '--';
+
+            const level = amsExtractClassLevelFromDisplay(className);
+
+            // Default target semester: current sem + 1 if available from /api/current_term
+            const term = await amsEnsureCurrentTermCached();
+            const programCur = amsComputeProgramCurrentSemester(level, term);
+            if (programCur) {
+                document.getElementById('setup-current-sem').innerText = `Sem ${programCur}`;
+                const next = Math.min(8, programCur + 1);
+                document.getElementById('target-semester-select').value = String(next);
+            } else if (term && term.semester) {
+                document.getElementById('setup-current-sem').innerText = String(term.semester);
+            }
+
+            await loadStructureElectives(sectionId);
+        }
+
+        async function submitSetup() {
+            const sectionId = document.getElementById('class-select').value;
+            const ids = Array.from(document.querySelectorAll('.setup-check:checked')).map(cb => cb.value);
+            const targetSemesterNo = document.getElementById('target-semester-select').value;
+            const minBatchSize = parseInt(document.getElementById('min-batch-size').value || '12', 10) || 12;
+            if (!targetSemesterNo) return showToast('Select target semester', 'error');
+            if (ids.length === 0) return showToast('Select at least one elective subject', 'error');
+
+            await fetch('/api/admin/elective_windows/open', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ section_id: sectionId, target_semester_no: parseInt(targetSemesterNo, 10), subject_ids: ids, min_batch_size: minBatchSize })
+            });
+            document.getElementById('setup-modal').classList.add('hidden');
+            loadLiveDashboard();
+        }
+
+        async function performAction(actionType) {
+            const checkboxes = document.querySelectorAll('.stu-check:checked');
+            if(checkboxes.length === 0) return showToast("Select students first", "error");
+            const studentIds = Array.from(checkboxes).map(cb => cb.value);
+            
+            const payload = { window_id: currentWindowId, student_ids: studentIds, subject_id: currentSubId, action: actionType };
+            if (actionType === 'Move') {
+                const newSubId = document.getElementById('target-subject').value;
+                if(newSubId == currentSubId || !newSubId) return showToast("Select a different target subject", "error");
+                payload.new_subject_id = newSubId;
+            }
+
+            return showConfirm(
+                "Confirm Action",
+                `${actionType} ${studentIds.length} students?`,
+                async () => {
+                    const res = await fetch('/api/elective_windows/manage_enrollment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!res.ok) return showToast("Failed", "error");
+                    viewSubject(currentSectionId, currentWindowId, currentSubId); // Refresh table
+                    loadLiveDashboard(); // Refresh sidebar
+                },
+                "Electives"
+            );
+        }
+
+        function toggleAll(source) { document.querySelectorAll('.stu-check').forEach(cb => cb.checked = source.checked); updateCount(); }
+        function updateCount() { document.getElementById('selected-count').innerText = document.querySelectorAll('.stu-check:checked').length; }
+    </script>
+</body>
+</html>

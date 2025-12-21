@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Console - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .serif { font-family: 'Merriweather', serif; }
+        .mit-purple { color: #48166d; }
+        .bg-mit-purple { background-color: #48166d; }
+        .mit-gold { color: #bf9d55; }
+        .bg-mit-gold { background-color: #bf9d55; }
+        
+        /* Scrollbar Styling */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+        /* Popup Animation */
+        .popup-enter { animation: popupIn 0.2s ease-out forwards; }
+        @keyframes popupIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+        /* Responsive Sidebar */
+        @media (max-width: 768px) {
+            aside { display: none; }
+            .sidebar-open aside { display: flex; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 flex h-screen overflow-hidden relative">
+
+    <!-- SIDEBAR -->
+    <aside class="w-64 bg-mit-purple text-white flex-shrink-0 flex flex-col z-20 shadow-xl">
+        <div class="p-6 border-b border-white/10 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-10 w-auto brightness-0 invert" onerror="this.style.display='none'">
+            <div>
+                <span class="block font-bold tracking-wider text-sm">ADMIN</span>
+                <!-- <span class="block text-[10px] text-purple-200 opacity-70"></span> -->
+            </div>
+        </div>
+        
+        <nav class="flex-grow p-4 space-y-1 overflow-y-auto custom-scroll">
+            <p class="px-4 text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 mt-2">Main</p>
+            <a href="/admin/dashboard" class="flex items-center gap-3 px-4 py-3 bg-white/10 rounded-lg text-white font-medium border border-white/10"><i data-lucide="layout-dashboard" class="w-4 h-4 text-mit-gold"></i> Overview</a>
+            <p class="px-4 text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 mt-6">Academics</p>
+            <a href="/admin/manage_classes" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="users" class="w-4 h-4"></i> Classes</a>
+            <a href="/admin/student_directory" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="graduation-cap" class="w-4 h-4"></i> Students</a>
+            <a href="/admin/promotions" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="trending-up" class="w-4 h-4"></i> Promotions</a>
+            <a href="/admin/manage_timetable" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="calendar-clock" class="w-4 h-4"></i> Timetable</a>
+            
+            <p class="px-4 text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 mt-6">Staff</p>
+            <a href="/admin/manage_faculty" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="briefcase" class="w-4 h-4"></i> Faculty Directory</a>
+            <a href="/admin/manage_coordinators" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="shield-check" class="w-4 h-4"></i> Roles & Permissions</a>
+            
+            <p class="px-4 text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 mt-6">System</p>
+            
+            <a href="#" onclick="openArchiveModal(); return false;" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="archive" class="w-4 h-4"></i> Academic Archives</a>
+        </nav>
+        <div class="p-4 border-t border-white/10">
+            <button onclick="logout()" class="flex items-center gap-3 px-4 py-3 text-red-200 hover:bg-white/5 w-full rounded-lg transition-colors group text-sm font-medium"><i data-lucide="log-out" class="w-4 h-4 group-hover:text-red-400"></i> Sign Out</button>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-grow flex flex-col h-screen overflow-hidden relative">
+        
+        <!-- Header -->
+        <header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8 z-10">
+            <div class="flex items-center gap-4 w-1/3">
+                <button onclick="toggleSidebar()" class="p-2 -ml-2 text-gray-400 hover:text-purple-600 md:hidden"><i data-lucide="menu" class="w-5 h-5"></i></button>
+                <div class="relative w-full">
+                    <i data-lucide="search" class="absolute left-3 top-2.5 w-4 h-4 text-gray-400"></i>
+                    <input type="text" placeholder="Search..." class="w-full pl-10 pr-4 py-2 bg-gray-100 border-transparent focus:bg-white focus:border-gray-300 rounded-lg text-sm transition-all outline-none">
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                {% include '_notifications.html' %}
+                <div class="h-8 w-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold text-xs">AD</div>
+            </div>
+        </header>
+
+        <!-- Dashboard Content -->
+        <div class="flex-grow overflow-y-auto p-8 custom-scroll">
+            
+            <div class="mb-8 flex justify-between items-end">
+                <div><h1 class="text-2xl font-bold text-gray-900 serif">Department Overview</h1><p class="text-gray-500 text-sm mt-1">Real-time system statistics.</p></div>
+                <div class="flex gap-2">
+                    <span id="academic-year-badge" class="px-3 py-1 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-600 shadow-sm">Academic Year: Loading...</span>
+                    <span id="current-term-badge" class="px-3 py-1 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-600 shadow-sm">Current Term: Loading...</span>
+                    <span class="px-3 py-1 bg-green-50 border border-green-100 rounded-lg text-xs font-bold text-green-700 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Online</span>
+                </div>
+            </div>
+
+            <!-- STATS ROW -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 relative">
+                
+                <!-- 1. Students (CLICKABLE) -->
+                <div id="student-card" onclick="toggleStudentPopup(this)" class="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-300 cursor-pointer transition-all relative overflow-hidden group z-10">
+                    <div class="flex justify-between items-start relative z-10">
+                        <div><p class="text-gray-500 text-xs font-bold uppercase tracking-wider">Total Students</p><h3 class="text-3xl font-bold text-gray-900 mt-1" id="stat-students">--</h3></div>
+                        <div class="p-2 bg-blue-50 rounded-lg text-blue-600 group-hover:bg-blue-100 transition-colors"><i data-lucide="users" class="w-5 h-5"></i></div>
+                    </div>
+                    <div class="mt-4 text-xs text-gray-400 flex items-center gap-1 group-hover:text-blue-600"><i data-lucide="bar-chart-2" class="w-3 h-3"></i> Click to view distribution</div>
+                    <div class="absolute -bottom-4 -right-4 w-20 h-20 bg-blue-50 rounded-full opacity-50 z-0"></div>
+                </div>
+
+                <!-- STUDENT POPUP (Hidden by default) -->
+                <div id="student-popup" class="hidden absolute top-full left-0 mt-2 w-[500px] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 popup-enter p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-gray-800">Student Distribution</h3>
+                        <button onclick="closePopup(event)" class="p-1 hover:bg-gray-100 rounded-full"><i data-lucide="x" class="w-4 h-4 text-gray-500"></i></button>
+                    </div>
+                    <div class="h-48">
+                        <canvas id="studentChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- 2. Faculty -->
+                <div class="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+                    <div class="flex justify-between items-start relative z-10">
+                        <div><p class="text-gray-500 text-xs font-bold uppercase tracking-wider">Faculty</p><h3 class="text-3xl font-bold text-gray-900 mt-1" id="stat-staff">--</h3></div>
+                        <div class="p-2 bg-purple-50 rounded-lg text-purple-600"><i data-lucide="briefcase" class="w-5 h-5"></i></div>
+                    </div>
+                    <div class="mt-4 flex items-center gap-1 text-xs text-gray-400">Active Staff Members</div>
+                </div>
+
+                <!-- 3. Classes -->
+                <div class="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+                    <div class="flex justify-between items-start relative z-10">
+                        <div><p class="text-gray-500 text-xs font-bold uppercase tracking-wider">Active Classes</p><h3 class="text-3xl font-bold text-gray-900 mt-1" id="stat-classes">--</h3></div>
+                        <div class="p-2 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="book-open" class="w-5 h-5"></i></div>
+                    </div>
+                    <div class="mt-4 flex items-center gap-1 text-xs text-gray-400">Sections currently running</div>
+                </div>
+
+                <!-- 4. Attendance Rate -->
+                <div class="bg-gradient-to-br from-[#48166d] to-[#2d0d45] p-5 rounded-xl shadow-lg text-white relative overflow-hidden">
+                    <div class="flex justify-between items-start relative z-10">
+                        <div><p class="text-purple-200 text-xs font-bold uppercase tracking-wider">Avg Attendance</p><h3 class="text-3xl font-bold mt-1" id="stat-rate">--%</h3></div>
+                        <div class="p-2 bg-white/10 rounded-lg"><i data-lucide="activity" class="w-5 h-5 text-mit-gold"></i></div>
+                    </div>
+                    <div class="mt-4 text-xs text-purple-200">Daily average across campus</div>
+                </div>
+            </div>
+
+            <!-- MAIN GRID -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+
+                
+                <!-- Operations (Left) -->
+                <div class="lg:col-span-2 space-y-6">
+                    <!-- Core Operations -->
+                    <div>
+                        <h3 class="text-xs font-bold text-gray-400 uppercase mb-4 tracking-wider">Core Operations</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <a href="/admin/manage_classes" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-orange-300 hover:shadow-md transition-all group"><div class="p-2 bg-orange-50 text-orange-600 rounded-lg group-hover:bg-orange-600 group-hover:text-white transition-colors"><i data-lucide="users" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-800">Class Teachers</h4><p class="text-[10px] text-gray-400">Assign Responsibilities</p></div></a>
+                            <a href="/admin/manage_coordinators" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-green-300 hover:shadow-md transition-all group"><div class="p-2 bg-green-50 text-green-600 rounded-lg group-hover:bg-green-600 group-hover:text-white transition-colors"><i data-lucide="shield-check" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-800">Roles & Permissions</h4><p class="text-[10px] text-gray-400">HOD, AMC, Event Coords</p></div></a>
+                            <a href="/admin/manage_allocations" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-teal-300 hover:shadow-md transition-all group"><div class="p-2 bg-teal-50 text-teal-600 rounded-lg group-hover:bg-teal-600 group-hover:text-white transition-colors"><i data-lucide="book-key" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-800">Subject Allocation</h4><p class="text-[10px] text-gray-400">Faculty Load & Courses</p></div></a>
+                            <a href="/admin/manage_electives" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-pink-400 hover:shadow-md transition-all group"><div class="p-2 bg-pink-50 text-pink-600 rounded-lg group-hover:bg-pink-600 group-hover:text-white transition-colors"><i data-lucide="check-square" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-700">Electives</h4><p class="text-[10px] text-gray-400">Subject Choices</p></div></a>
+                            <!-- <a href="/admin/bulk_uploads" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-gray-400 hover:shadow-md transition-all group"><div class="p-2 bg-gray-100 text-gray-600 rounded-lg group-hover:bg-gray-800 group-hover:text-white transition-colors"><i data-lucide="upload-cloud" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-800">Data Import</h4><p class="text-[10px] text-gray-400">CSV Bulk Uploads</p></div></a> -->
+                            <a href="/admin/manage_timetable" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-purple-400 hover:shadow-md transition-all group"><div class="p-2 bg-purple-50 text-purple-600 rounded-lg group-hover:bg-purple-600 group-hover:text-white transition-colors"><i data-lucide="calendar-clock" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-800">Auto-Scheduler</h4><p class="text-[10px] text-gray-400">Generate Timetables</p></div></a>
+                            <!-- uploads -->
+                            <a href="/admin/bulk_uploads" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-gray-500 hover:shadow-md transition-all group cursor-pointer"><div class="p-2 bg-gray-50 text-gray-700 rounded-lg group-hover:bg-gray-700 group-hover:text-white transition-colors"><i data-lucide="upload-cloud" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-800">Bulk Uploads</h4><p class="text-[10px] text-gray-400">Historical Data</p></div></a>
+
+                            <!-- Academic Archives (modal) -->
+                            <div onclick="openArchiveModal()" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-gray-500 hover:shadow-md transition-all group cursor-pointer">
+                                <div class="p-2 bg-gray-50 text-gray-700 rounded-lg group-hover:bg-gray-700 group-hover:text-white transition-colors">
+                                    <i data-lucide="archive" class="w-5 h-5"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-bold text-gray-800">Academic Archives</h4>
+                                    <p class="text-[10px] text-gray-400">Year & Semester View</p>
+                                </div>
+                            </div>
+
+                            <button onclick="openFeedbackManager()" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-indigo-400 hover:shadow-md transition-all group cursor-pointer"><div class="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-colors"><i data-lucide="message-square-plus" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-800">Feedback Manager</h4><p class="text-[10px] text-gray-400">Activate Survey Cycles</p></div></button>
+                            
+                        </div>
+                    </div>
+                    <!-- People -->
+                    <div>
+                        <h3 class="text-xs font-bold text-gray-400 uppercase mb-4 tracking-wider">People Management</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <a href="/admin/manage_faculty" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-purple-300 hover:shadow-md transition-all group"><div class="p-2 bg-purple-50 text-purple-600 rounded-lg group-hover:bg-purple-600 group-hover:text-white transition-colors"><i data-lucide="briefcase" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-700">Faculty Directory</h4><p class="text-[10px] text-gray-400">Add, Archive, Edit</p></div></a>
+                            <a href="/admin/student_directory" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-blue-300 hover:shadow-md transition-all group"><div class="p-2 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors"><i data-lucide="graduation-cap" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-700">Student Directory</h4><p class="text-[10px] text-gray-400">Promotions & Status</p></div></a>
+                            <a href="/admin/promotions" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-yellow-400 hover:shadow-md transition-all group"><div class="p-2 bg-yellow-50 text-yellow-600 rounded-lg group-hover:bg-yellow-500 group-hover:text-white transition-colors"><i data-lucide="trending-up" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-700">Batch Promotion and Semester Rollover</h4><p class="text-[10px] text-gray-400">End of Year Processing</p></div></a>
+                            <a href="/admin/manage_mentors" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-teal-400 hover:shadow-md transition-all group"><div class="p-2 bg-teal-50 text-teal-600 rounded-lg group-hover:bg-teal-600 group-hover:text-white transition-colors"><i data-lucide="heart-handshake" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-700">Mentors</h4><p class="text-[10px] text-gray-400">Assign Counseling</p></div></a>
+                            <!-- <a href="/admin/manage_electives" class="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-pink-400 hover:shadow-md transition-all group"><div class="p-2 bg-pink-50 text-pink-600 rounded-lg group-hover:bg-pink-600 group-hover:text-white transition-colors"><i data-lucide="check-square" class="w-5 h-5"></i></div><div><h4 class="text-sm font-bold text-gray-700">Electives</h4><p class="text-[10px] text-gray-400">Subject Choices</p></div></a> -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Activity Log (Right) -->
+                <div>
+                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden h-full flex flex-col">
+                        <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                            <h3 class="font-bold text-gray-800 text-sm flex items-center gap-2"><i data-lucide="list" class="w-4 h-4 text-gray-400"></i> Activity Log</h3>
+                            <span class="text-[10px] text-gray-400 uppercase font-bold tracking-wide bg-white px-2 py-1 rounded border">Recent</span>
+                        </div>
+                        <div id="activity-log-container" class="divide-y divide-gray-100 overflow-y-auto custom-scroll" style="height: 500px;">
+                            <div class="p-8 text-center text-gray-400 text-sm">Loading activity...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ARCHIVE MODAL -->
+    <div id="archive-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-gray-900">Academic Archives</h2>
+                <button onclick="document.getElementById('archive-modal').classList.add('hidden')" class="p-1 hover:bg-gray-100 rounded-full"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="space-y-4">
+                <div class="flex gap-2">
+                    <select id="archive-year" class="flex-1 p-2 border rounded-lg bg-white outline-none text-sm">
+                        <option value="">Loading...</option>
+                    </select>
+                    <select id="archive-sem" class="w-36 p-2 border rounded-lg bg-white outline-none text-sm" disabled>
+                        <option value="">Sem</option>
+                    </select>
+                    <button onclick="fetchArchive()" class="px-4 py-2 bg-gray-800 text-white text-sm font-bold rounded-lg hover:bg-black transition-colors">Analyze</button>
+                    <button onclick="fetchArchivedData()" class="px-4 py-2 bg-purple-700 text-white text-sm font-bold rounded-lg hover:bg-purple-800 transition-colors">View Data</button>
+                </div>
+                
+                <!-- Result Area -->
+                <div id="archive-result" class="hidden space-y-4">
+                    <p class="text-xs text-center text-gray-500 uppercase font-bold tracking-widest border-b border-gray-100 pb-2" id="arc-range">...</p>
+                    
+                    <div class="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                        <h4 class="text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-2"><i data-lucide="graduation-cap" class="w-3 h-3"></i> Student Performance</h4>
+                        <div class="grid grid-cols-2 gap-4 text-center">
+                            <div><p class="text-2xl font-black text-blue-800" id="arc-st-att">--%</p><p class="text-[10px] text-blue-600">Avg Attendance</p></div>
+                            <div><p class="text-sm font-bold text-blue-800 mt-1" id="arc-st-best">--</p><p class="text-[10px] text-blue-600">Best Class</p></div>
+                        </div>
+                    </div>
+
+                    <div class="bg-purple-50 rounded-lg p-3 border border-purple-100">
+                        <h4 class="text-xs font-bold text-purple-700 uppercase mb-2 flex items-center gap-2"><i data-lucide="briefcase" class="w-3 h-3"></i> Faculty Performance</h4>
+                        <div class="grid grid-cols-2 gap-4 text-center">
+                            <div><p class="text-2xl font-black text-purple-800" id="arc-fac-total">--</p><p class="text-[10px] text-purple-600">Sessions Held</p></div>
+                            <div><p class="text-sm font-bold text-purple-800 mt-1 truncate" id="arc-fac-top">--</p><p class="text-[10px] text-purple-600">Top Performer</p></div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        <div class="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                            <h4 class="text-xs font-bold text-gray-700 uppercase flex items-center gap-2"><i data-lucide="archive" class="w-3 h-3 text-gray-500"></i> Archived Data (Year → Semester)</h4>
+                            <span id="archived-data-meta" class="text-[10px] text-gray-500 font-bold">—</span>
+                        </div>
+                        <div class="p-3 space-y-3">
+                            <div>
+                                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Archived Allocations</p>
+                                <div class="overflow-auto border border-gray-100 rounded">
+                                    <table class="min-w-full text-sm">
+                                        <thead class="bg-gray-50">
+                                            <tr class="text-xs text-gray-500">
+                                                <th class="text-left p-2">Section</th>
+                                                <th class="text-left p-2">Subject</th>
+                                                <th class="text-left p-2">Teacher</th>
+                                                <th class="text-left p-2">Term</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="archived-allocations-body">
+                                            <tr><td colspan="4" class="p-3 text-center text-gray-400">Select year + semester, then click View Data.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div>
+                                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Archived Timetable</p>
+                                <div class="overflow-auto border border-gray-100 rounded">
+                                    <table class="min-w-full text-sm">
+                                        <thead class="bg-gray-50">
+                                            <tr class="text-xs text-gray-500">
+                                                <th class="text-left p-2">Class</th>
+                                                <th class="text-left p-2">Day</th>
+                                                <th class="text-left p-2">Time</th>
+                                                <th class="text-left p-2">Subject</th>
+                                                <th class="text-left p-2">Teacher</th>
+                                                <th class="text-left p-2">Term</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="archived-schedule-body">
+                                            <tr><td colspan="6" class="p-3 text-center text-gray-400">Select year + semester, then click View Data.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FEEDBACK MANAGER MODAL (NEW) -->
+    <div id="feedback-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-purple-800 flex items-center gap-2"><i data-lucide="message-square-plus" class="w-5 h-5"></i> Feedback Manager</h2>
+                <button onclick="document.getElementById('feedback-modal').classList.add('hidden')" class="p-1 hover:bg-gray-100 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Cycle Name</label>
+                    <input type="text" id="fb-name" placeholder="e.g. End Semester Feedback 2025" class="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Start Date</label>
+                        <input type="date" id="fb-start" class="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">End Date</label>
+                        <input type="date" id="fb-end" class="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none">
+                    </div>
+                </div>
+
+                <div class="bg-purple-50 p-3 rounded-lg border border-purple-100 text-xs text-purple-700">
+                    <i data-lucide="info" class="w-3 h-3 inline mr-1"></i> 
+                    Activating this cycle will prompt all students to submit feedback for their enrolled subjects.
+                </div>
+
+                <button onclick="createFeedbackCycle()" class="w-full py-2 bg-purple-700 text-white font-bold rounded-lg hover:bg-purple-800 transition-colors shadow-md">
+                    Activate Feedback Cycle
+                </button>
+
+                <div class="pt-3 border-t border-gray-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-xs font-bold text-gray-500 uppercase">Live Submission Status</p>
+                        <span id="fb-live-cycle" class="text-[11px] text-gray-500">--</span>
+                    </div>
+                    <div class="border border-gray-200 rounded-lg overflow-hidden">
+                        <div id="fb-live-loading" class="p-3 text-xs text-gray-400">Loading...</div>
+                        <div id="fb-live-empty" class="hidden p-3 text-xs text-gray-400">No active feedback cycle right now.</div>
+                        <table id="fb-live-table" class="hidden w-full text-sm">
+                            <thead class="bg-gray-50 text-gray-500 font-bold uppercase text-[10px]">
+                                <tr>
+                                    <th class="text-left p-2">Class</th>
+                                    <th class="text-right p-2">Submitted</th>
+                                    <th class="text-right p-2">Total</th>
+                                    <th class="text-right p-2">%</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fb-live-body" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        let studentChart = null;
+        let sidebarVisible = false; // For mobile
+        const AUTO_REFRESH_MS = 30000;
+
+        function shouldSkipAutoRefresh() {
+            if (document.hidden) return true;
+            if (window.__amsActionModalOpen) return true;
+            return !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        }
+
+        async function refreshAdminDashboard() {
+            if (shouldSkipAutoRefresh()) return;
+            await loadDashboard();
+        }
+
+        async function loadCurrentTermBadge() {
+            const el = document.getElementById('current-term-badge');
+            const ayEl = document.getElementById('academic-year-badge');
+            if (!el) return;
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                window.__amsCurrentTermInfo = data;
+                const term = (data && data.current_term) ? data.current_term : 'Not Set';
+                el.innerText = `Current Term: ${term}`;
+
+                if (ayEl) {
+                    const ay = (data && data.academic_year) ? data.academic_year : null;
+                    ayEl.innerText = ay ? `Academic Year: ${ay}` : 'Academic Year: -';
+                }
+            } catch (e) {
+                el.innerText = 'Current Term: Error';
+                if (ayEl) ayEl.innerText = 'Academic Year: Error';
+            }
+        }
+        
+        async function loadDashboard() {
+            try {
+                const res = await fetch('/api/admin/dashboard');
+                const data = await res.json();
+                document.getElementById('stat-students').innerText = data.stats.students;
+                document.getElementById('stat-staff').innerText = data.stats.staff;
+                document.getElementById('stat-classes').innerText = data.stats.classes;
+                document.getElementById('stat-rate').innerText = data.stats.attendance_rate + "%";
+            } catch(e) { console.error(e); }
+
+            try {
+                const resLog = await fetch('/api/admin/activity_log');
+                const dataLog = await resLog.json();
+                const logContainer = document.getElementById('activity-log-container');
+                if(dataLog.logs.length === 0) {
+                    logContainer.innerHTML = `<div class="p-12 text-center text-gray-400 text-sm flex flex-col items-center gap-2"><i data-lucide="clock" class="w-8 h-8 opacity-20"></i><span>No recent activity recorded.</span></div>`;
+                    lucide.createIcons();
+                } else {
+                    logContainer.innerHTML = dataLog.logs.map(log => `
+                        <div class="p-4 flex gap-3 items-start hover:bg-gray-50 transition-colors">
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center mt-1 flex-shrink-0 ${log.color}"><i data-lucide="${log.icon}" class="w-4 h-4"></i></div>
+                            <div><p class="text-sm text-gray-800 font-medium leading-tight">${log.action}</p><p class="text-xs text-gray-500 mt-0.5 leading-snug">${log.desc}</p><p class="text-[10px] text-gray-400 mt-1">${log.time}</p></div>
+                        </div>`).join('');
+                    lucide.createIcons();
+                }
+            } catch(e) { console.error("Log Error:", e); }
+        }
+        
+        // --- ARCHIVE LOGIC ---
+        let __amsArchiveTerms = null;
+        function openArchiveModal() {
+            document.getElementById('archive-modal').classList.remove('hidden');
+            loadArchiveTerms();
+        }
+
+        async function loadArchiveTerms() {
+            if (__amsArchiveTerms) return;
+
+            const yearSel = document.getElementById('archive-year');
+            const semSel = document.getElementById('archive-sem');
+            if (!yearSel || !semSel) return;
+
+            try {
+                const res = await fetch('/api/admin/archived_terms');
+                const data = await res.json();
+                __amsArchiveTerms = data;
+
+                const years = (data && data.academic_years) ? data.academic_years : [];
+                if (!years.length) {
+                    yearSel.innerHTML = `<option value="">No archived terms</option>`;
+                    semSel.innerHTML = `<option value="">Sem</option>`;
+                    semSel.disabled = true;
+                    return;
+                }
+
+                yearSel.innerHTML = years.map(y => `<option value="${y.academic_year}">${y.academic_year}</option>`).join('');
+                yearSel.onchange = () => onArchiveYearChange();
+                onArchiveYearChange();
+            } catch (e) {
+                yearSel.innerHTML = `<option value="">Error</option>`;
+                semSel.innerHTML = `<option value="">Sem</option>`;
+                semSel.disabled = true;
+            }
+        }
+
+        function onArchiveYearChange() {
+            const yearSel = document.getElementById('archive-year');
+            const semSel = document.getElementById('archive-sem');
+            if (!yearSel || !semSel) return;
+
+            const ay = yearSel.value;
+            const years = (__amsArchiveTerms && __amsArchiveTerms.academic_years) ? __amsArchiveTerms.academic_years : [];
+            const row = years.find(y => y.academic_year === ay);
+            const sems = row ? (row.semesters || []) : [];
+
+            semSel.innerHTML = `<option value="">Sem</option>` + sems.map(s => `<option value="${s}">Sem ${s}</option>`).join('');
+            semSel.disabled = sems.length === 0;
+        }
+
+        async function fetchArchive() {
+            const year = document.getElementById('archive-year').value;
+            const resDiv = document.getElementById('archive-result');
+            resDiv.classList.remove('hidden');
+
+            if (!year) {
+                showToast('Select an Academic Year first.', 'error');
+                resDiv.innerHTML = `<div class="p-8 text-center text-gray-400 border border-dashed rounded">Please select an Academic Year.</div>`;
+                return;
+            }
+            
+            try {
+                const res = await fetch(`/api/admin/archive_stats?year=${year}`);
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showToast(data.error || 'Failed to load archive stats.', 'error');
+                    resDiv.innerHTML = `<div class="p-8 text-center text-red-500 border border-dashed rounded">${data.error || 'Failed to load archive stats.'}</div>`;
+                    return;
+                }
+                
+                if (data.no_data) {
+                    resDiv.innerHTML = `<div class="p-8 text-center text-gray-400 border border-dashed rounded">No records found for ${year}.</div>`;
+                    return;
+                }
+
+                // Re-render structure if lost
+                resDiv.innerHTML = `
+                    <p class="text-xs text-center text-gray-500 uppercase font-bold tracking-widest border-b border-gray-100 pb-2">${data.date_range}</p>
+                    <div class="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                        <h4 class="text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-2"><i data-lucide="graduation-cap" class="w-3 h-3"></i> Student Performance</h4>
+                        <div class="grid grid-cols-2 gap-4 text-center">
+                            <div><p class="text-2xl font-black text-blue-800">${data.student_summary.avg_attendance}%</p><p class="text-[10px] text-blue-600">Avg Attendance</p></div>
+                            <div><p class="text-sm font-bold text-blue-800 mt-1">${data.student_summary.best_class}</p><p class="text-[10px] text-blue-600">Best Class</p></div>
+                        </div>
+                    </div>
+                    <div class="bg-purple-50 rounded-lg p-3 border border-purple-100">
+                        <h4 class="text-xs font-bold text-purple-700 uppercase mb-2 flex items-center gap-2"><i data-lucide="briefcase" class="w-3 h-3"></i> Faculty Performance</h4>
+                        <div class="grid grid-cols-2 gap-4 text-center">
+                            <div><p class="text-2xl font-black text-purple-800">${data.faculty_summary.total_sessions}</p><p class="text-[10px] text-purple-600">Sessions Held</p></div>
+                            <div><p class="text-sm font-bold text-purple-800 mt-1 truncate">${data.faculty_summary.top_performer}</p><p class="text-[10px] text-purple-600">Top Performer</p></div>
+                        </div>
+                    </div>`;
+                lucide.createIcons();
+
+            } catch(e) { resDiv.innerHTML = `<p class="text-red-500 text-center text-sm p-4">Error: ${e.message}</p>`; }
+        }
+
+        async function fetchArchivedData() {
+            const yearSel = document.getElementById('archive-year');
+            const semSel = document.getElementById('archive-sem');
+            const ay = (yearSel ? yearSel.value : '');
+            const semNo = (semSel ? semSel.value : '');
+            if (!ay) return showToast('Select an Academic Year first.', 'error');
+            if (!semNo) return showToast('Select a Semester (Sem 1 / Sem 2).', 'error');
+
+            const resDiv = document.getElementById('archive-result');
+            resDiv.classList.remove('hidden');
+
+            const meta = document.getElementById('archived-data-meta');
+            const allocBody = document.getElementById('archived-allocations-body');
+            const schedBody = document.getElementById('archived-schedule-body');
+
+            if (meta) meta.innerText = `${ay} • Sem ${semNo}`;
+            if (allocBody) allocBody.innerHTML = `<tr><td colspan="4" class="p-3 text-center text-gray-400">Loading...</td></tr>`;
+            if (schedBody) schedBody.innerHTML = `<tr><td colspan="6" class="p-3 text-center text-gray-400">Loading...</td></tr>`;
+
+            try {
+                const res = await fetch(`/api/admin/archived_data?academic_year=${encodeURIComponent(ay)}&semester_no=${encodeURIComponent(semNo)}`);
+                const data = await res.json();
+
+                const allocs = (data && data.allocations) ? data.allocations : [];
+                const sched = (data && data.schedule) ? data.schedule : [];
+
+                if (allocBody) {
+                    if (!allocs.length) {
+                        allocBody.innerHTML = `<tr><td colspan="4" class="p-3 text-center text-gray-400">No archived allocations found.</td></tr>`;
+                    } else {
+                        allocBody.innerHTML = allocs.map(a => `
+                            <tr class="border-t border-gray-50 hover:bg-gray-50">
+                                <td class="p-2 text-xs text-gray-700">${a.section_id ?? '-'}</td>
+                                <td class="p-2 text-xs text-gray-800 font-semibold">${(a.subject_code || '-') + ' • ' + (a.subject_name || '-')}</td>
+                                <td class="p-2 text-xs text-gray-700">${a.teacher_name || '-'}</td>
+                                <td class="p-2 text-[10px] text-gray-500 font-mono">${a.term_name || '-'}</td>
+                            </tr>
+                        `).join('');
+                    }
+                }
+
+                if (schedBody) {
+                    if (!sched.length) {
+                        schedBody.innerHTML = `<tr><td colspan="6" class="p-3 text-center text-gray-400">No archived timetable found.</td></tr>`;
+                    } else {
+                        schedBody.innerHTML = sched.map(s => `
+                            <tr class="border-t border-gray-50 hover:bg-gray-50">
+                                <td class="p-2 text-xs text-gray-700">${s.section_name || '-'}</td>
+                                <td class="p-2 text-xs text-gray-700">${s.day || '-'}</td>
+                                <td class="p-2 text-xs text-gray-700 font-mono">${s.time_slot || '-'}</td>
+                                <td class="p-2 text-xs text-gray-800 font-semibold">${s.subject || '-'}</td>
+                                <td class="p-2 text-xs text-gray-700">${s.teacher || '-'}</td>
+                                <td class="p-2 text-[10px] text-gray-500 font-mono">${s.term_name || '-'}</td>
+                            </tr>
+                        `).join('');
+                    }
+                }
+
+                lucide.createIcons();
+            } catch (e) {
+                if (allocBody) allocBody.innerHTML = `<tr><td colspan="4" class="p-3 text-center text-red-500">Error loading archived allocations</td></tr>`;
+                if (schedBody) schedBody.innerHTML = `<tr><td colspan="6" class="p-3 text-center text-red-500">Error loading archived timetable</td></tr>`;
+            }
+        }
+        
+        // --- POPUP LOGIC (Students) ---
+        async function toggleStudentPopup(cardElement) {
+            const popup = document.getElementById('student-popup');
+            if (!popup.classList.contains('hidden')) { popup.classList.add('hidden'); return; }
+            popup.classList.remove('hidden');
+            try {
+                const res = await fetch('/api/admin/student_distribution');
+                const data = await res.json();
+                const ctx = document.getElementById('studentChart').getContext('2d');
+                if (studentChart) studentChart.destroy();
+                studentChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(data),
+                        datasets: [{ label: 'Students', data: Object.values(data), backgroundColor: ['#48166d', '#f17736', '#00a887', '#bf9d55', '#6b7280'], borderRadius: 4 }]
+                    },
+                    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { grid: { display: false } } } }
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        function closePopup(e) { e.stopPropagation(); document.getElementById('student-popup').classList.add('hidden'); }
+        function logout() { sessionStorage.removeItem('user_id'); window.location.href = '/'; }
+        document.addEventListener('click', function(event) {
+            const popup = document.getElementById('student-popup');
+            const card = document.getElementById('student-card');
+            if (!popup.classList.contains('hidden') && !popup.contains(event.target) && !card.contains(event.target)) { popup.classList.add('hidden'); }
+        });
+
+        // --- NEW: FEEDBACK MANAGER ---
+        function openFeedbackManager() {
+            document.getElementById('feedback-modal').classList.remove('hidden');
+            loadFeedbackLiveStatus();
+        }
+
+        async function loadFeedbackLiveStatus() {
+            const loading = document.getElementById('fb-live-loading');
+            const empty = document.getElementById('fb-live-empty');
+            const table = document.getElementById('fb-live-table');
+            const body = document.getElementById('fb-live-body');
+            const cycleEl = document.getElementById('fb-live-cycle');
+
+            if (loading) loading.classList.remove('hidden');
+            if (empty) empty.classList.add('hidden');
+            if (table) table.classList.add('hidden');
+            if (body) body.innerHTML = '';
+            if (cycleEl) cycleEl.textContent = '--';
+
+            try {
+                const res = await fetch('/api/admin/feedback_status');
+                const data = await res.json();
+
+                if (loading) loading.classList.add('hidden');
+
+                if (!res.ok) {
+                    if (empty) { empty.textContent = (data && data.error) ? data.error : 'Unable to load feedback status.'; empty.classList.remove('hidden'); }
+                    return;
+                }
+
+                if (!data.active) {
+                    if (empty) empty.classList.remove('hidden');
+                    return;
+                }
+
+                if (cycleEl) cycleEl.textContent = data.cycle_name ? data.cycle_name : '--';
+
+                const rows = (data.sections || []).map(s => {
+                    const submitted = s.submitted_students ?? 0;
+                    const total = s.total_students ?? 0;
+                    const pct = s.percentage ?? 0;
+                    return `
+                        <tr>
+                            <td class="p-2 text-gray-700 font-semibold">${s.class || '--'}</td>
+                            <td class="p-2 text-right text-gray-700">${submitted}</td>
+                            <td class="p-2 text-right text-gray-700">${total}</td>
+                            <td class="p-2 text-right text-gray-700">${pct}%</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                if (body) body.innerHTML = rows || `<tr><td colspan="4" class="p-3 text-center text-gray-400 text-xs">No student data found.</td></tr>`;
+                if (table) table.classList.remove('hidden');
+            } catch (e) {
+                if (loading) loading.classList.add('hidden');
+                if (empty) { empty.textContent = 'Unable to load feedback status.'; empty.classList.remove('hidden'); }
+            }
+        }
+        
+        async function createFeedbackCycle() {
+            const name = document.getElementById('fb-name').value;
+            const start = document.getElementById('fb-start').value;
+            const end = document.getElementById('fb-end').value;
+            
+            if(!name || !start || !end) return showToast("Please fill all fields.", "error");
+            
+            try {
+                const res = await fetch('/api/admin/create_feedback_cycle', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name: name, start_date: start, end_date: end, is_active: true })
+                });
+
+                const data = await res.json();
+                if(res.ok) {
+                    showToast("Feedback Cycle Activated!");
+                    loadFeedbackLiveStatus();
+                } else {
+                    showToast((data && data.error) ? data.error : "Failed to create cycle.", "error");
+                }
+            } catch(e) { showToast("Error", "error"); }
+        }
+
+        // --- SIDEBAR TOGGLE ---
+        function toggleSidebar() {
+            const body = document.body;
+            sidebarVisible = !sidebarVisible;
+            if (sidebarVisible) {
+                body.classList.add('sidebar-open');
+            } else {
+                body.classList.remove('sidebar-open');
+            }
+        }
+
+        loadDashboard();
+        loadCurrentTermBadge();
+        // Auto-refresh is disabled globally.
+    </script>
+</body>
+</html>

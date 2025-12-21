@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Staff Dashboard - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PDF Libs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- 1. AutoAnimate (For Lists) -->
+    <script src="https://cdn.jsdelivr.net/npm/@formkit/auto-animate@0.8.1/index.global.min.js"></script>
+    
+    <!-- 2. GSAP (For Page Entrance) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .serif { font-family: 'Merriweather', serif; }
+        
+        .mit-purple { color: #48166d; } .mit-bg-purple { background-color: #48166d; }
+        .mit-teal { color: #00a887; } .mit-bg-teal { background-color: #00a887; }
+        
+        /* Modern Scrollbar */
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Animations */
+        .hover-lift { transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s; }
+        .hover-lift:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        
+        .aurora-text { background: linear-gradient(90deg, #48166d, #f17736, #00a887); background-size: 200% auto; background-clip: text; -webkit-background-clip: text; color: transparent; animation: aurora 3s infinite linear; font-weight: 800; }
+        @keyframes aurora { 0% { background-position: 0% 50%; } 100% { background-position: 100% 50%; } }
+
+        /* Loader */
+        .loader-bar { height: 4px; width: 100%; background: linear-gradient(90deg, #48166d, #f17736, #00a887); background-size: 200% 100%; animation: aurora 1.5s linear infinite; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+ 
+    <!-- NAV -->
+    <nav class="bg-white border-b border-gray-200 sticky top-0 z-50 h-16 shadow-sm">
+        <div id="global-loader" class="absolute top-0 left-0 w-full h-1 aurora-bar hidden z-50"></div>
+        <div class="max-w-7xl mx-auto px-4 h-full relative flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-10 w-auto" onerror="this.style.display='none'">
+                <span class="hidden sm:block font-bold text-lg mit-purple serif tracking-tight"></span>
+            </div>
+            <div class="ml-auto mr-4">
+                {% include '_notifications.html' %}
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="text-right hidden sm:block"><p id="nav-user-name" class="text-xs font-bold aurora-text">Loading...</p><p id="current-date" class="text-[10px] text-gray-400 font-mono">Loading term...</p></div>
+                <button onclick="logout()" class="p-2 text-gray-400 hover:text-red-600 transition-colors"><i data-lucide="log-out" class="w-5 h-5"></i></button>
+            </div>
+        </div>
+
+        
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
+        
+        <!-- 1. PROFILE & STATS -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Profile -->
+            <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex items-center gap-5 relative overflow-hidden">
+                <div class="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-purple-600 to-blue-600"></div>
+                <div class="w-16 h-16 rounded-full bg-purple-50 flex items-center justify-center text-2xl font-bold mit-purple border-2 border-white shadow-sm" id="avatar-initial">U</div>
+                <div>
+                    <h2 class="text-lg font-bold text-gray-800" id="profile-name">...</h2>
+                    <p class="text-xs text-gray-500 uppercase tracking-wider" id="profile-dept">...</p>
+                </div>
+            </div>
+            <!-- Load -->
+            <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex justify-between items-center">
+                <div><p class="text-xs text-gray-400 font-bold uppercase">Weekly Load</p><h3 class="text-3xl font-black mit-purple mt-1" id="stat-classes">--</h3></div>
+                <div class="p-3 bg-purple-50 rounded-full text-purple-600"><i data-lucide="bar-chart-2" class="w-6 h-6"></i></div>
+            </div>
+            <!-- Attendance -->
+            <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex justify-between items-center">
+                <div><p class="text-xs text-gray-400 font-bold uppercase">Avg Attendance</p><h3 class="text-3xl font-black mit-teal mt-1" id="stat-attendance">--%</h3></div>
+                <div class="p-3 bg-teal-50 rounded-full text-teal-600"><i data-lucide="users" class="w-6 h-6"></i></div>
+            </div>
+        </div>
+
+        <!-- 2. SCHEDULE & ASSIGNED COURSES -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- LEFT: SCHEDULE -->
+            <div class="lg:col-span-2 space-y-6">
+                
+                <!-- Today -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 relative overflow-hidden">
+                    <div class="absolute top-0 left-0 w-1 h-full mit-bg-purple"></div>
+                    <div class="flex justify-between mb-6 items-center"><h2 class="text-lg font-bold flex items-center gap-2 mit-purple"><i data-lucide="calendar-clock" class="w-5 h-5"></i> Today's Classes</h2><span class="text-xs font-bold px-3 py-1 bg-purple-50 mit-purple rounded-full">Today</span></div>
+                    <div id="schedule-container" class="space-y-4"><div class="h-16 w-full aurora-loader"></div></div>
+                </div>
+
+                <!-- Upcoming (Fixed Height Scrollable) -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <button onclick="toggleUpcoming()" class="w-full flex justify-between p-5 hover:bg-gray-50 transition-colors group">
+                        <div class="flex items-center gap-3"><div class="p-2 bg-gray-100 rounded-lg group-hover:bg-purple-50"><i data-lucide="calendar-days" class="w-5 h-5 text-gray-500 group-hover:mit-purple"></i></div><h2 class="text-md font-semibold text-gray-700 group-hover:mit-purple">Upcoming Schedule</h2></div>
+                        <div class="flex items-center gap-3"><span id="upcoming-count" class="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-1 rounded-full">0</span><i id="upcoming-icon" data-lucide="chevron-down" class="w-5 h-5 text-gray-400 transition-transform duration-300"></i></div>
+                    </button>
+                    <!-- UPDATED WRAPPER: Limits height to prevent layout shift -->
+                    <div id="upcoming-wrapper" class="hidden border-t border-gray-100 bg-gray-50/30 p-2">
+                        <div id="upcoming-days" class="flex flex-wrap gap-2 p-2"></div>
+                        <div id="upcoming-container" class="space-y-3 max-h-64 overflow-y-auto custom-scroll p-2"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- RIGHT: ASSIGNED COURSES -->
+<!-- RIGHT: ASSIGNED COURSES -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit flex flex-col">
+                <div class="flex justify-between mb-4 items-center">
+                    <h2 class="text-sm font-bold flex items-center gap-2 text-gray-700 uppercase tracking-wider">
+                        <i data-lucide="book-open-check" class="w-4 h-4 mit-teal"></i> Assigned Subjects
+                    </h2>
+                    <!-- NEW BUTTON -->
+                    <div class="flex gap-2">
+                        <button onclick="window.location.href='/staff/lesson_plan'" class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-bold shadow-sm transition-transform active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
+                            <i data-lucide="book" class="w-4 h-4"></i> Syllabus
+                        </button>
+                        <button onclick="window.location.href='/staff/marks_entry'" class="text-xs bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 font-bold shadow-sm transition-transform active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
+                            <i data-lucide="calculator" class="w-4 h-4"></i> Enter Marks
+                        </button>
+                    </div>
+                </div>
+                <div id="subjects-container" class="space-y-3 flex-grow overflow-y-auto custom-scroll pr-1" style="max-height: 400px;">
+                    <div class="h-12 w-full aurora-loader"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. MANAGEMENT GRID (History & Roles) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" id="management-grid">
+            
+            <!-- A. Session History (CLICKABLE) -->
+            <div onclick="openHistoryModal()" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 lg:col-span-1 cursor-pointer hover:shadow-md hover:border-teal-200 transition-all group">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="history" class="w-4 h-4 text-teal-500"></i> Session History</h3>
+                    <i data-lucide="external-link" class="w-3 h-3 text-gray-400 group-hover:text-teal-600"></i>
+                </div>
+                <div id="history-container" class="space-y-2 max-h-48 overflow-y-auto custom-scroll pr-1 pointer-events-none"></div>
+            </div>
+
+            <!-- B. Role Widgets (Injected) -->
+            <div id="role-widgets-wrapper" class="contents"></div>
+        </div>
+
+    </main>
+
+
+    <!-- MODALS -->
+
+<!-- History Modal (NEW) -->
+    <div id="history-modal" class="fixed inset-0 bg-black/50 hidden z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-3xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div><h2 class="text-xl font-bold mit-teal serif">Session History</h2><p class="text-xs text-gray-500">Complete Log of Conducted Classes</p></div>
+                <button onclick="amsMarkModalClosed(); document.getElementById('history-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            <div class="flex-grow overflow-auto p-0">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-gray-100 text-gray-600 font-bold sticky top-0 z-10">
+                        <tr><th class="p-4">Date & Time</th><th class="p-4">Subject & Class</th><th class="p-4 text-right">Attendance</th></tr>
+                    </thead>
+                    <tbody id="full-history-list" class="divide-y divide-gray-100">
+                        <tr><td colspan="3" class="p-8 text-center text-gray-400">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Meeting Scheduler Modal (NEW) -->
+    <div id="meeting-modal" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm transform scale-100 transition-all">
+            <div class="flex justify-between items-center mb-5">
+                <h3 class="font-bold text-lg text-gray-900 serif">Schedule Meeting</h3>
+                <button onclick="amsMarkModalClosed(); document.getElementById('meeting-modal').classList.add('hidden')" class="p-1 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Date</label>
+                    <input type="date" id="meet-date" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Time</label>
+                    <input type="time" id="meet-time" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Agenda</label>
+                    <input type="text" id="meet-agenda" placeholder="e.g. Mid-term Review" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+                </div>
+                
+                <button onclick="confirmSchedule()" class="w-full py-2.5 bg-teal-600 text-white font-bold rounded-lg hover:bg-teal-700 shadow-md transition-colors mt-2">
+                    Confirm Schedule
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Existing Modals -->
+    <!-- REPORT MODAL -->
+    <div id="report-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div id="report-modal-loader" class="w-full h-1 aurora-bar hidden"></div>
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div><h2 class="text-xl font-bold mit-purple serif" id="report-modal-title">Report</h2><p class="text-xs text-gray-500" id="report-modal-subtitle">...</p></div>
+                <div class="flex gap-3">
+                    <button onclick="generatePDF()" class="px-4 py-2 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 flex items-center gap-2 shadow-sm"><i data-lucide="file-down" class="w-4 h-4"></i> PDF</button>
+                    <button onclick="closeModal()" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+                </div>
+            </div>
+            <div class="flex-grow overflow-auto p-0" id="report-content"><table class="w-full text-left text-sm border-collapse" id="report-table"><thead class="bg-gray-100 text-gray-600 font-bold sticky top-0 z-10"><tr id="report-modal-header-row"></tr></thead><tbody id="report-modal-body" class="divide-y divide-gray-100"></tbody></table></div>
+        </div>
+    </div>
+    <div id="summary-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm"><div class="bg-white w-full max-w-[95%] h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"><div id="summary-loader" class="w-full h-1 aurora-bar hidden"></div><div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50"><div><h2 class="text-xl font-bold mit-purple serif">Overall Class Summary</h2><p class="text-xs text-gray-500">Cumulative Attendance Report</p></div><div class="flex gap-2"><button onclick="downloadSummaryPDF()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg flex items-center gap-2"><i data-lucide="file-down" class="w-4 h-4"></i> Download PDF</button><button onclick="amsMarkModalClosed(); document.getElementById('summary-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button></div></div><div class="flex-grow overflow-auto p-0"><table class="w-full text-left text-sm border-collapse" id="summary-table"><thead class="bg-gray-100 text-gray-600 font-bold sticky top-0 z-10 shadow-sm"><tr id="summary-header"></tr></thead><tbody id="summary-body" class="divide-y divide-gray-100"></tbody></table></div></div></div>
+
+    <div id="mentee-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div><h2 class="text-xl font-bold mit-teal serif">My Mentees</h2><p class="text-xs text-gray-500">Student Monitoring & Meetings</p></div>
+                <button onclick="closeModal()" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            
+            <!-- MEETING TRACKER (Injected Here) -->
+            <div class="px-6 py-4 bg-teal-50 border-b border-teal-100 flex flex-col gap-3">
+                <div class="flex justify-between items-end">
+                    <div><h4 class="text-xs font-bold text-teal-800 uppercase tracking-wider mb-1">Batch Progress</h4><p class="text-sm font-bold text-teal-600" id="meeting-count-text">Loading...</p></div>
+                    <button onclick="openMeetingScheduler()" class="bg-teal-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-teal-700 shadow-sm flex items-center gap-2"><i data-lucide="calendar-plus" class="w-3 h-3"></i> Schedule Meeting</button>
+                </div>
+                <div class="w-full bg-teal-200/50 rounded-full h-2"><div id="meeting-progress-bar" class="bg-teal-600 h-2 rounded-full transition-all duration-1000" style="width: 0%"></div></div>
+                <div class="flex gap-2 flex-wrap" id="meeting-history"></div>
+            </div>
+
+            <div class="flex-grow overflow-auto p-0">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-gray-100 text-gray-600 font-bold sticky top-0 z-10"><tr><th class="p-4">Name</th><th class="p-4">Class & Batch</th><th class="p-4 text-right">Attendance</th></tr></thead>
+                    <tbody id="mentee-list" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+
+    
+
+    <!-- Counseling Log Modal -->
+    <div id="counseling-modal" class="fixed inset-0 bg-black/50 hidden z-[60] flex items-center justify-center p-4 backdrop-blur-sm"><div class="bg-white w-full max-w-4xl h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"><div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50"><div><h2 class="text-xl font-bold mit-purple serif">Counseling Log for: <span id="log-student-name">...</span></h2><p class="text-xs text-gray-500">Record interventions.</p></div><button onclick="amsMarkModalClosed(); document.getElementById('counseling-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button></div><div class="flex-grow flex overflow-hidden"><div class="w-1/2 border-r border-gray-200 overflow-y-auto p-4 space-y-4 bg-gray-50"><h3 class="text-sm font-bold text-gray-500 uppercase">History</h3><div id="log-history-timeline"><p class="text-gray-400 text-xs">Fetching...</p></div></div><div class="w-1/2 overflow-y-auto p-6 flex flex-col"><h3 class="text-sm font-bold text-purple-700 uppercase mb-4">Add New Session</h3><form id="log-form" onsubmit="submitMentorLog(event)" class="space-y-4 flex-grow flex flex-col"><input type="hidden" id="log-student-id"><input type="hidden" id="log-mentor-id"><div><label class="block text-xs font-bold text-gray-500 uppercase">Category</label><select id="log-category" class="w-full p-2 border rounded text-sm bg-white" required><option value="Academic">Academic (Attendance, Grades)</option><option value="Disciplinary">Disciplinary/Behavioral</option><option value="Personal">Personal/Wellness</option></select></div><div><label class="block text-xs font-bold text-gray-500 uppercase">Remarks / Issue Summary</label><textarea id="log-remarks" rows="3" class="w-full p-2 border rounded text-sm resize-none" required></textarea></div><div><label class="block text-xs font-bold text-gray-500 uppercase">Action Taken / Resolution</label><textarea id="log-action" rows="3" class="w-full p-2 border rounded text-sm resize-none"></textarea></div><button type="submit" class="mt-auto py-2 bg-purple-600 text-white font-bold rounded hover:bg-purple-700">Record Session</button></form></div></div></div></div>
+
+    <!-- LOAD ADJUSTMENT MODAL -->
+    <div id="adjust-modal" class="hidden fixed inset-0 bg-black/50 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
+            <div class="p-5 border-b border-gray-100 bg-purple-50 flex justify-between items-center">
+                <h3 class="font-bold text-purple-800">Request Load Adjustment</h3>
+                <button onclick="closeModal()" class="p-1 hover:bg-purple-100 rounded-full"><i data-lucide="x" class="w-5 h-5 text-purple-500"></i></button>
+            </div>
+            
+            <div class="p-6 space-y-4">
+                <input type="hidden" id="adj-req-id"> <!-- My Slot ID -->
+                <input type="hidden" id="adj-req-date"> <!-- My Slot Date -->
+
+                <!-- Step 1: Select Replacement -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Find Substitute (Same Class)</label>
+                    <button onclick="findFacultyForAdjustment()" class="w-full py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 flex justify-center gap-2">
+                        <i data-lucide="search" class="w-4 h-4"></i> Search Available Faculty
+                    </button>
+                    <div id="adj-faculty-list" class="mt-2 space-y-2 max-h-40 overflow-y-auto hidden border rounded p-2"></div>
+                </div>
+
+                <!-- Step 2: Select Swap Slot (Hidden until faculty selected) -->
+                <div id="adj-swap-section" class="hidden">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Select Slot to Take (Compensation)</label>
+                    <select id="adj-swap-slot" class="w-full p-2 border rounded-lg text-sm outline-none bg-white">
+                        <option value="">-- Select Their Slot --</option>
+                    </select>
+                    <div class="mt-2">
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Compensation Date</label>
+                        <input type="date" id="adj-swap-date" class="w-full p-2 border rounded-lg text-sm">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Reason</label>
+                    <input type="text" id="adj-reason" class="w-full p-2 border rounded-lg text-sm" placeholder="e.g. Medical Emergency">
+                </div>
+
+                <button onclick="submitAdjustment()" class="w-full py-2 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 shadow-md">Send Request</button>
+            </div>
+        </div>
+    </div>
+
+    {% include '_toast_modal.html' %}
+
+    <!-- Parent Tooltip -->
+    <div id="parent-tooltip" class="hidden absolute z-[9999] w-64 bg-white rounded-xl shadow-2xl border border-blue-100 p-4 pointer-events-none tooltip-enter"></div>
+
+    <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let reportMeta = {}; let summaryMeta = {}; let menteeDataMap = {};
+        let currentBatchId = null;
+        let __amsCurrentTermInfo = null;
+        let __amsUpcomingSchedule = [];
+        let __amsUpcomingSelectedDay = null;
+        const AUTO_REFRESH_MS = 30000;
+        const AUTO_REFRESH_GRACE_AFTER_MODAL_CLOSE_MS = 8000;
+        let __amsLastModalClosedAt = 0;
+
+        function amsMarkModalClosed() {
+            __amsLastModalClosedAt = Date.now();
+        }
+
+
+        function amsFormatDateISO(d) {
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+
+        function amsDayIndex(name) {
+            const map = { 'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6 };
+            return map[name] ?? 7;
+        }
+
+        function amsNextOccurrenceISO(dayName) {
+            // Returns the next occurrence (including next week if same day)
+            const targetIdx = amsDayIndex(dayName);
+            const now = new Date();
+            // JS: Sunday=0..Saturday=6 -> convert to Monday=0..Sunday=6
+            const todayIdx = (now.getDay() + 6) % 7;
+            let delta = (targetIdx - todayIdx + 7) % 7;
+            if (delta === 0) delta = 7;
+            const d = new Date(now);
+            d.setDate(now.getDate() + delta);
+            return amsFormatDateISO(d);
+        }
+
+        function selectUpcomingDay(day) {
+            __amsUpcomingSelectedDay = day;
+            renderUpcomingDays();
+            renderUpcomingSessions();
+        }
+
+        function renderUpcomingDays() {
+            const daysWrap = document.getElementById('upcoming-days');
+            if (!daysWrap) return;
+
+            const uniqueDays = [];
+            const seen = new Set();
+            const dayToDateLabel = {};
+            for (const s of (__amsUpcomingSchedule || [])) {
+                const d = s && s.day ? String(s.day) : '';
+                if (!d || seen.has(d)) continue;
+                seen.add(d);
+                uniqueDays.push(d);
+                if (s && s.date_display) dayToDateLabel[d] = String(s.date_display);
+            }
+
+            if (uniqueDays.length === 0) {
+                daysWrap.innerHTML = '';
+                return;
+            }
+
+            if (!__amsUpcomingSelectedDay || !seen.has(__amsUpcomingSelectedDay)) {
+                __amsUpcomingSelectedDay = uniqueDays[0];
+            }
+
+            daysWrap.innerHTML = uniqueDays.map((d) => {
+                const isActive = d === __amsUpcomingSelectedDay;
+                const base = 'px-3 py-1.5 rounded-full text-xs font-bold border transition-colors';
+                const active = 'bg-purple-600 text-white border-purple-600';
+                const inactive = 'bg-white text-gray-600 border-gray-200 hover:border-purple-200 hover:text-purple-700';
+                const dayShort = String(d).substring(0, 3);
+                const dateLabel = dayToDateLabel[d] ? ` ${dayToDateLabel[d]}` : '';
+                const label = `${dayShort}${dateLabel}`;
+                return `<button type="button" onclick="selectUpcomingDay('${String(d).replace(/'/g, "\\'")}')" class="${base} ${isActive ? active : inactive}">${label}</button>`;
+            }).join('');
+        }
+
+        function renderUpcomingSessions() {
+            const upList = document.getElementById('upcoming-container');
+            if (!upList) return;
+
+            const selected = __amsUpcomingSelectedDay;
+            const rows = (__amsUpcomingSchedule || []).filter((u) => (u && u.day) === selected);
+
+            if (!rows.length) {
+                upList.innerHTML = `<p class="text-center text-gray-400 text-xs">No scheduled sessions for ${selected || 'this day'}.</p>`;
+                return;
+            }
+
+            upList.innerHTML = rows.map((u) => {
+                const dayShort = (u.day || '').toString().substring(0, 3);
+                const safeTime = (u.time || '').toString();
+                const timeStart = safeTime.includes(' - ') ? safeTime.split(' - ')[0] : safeTime;
+                const dateISO = u && u.date_iso ? String(u.date_iso) : amsNextOccurrenceISO(u.day);
+                const dateDisplay = u && u.date_display ? String(u.date_display) : '';
+                const subject = (u.subject || '').toString();
+                const cls = (u.class || '').toString();
+                const adj = u && u.adjustment ? u.adjustment : null;
+                let rightControls = '';
+                if (adj && adj.kind === 'out' && adj.role === 'requester') {
+                    const label = (adj.status === 'Approved') ? 'Adjusted' : 'Request Sent';
+                    const swapSub = (adj.swap && adj.swap.subject) ? ` • ${amsEscapeHtml(String(adj.swap.subject))}` : '';
+                    const swapTo = swapSub ? `<span class="mt-1 inline-flex text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">Swapped To${swapSub}</span>` : '';
+                    rightControls = `<button class="mt-1 text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200 cursor-not-allowed" disabled>${label}</button>${swapTo}`;
+                } else if (adj && (adj.kind === 'in' || (adj.kind === 'out' && adj.status === 'Approved'))) {
+                    const label = (adj.kind === 'in') ? 'Swapped In' : 'Swapped';
+                    const partner = adj.partner_name ? ` • ${amsEscapeHtml(adj.partner_name)}` : '';
+                    rightControls = `<span class="mt-1 inline-flex text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">${label}${partner}</span>`;
+                } else {
+                    rightControls = `<button onclick="openAdjustmentModal(${u.id}, '${dateISO}')" class="mt-1 text-[10px] font-bold text-purple-600 hover:underline bg-purple-50 px-2 py-0.5 rounded border border-purple-100">Adjust</button>`;
+                }
+
+                return `
+                <div class="flex justify-between items-center p-3 border-b border-gray-50 last:border-0 hover:bg-gray-50 rounded-lg transition-colors">
+                    <div>
+                        <span class="text-[10px] font-bold text-gray-400 uppercase bg-gray-100 px-1.5 py-0.5 rounded">${dayShort}</span>
+                        <p class="text-xs font-bold text-gray-700 mt-1">${subject}</p>
+                        ${cls ? `<p class="text-[10px] text-gray-400 font-bold uppercase mt-0.5">${cls}</p>` : ''}
+                    </div>
+                    <div class="text-right">
+                        <p class="text-[10px] font-mono text-gray-500">${timeStart}${dateDisplay ? ` • ${dateDisplay}` : ''}</p>
+                        ${rightControls}
+                    </div>
+                </div>`;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        function shouldSkipAutoRefresh() {
+            if (document.hidden) return true;
+            if (window.__amsActionModalOpen) return true;
+            if (__amsLastModalClosedAt && (Date.now() - __amsLastModalClosedAt) < AUTO_REFRESH_GRACE_AFTER_MODAL_CLOSE_MS) return true;
+            // Generic catch-all for dashboard overlays
+            return !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        }
+
+        async function refreshStaffDashboard(opts = {}) {
+            const force = !!opts.force;
+            if (!force && shouldSkipAutoRefresh()) return;
+            try {
+                const response = await fetch(`/api/staff/dashboard?user_id=${userId}`);
+                if (!response.ok) return;
+                const data = await response.json();
+                renderDashboard(data);
+            } catch (e) {
+                console.error('Auto-refresh failed:', e);
+            }
+        }
+
+        async function loadCurrentTermNav() {
+            const el = document.getElementById('current-date');
+            if (!el) return;
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                __amsCurrentTermInfo = data;
+                const ay = data && data.academic_year ? data.academic_year : null;
+                const sem = data && data.semester ? data.semester : null;
+                if (ay && sem) el.innerText = `AY ${ay} • ${sem}`;
+                else if (data && data.current_term) el.innerText = data.current_term;
+                else el.innerText = '-';
+            } catch (e) {
+                el.innerText = '-';
+            }
+        }
+
+        function amsGetAcademicTermLine(meta) {
+            const ayRaw = (meta && meta.year) ? meta.year : (__amsCurrentTermInfo && __amsCurrentTermInfo.academic_year);
+            const semRaw = (meta && meta.semester) ? meta.semester : (__amsCurrentTermInfo && __amsCurrentTermInfo.semester);
+            const ay = (ayRaw || '').toString().trim();
+            const sem = (semRaw || '').toString().trim();
+            if (ay && sem) {
+                const semLabel = sem.toLowerCase().includes('sem') ? sem : `Sem ${sem}`;
+                return `Academic Year: ${ay} | ${semLabel}`;
+            }
+            if (__amsCurrentTermInfo && __amsCurrentTermInfo.current_term) {
+                return `Academic Term: ${__amsCurrentTermInfo.current_term}`;
+            }
+            return '';
+        }
+
+        function amsDrawPdfHeader(doc, title, subLines, metaLine) {
+            const margin = 14;
+            const pageW = doc.internal.pageSize.getWidth();
+            const logoImg = document.getElementById('mit-logo-img');
+
+            let logoH = 20;
+            let logoW = 20;
+            if (logoImg && logoImg.naturalWidth && logoImg.naturalHeight) {
+                logoW = logoH * (logoImg.naturalWidth / logoImg.naturalHeight);
+            }
+            const logoX = pageW - margin - logoW;
+            const logoY = 10;
+
+            const leftX = margin;
+            const maxW = Math.max(60, logoX - leftX - 6);
+
+            let y = 16;
+            doc.setTextColor(0, 0, 0);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            const uniLines = doc.splitTextToSize('MIT Art, Design and Technology University, Pune', maxW);
+            doc.text(uniLines, leftX, y);
+            y += uniLines.length * 6;
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            (subLines || []).forEach((line) => {
+                const parts = doc.splitTextToSize(String(line || ''), maxW);
+                doc.text(parts, leftX, y);
+                y += parts.length * 5;
+            });
+
+            if (title) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(11);
+                const tLines = doc.splitTextToSize(String(title), maxW);
+                doc.text(tLines, leftX, y);
+                y += tLines.length * 5;
+            }
+
+            if (metaLine) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                const mLines = doc.splitTextToSize(String(metaLine), maxW);
+                doc.text(mLines, leftX, y);
+                y += mLines.length * 4.5;
+            }
+
+            if (logoImg && logoImg.src) {
+                doc.addImage(logoImg, 'PNG', logoX, logoY, logoW, logoH);
+            }
+
+            const headerBottom = Math.max(y + 2, logoY + logoH + 2);
+            doc.setDrawColor(191, 157, 85);
+            doc.setLineWidth(0.6);
+            doc.line(margin, headerBottom, pageW - margin, headerBottom);
+            return headerBottom + 6;
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (!userId) { window.location.href = '/'; return; }
+            loadCurrentTermNav();
+            document.getElementById('global-loader').classList.remove('hidden');
+            try {
+                const response = await fetch(`/api/staff/dashboard?user_id=${userId}`);
+                if (!response.ok) throw new Error('API Error');
+                const data = await response.json();
+                renderDashboard(data);
+                animateDashboard();
+            } catch (e) { console.error(e); showToast("Session Error", "error"); window.location.href = '/'; }
+            finally { document.getElementById('global-loader').classList.add('hidden'); }
+        });
+
+        // Auto-refresh is disabled globally.
+
+        function renderDashboard(data) {
+            document.getElementById('nav-user-name').innerText = data.profile.name;
+            document.getElementById('profile-name').innerText = data.profile.name;
+            document.getElementById('profile-dept').innerText = data.profile.dept;
+            document.getElementById('avatar-initial').innerText = data.profile.name.charAt(0);
+            document.getElementById('stat-classes').innerText = data.profile.stats.weekly_classes;
+            document.getElementById('stat-attendance').innerText = data.profile.stats.avg_attendance;
+
+            const todayISO = new Date().toISOString().split('T')[0];
+
+            // Today
+            const list = document.getElementById('schedule-container');
+            if (data.widgets.today_schedule.length === 0) list.innerHTML = `<div class="p-8 text-center text-gray-400 text-sm">No classes scheduled today.</div>`;
+            else list.innerHTML = data.widgets.today_schedule.map(c => {
+                let typeBadge = c.batch 
+                    ? `<span class="ml-2 text-[10px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded border border-green-200 flex items-center gap-1"><i data-lucide="flask-conical" class="w-3 h-3"></i> ${c.type} • ${c.batch}</span>`
+                    : `<span class="ml-2 text-[10px] font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100">${c.type || 'Lecture'}</span>`;
+                const adj = c && c.adjustment ? c.adjustment : null;
+                const isSwapOutApproved = !!(adj && adj.status === 'Approved' && adj.kind === 'out');
+
+                let swapTag = '';
+                let swapToTag = '';
+                if (adj && (adj.kind === 'in' || adj.kind === 'out')) {
+                    const label = (adj.kind === 'in') ? 'Swapped In' : (adj.status === 'Approved') ? 'Adjusted' : 'Swapped';
+                    const partner = adj.partner_name ? ` • ${amsEscapeHtml(adj.partner_name)}` : '';
+                    swapTag = `<span class="ml-2 text-[10px] font-bold bg-purple-50 text-purple-700 px-2 py-0.5 rounded border border-purple-100">${label}${partner}</span>`;
+
+                    if (adj.kind === 'out' && adj.status === 'Approved' && adj.swap && adj.swap.subject) {
+                        const swapSub = amsEscapeHtml(String(adj.swap.subject));
+                        const swapDay = adj.swap.day ? String(adj.swap.day).substring(0, 3) : '';
+                        const swapDate = adj.swap.date_display ? String(adj.swap.date_display) : '';
+                        const swapWhen = (swapDay || swapDate) ? ` • ${amsEscapeHtml(`${swapDay}${swapDay && swapDate ? ' ' : ''}${swapDate}`)}` : '';
+                        swapToTag = `<span class="ml-2 text-[10px] font-bold bg-purple-50 text-purple-700 px-2 py-0.5 rounded border border-purple-100">Swapped To • ${swapSub}${swapWhen}</span>`;
+                    }
+                }
+
+                const actionBtn = (() => {
+                    if (isSwapOutApproved) {
+                        return `<button class="px-4 py-2 bg-gray-100 text-gray-500 text-xs font-bold rounded-lg cursor-not-allowed" disabled>Adjusted</button>`;
+                    }
+                    if (c.status !== 'Pending') {
+                        return `<button class="px-4 py-2 bg-gray-100 text-gray-500 text-xs font-bold rounded-lg cursor-default">Done</button>`;
+                    }
+                    const dateForRow = (c && c.date_iso) ? String(c.date_iso) : todayISO;
+                    return `<button onclick="window.location.href='/staff/mark_attendance?schedule_id=${c.id}&date=${dateForRow}'" class="px-4 py-2 bg-purple-600 text-white text-xs font-bold uppercase rounded-lg hover:bg-purple-700 shadow-md">Mark</button>`;
+                })();
+
+                const leftBorder = isSwapOutApproved ? 'border-l-gray-300' : (c.status === 'Done' ? 'border-l-green-500' : 'border-l-purple-500');
+                return `<div class="flex justify-between items-center p-4 bg-white border border-gray-100 rounded-xl hover:border-purple-200 transition-all border-l-4 ${leftBorder}"><div><div class="flex items-center mb-1"><h4 class="font-bold text-sm text-gray-800">${c.subject}</h4>${typeBadge}${swapTag}${swapToTag}</div><p class="text-xs text-gray-500 font-mono flex items-center gap-2"><i data-lucide="clock" class="w-3 h-3"></i> ${c.time.split(' - ')[0]} <span class="text-gray-300">|</span> <span class="font-bold text-gray-600">${c.class}</span></p></div>${actionBtn}</div>`;
+            }).join('');
+
+            // Upcoming
+            const upcomingRaw = (data.widgets && Array.isArray(data.widgets.upcoming_schedule)) ? data.widgets.upcoming_schedule : [];
+            __amsUpcomingSchedule = upcomingRaw.slice().sort((a, b) => {
+                const ak = (a && typeof a.sort_key === 'number') ? a.sort_key : 0;
+                const bk = (b && typeof b.sort_key === 'number') ? b.sort_key : 0;
+                return ak - bk;
+            });
+            document.getElementById('upcoming-count').innerText = __amsUpcomingSchedule.length;
+
+            const daysWrap = document.getElementById('upcoming-days');
+            const upList = document.getElementById('upcoming-container');
+            if (__amsUpcomingSchedule.length === 0) {
+                if (daysWrap) daysWrap.innerHTML = '';
+                if (upList) upList.innerHTML = `<p class="text-center text-gray-400 text-xs">No upcoming classes.</p>`;
+            } else {
+                renderUpcomingDays();
+                renderUpcomingSessions();
+            }
+
+            // Subjects
+            const subContainer = document.getElementById('subjects-container');
+            if (data.widgets.my_subjects.length === 0) subContainer.innerHTML = '<div class="p-6 text-center text-gray-400">No subjects assigned.</div>';
+            else subContainer.innerHTML = data.widgets.my_subjects.map(s => `<div class="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors"><div><div class="w-8 h-8 rounded-full bg-teal-50 mit-teal flex items-center justify-center text-xs font-bold">${s.class_name.substring(0,2)}</div><div><h4 class="font-bold text-sm text-gray-700">${s.subject_name}</h4><div class="flex items-center gap-2 mt-0.5"><span class="text-[10px] text-gray-400 font-bold uppercase">${s.class_name}</span>${s.sessions_per_week > 0 ? `<span class="text-purple-600 font-bold text-[10px] bg-purple-50 px-2 py-0.5 rounded">${s.sessions_per_week} Sess/Wk</span>` : `<span class="text-orange-500 font-bold text-[10px] bg-orange-50 px-2 py-0.5 rounded">Not Scheduled</span>`}</div></div></div><button onclick="openReport(${s.subject_id}, ${s.section_id})" class="text-xs mit-purple font-bold hover:underline flex items-center gap-1"><i data-lucide="file-bar-chart" class="w-3 h-3"></i> Report</button></div>`).join('');
+
+            // History
+            const histList = document.getElementById('history-container');
+            if (data.widgets.history_schedule.length === 0) histList.innerHTML = `<p class="text-center text-gray-400 text-xs py-4">No recent history.</p>`;
+            else histList.innerHTML = data.widgets.history_schedule.map(h => `
+                <div onclick="openHistoryModal()" class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50 rounded-lg transition-colors cursor-pointer" title="Click to view full history">
+                    <div><p class="text-xs font-bold text-gray-700">${h.subject}</p><p class="text-[10px] text-gray-400">${h.date_display} • ${h.class}</p></div>
+                    <span class="text-xs font-bold ${h.percentage < 75 ? 'text-red-500' : 'text-teal-600'}">${h.percentage}%</span>
+                </div>`).join('');
+            // Widgets
+            const widgetCol = document.getElementById('role-widgets-wrapper');
+            let roleHTML = '';
+            if (data.roles.is_class_teacher) roleHTML += `<div onclick="window.location.href='/staff/class_teacher_dashboard'" class="bg-white p-5 rounded-xl border border-orange-200 shadow-sm hover:shadow-md cursor-pointer transition-all relative overflow-hidden"><div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="users" class="w-12 h-12 text-orange-600"></i></div><h3 class="font-bold text-gray-800 text-sm mb-1">Class Teacher</h3><p class="text-xs text-gray-500 mb-3">${data.widgets.class_teacher_data.name}</p><div class="flex gap-2 mt-auto"><span class="bg-orange-50 text-orange-700 text-[10px] font-bold px-2 py-1 rounded-full">${data.widgets.class_teacher_data.count} Students</span>${data.widgets.pending_leaves.length > 0 ? `<span class="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full animate-pulse">${data.widgets.pending_leaves.length} Leaves</span>` : ''}</div></div>`;
+            if (data.widgets.can_assign_detention) {
+                if (data.widgets.detention_review_count > 0) roleHTML += `<div onclick="window.location.href='/staff/detention_review'" class="bg-white p-5 rounded-xl border border-red-200 shadow-sm hover:shadow-md cursor-pointer transition-all relative overflow-hidden"><div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="inbox" class="w-12 h-12 text-red-600"></i></div><h3 class="font-bold text-gray-800 text-sm mb-1">Review Inbox</h3><p class="text-xs text-gray-500 mb-3">Submissions</p><span class="bg-yellow-100 text-yellow-700 text-[10px] font-bold px-2 py-1 rounded-full border border-yellow-200">${data.widgets.detention_review_count} In Review</span></div>`;
+                roleHTML += `<div onclick="window.location.href='/staff/detention'" class="bg-white p-5 rounded-xl border border-red-200 shadow-sm hover:shadow-md cursor-pointer transition-all relative overflow-hidden"><div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="shield-alert" class="w-12 h-12 text-red-600"></i></div><h3 class="font-bold text-gray-800 text-sm mb-1">Detention Zone</h3><p class="text-xs text-gray-500 mb-3">Assign Remedial Tasks</p><span class="bg-red-50 text-red-700 text-[10px] font-bold px-2 py-1 rounded-full">Assign Watchlist</span></div>`;
+            }
+            if (data.roles.is_mentor) roleHTML += `<div onclick="openMenteeModal()" class="bg-white p-5 rounded-xl border border-teal-200 shadow-sm hover:shadow-md cursor-pointer transition-all relative overflow-hidden"><div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="heart-handshake" class="w-12 h-12 text-teal-600"></i></div><h3 class="font-bold text-gray-800 text-sm mb-1">My Mentees</h3><p class="text-xs text-gray-500 mb-3">Counseling Group</p><span class="bg-teal-50 text-teal-700 text-[10px] font-bold px-3 py-1 rounded-full">${data.widgets.mentee_data.count} Students</span></div>`;
+            if (data.roles.is_amc_member || data.roles.is_amc_head) roleHTML += `<div onclick="window.location.href='/staff/amc_dashboard'" class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm hover:shadow-md cursor-pointer transition-all relative overflow-hidden"><div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="activity" class="w-12 h-12 text-blue-600"></i></div><h3 class="font-bold text-gray-800 text-sm mb-1">AMC Monitor</h3><p class="text-xs text-gray-500 mb-3">Compliance Report</p><span class="bg-blue-50 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full">View Status</span></div>`;
+            if (data.roles.is_coordinator) roleHTML += `<div onclick="window.location.href='/staff/events'" class="bg-gradient-to-br from-purple-600 to-blue-600 p-5 rounded-xl shadow-lg text-white cursor-pointer hover:scale-[1.02] transition-transform"><h3 class="font-bold text-sm flex items-center gap-2"><i data-lucide="calendar-check" class="w-4 h-4"></i> Event Manager</h3><p class="text-[10px] text-white/80 mt-1">Manage ODs</p></div>`;
+            if (data.roles.is_hod) roleHTML += `<div onclick="window.location.href='/staff/hod_dashboard'" class="bg-gray-900 p-5 rounded-xl shadow-lg text-white cursor-pointer hover:scale-[1.02] transition-transform"><h3 class="font-bold text-sm flex items-center gap-2"><i data-lucide="briefcase" class="w-4 h-4"></i> HOD Console</h3><p class="text-[10px] text-gray-400 mt-1">Dept Admin</p></div>`;
+            
+            // --- NEW: Adjustment Requests Widget ---
+            if (data.widgets.adjustment_requests && data.widgets.adjustment_requests.length > 0) {
+                roleHTML += `
+                <div class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm relative overflow-hidden h-64 flex flex-col">
+                    <div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="git-pull-request" class="w-12 h-12 text-blue-600"></i></div>
+                    <h3 class="font-bold text-blue-800 text-sm mb-3">Load Requests</h3>
+                    <div class="flex-grow overflow-y-auto custom-scroll space-y-2">
+                        ${data.widgets.adjustment_requests.map(r => `
+                            <div class="p-2 bg-blue-50 rounded border border-blue-100 text-xs">
+                                <p class="font-bold text-blue-900">${r.requester}</p>
+                                <p class="text-blue-700">Wants to swap: ${r.date}</p>
+                                <div class="flex gap-2 mt-2">
+                                    <button onclick="respondAdjustment(${r.id}, 'Approved')" class="px-2 py-1 bg-green-500 text-white rounded text-[10px]">Accept</button>
+                                    <button onclick="respondAdjustment(${r.id}, 'Rejected')" class="px-2 py-1 bg-red-500 text-white rounded text-[10px]">Deny</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+            }
+
+            widgetCol.innerHTML = roleHTML;
+            lucide.createIcons();
+        }
+
+        // --- NEW MENTEE LOGIC (With Meeting Scheduler) ---
+        function openMeetingScheduler() { document.getElementById('meeting-modal').classList.remove('hidden'); }
+
+        async function openMenteeModal() { 
+            document.getElementById('mentee-modal').classList.remove('hidden'); 
+            const list = document.getElementById('mentee-list'); list.innerHTML = '<tr><td colspan="3" class="p-8 text-center text-gray-400">Loading...</td></tr>';
+            try { 
+                const res = await fetch(`/api/staff/my_mentees?user_id=${userId}`); const data = await res.json(); 
+                if(data.mentees.length === 0) { list.innerHTML = '<tr><td colspan="3" class="p-8 text-center text-gray-400">No mentees assigned.</td></tr>'; } 
+                else { 
+                    currentBatchId = data.mentees[0].batch_id; // Capture Batch ID
+                    loadMeetingTracker(); // Load meetings
+                    list.innerHTML = data.mentees.map((m, i) => {
+                        menteeDataMap[`mentee-${i}`] = m;
+                        const safeName = amsEscapeHtml(m.name);
+                        const safeRoll = amsEscapeHtml(m.roll);
+                        const safeClass = amsEscapeHtml(m.class);
+                        const safeBatch = amsEscapeHtml(m.batch);
+                        const safeId = amsEscapeHtml(m.id);
+                        const attendance = Number(m.attendance);
+                        const attText = Number.isFinite(attendance) ? `${attendance}%` : `${amsEscapeHtml(m.attendance)}%`;
+                        const attCls = attendance < 75 ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50';
+                        return `<tr class="hover:bg-teal-50/30 border-b border-gray-50 last:border-0">
+                            <td class="p-4 relative group cursor-pointer" onmouseenter="showParentTooltip(event, 'mentee-${i}')" onmouseleave="hideParentTooltip()">
+                                <p class="font-bold text-gray-800 text-sm underline decoration-dotted decoration-gray-300 underline-offset-4 hover:decoration-teal-500 hover:text-teal-700 transition-all">${safeName}</p>
+                                <p class="text-xs text-gray-500">${safeRoll}</p>
+                            </td>
+                            <td class="p-4 text-xs text-gray-600">${safeClass} <span class="text-teal-600 font-bold">(${safeBatch})</span></td>
+                            <td class="p-4 text-right">
+                                <button type="button" class="js-open-counseling text-xs font-bold text-purple-600 hover:underline mr-2" data-student-id="${safeId}" data-student-name="${safeName}">Log Session</button>
+                                <span class="text-xs font-bold ${attCls} px-2 py-1 rounded ml-2">${attText}</span>
+                            </td>
+                        </tr>`;
+                    }).join(''); 
+                } 
+            } catch(e) { console.error(e); } 
+        }
+
+        async function loadMeetingTracker() {
+            if (!currentBatchId) return;
+            const res = await fetch(`/api/mentor/get_meetings?batch_id=${currentBatchId}`);
+            const data = await res.json();
+            const count = data.count;
+            document.getElementById('meeting-progress-bar').style.width = `${(count/4)*100}%`;
+            document.getElementById('meeting-count-text').innerText = `${count} / 4 Mandatory Meetings`;
+            const histDiv = document.getElementById('meeting-history');
+            if (data.meetings.length === 0) histDiv.innerHTML = '<span class="text-xs text-gray-400 italic">No meetings yet.</span>';
+            else histDiv.innerHTML = data.meetings.map(m => `<span class="text-[10px] bg-gray-100 border border-gray-200 px-2 py-1 rounded text-gray-600 flex items-center gap-1" title="${m.agenda}"><i data-lucide="calendar" class="w-3 h-3"></i> ${m.date}</span>`).join('');
+            lucide.createIcons();
+        }
+
+
+
+        // --- NEW: FULL HISTORY MODAL ---
+        async function openHistoryModal() {
+            document.getElementById('history-modal').classList.remove('hidden');
+            const list = document.getElementById('full-history-list');
+            list.innerHTML = '<tr><td colspan="3" class="p-8 text-center text-gray-400">Loading...</td></tr>';
+            try {
+                // Fetches FULL history (not limited to 2)
+                const res = await fetch(`/api/staff/session_history?user_id=${userId}`);
+                const data = await res.json();
+                
+                if(data.history.length === 0) {
+                    list.innerHTML = '<tr><td colspan="3" class="p-8 text-center text-gray-400">No session history found.</td></tr>';
+                } else {
+                    const safeDate = (iso) => iso || new Date().toISOString().split('T')[0];
+                    list.innerHTML = data.history.map(h => `
+                        <tr class="hover:bg-teal-50/30 border-b border-gray-50 last:border-0 cursor-pointer transition-colors" onclick="window.location.href='/staff/mark_attendance?schedule_id=${h.schedule_id}&date=${safeDate(h.date_iso)}'">
+                            <td class="p-4">
+                                <p class="font-bold text-gray-800 text-sm">${h.date_display}</p>
+                                <p class="text-xs text-gray-500 font-mono">${h.time}</p>
+                            </td>
+                            <td class="p-4 text-xs text-gray-600 font-bold">
+                                ${h.subject} <br>
+                                <span class="font-normal text-gray-500">${h.class}</span>
+                            </td>
+                            <td class="p-4 text-right">
+                                <span class="text-xs font-bold ${h.percentage < 75 ? 'text-red-600 bg-red-50' : 'text-teal-600 bg-teal-50'} px-2 py-1 rounded border ${h.percentage < 75 ? 'border-red-100' : 'border-teal-100'}">${h.percentage}%</span>
+                            </td>
+                        </tr>`).join('');
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        // Auto-refresh is disabled globally.
+        
+        async function confirmSchedule() {
+            const payload = { mentor_id: userId, batch_id: currentBatchId, date: document.getElementById('meet-date').value, time: document.getElementById('meet-time').value, agenda: document.getElementById('meet-agenda').value };
+            if(!payload.date || !payload.time) return showToast("Fill all fields", "error");
+            const res = await fetch('/api/mentor/schedule_meeting', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+            if(res.ok) { showToast("Scheduled!"); amsMarkModalClosed(); document.getElementById('meeting-modal').classList.add('hidden'); loadMeetingTracker(); } else { showToast("Failed", "error"); }
+        }
+
+
+        // Add this inside renderDashboard() at the very end
+        function animateDashboard() {
+            // Animate Top Stats
+            gsap.from(".grid:not(#management-grid) > div", {
+                duration: 0.6,
+                y: 20,
+                opacity: 0,
+                stagger: 0.1, // Delays each card by 0.1s for a "wave" effect
+                ease: "back.out(1.7)" // The "Snappy" bounce effect
+            });
+
+            // Animate Tables Rows
+            gsap.from("tr", {
+                duration: 0.4,
+                x: -20,
+                opacity: 0,
+                stagger: 0.05,
+                delay: 0.3,
+                ease: "power2.out"
+            });
+        }
+
+        // Called after dashboard data renders
+
+        function showParentTooltip(event, key) { const m = menteeDataMap[key]; if (!m) return; const tip = document.getElementById('parent-tooltip'); tip.innerHTML = `<div class="flex items-center gap-2 mb-3 border-b border-gray-100 pb-2"><div class="p-1.5 bg-blue-50 rounded-full text-blue-600"><i data-lucide="users" class="w-4 h-4"></i></div><span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Parent Details</span></div><div class="space-y-2 text-sm"><div><span class="text-xs text-gray-400 block">Father</span><span class="font-bold text-gray-800">${m.father}</span></div><div><span class="text-xs text-gray-400 block">Mother</span><span class="font-bold text-gray-800">${m.mother}</span></div><div class="pt-2 mt-1 border-t border-gray-50 flex items-center gap-2 text-green-700"><i data-lucide="phone" class="w-3 h-3"></i><a href="tel:${m.phone}" class="font-mono font-bold hover:underline">${m.phone}</a></div></div>`; const rect = event.currentTarget.getBoundingClientRect(); tip.style.left = `${rect.right + 10}px`; tip.style.top = `${rect.top - 20}px`; tip.classList.remove('hidden'); lucide.createIcons(); }
+        function hideParentTooltip() { document.getElementById('parent-tooltip').classList.add('hidden'); }
+        function openCounselingModal(studentId, studentName, evt) {
+            try {
+                if (evt) { evt.preventDefault(); evt.stopPropagation(); }
+                const menteeModal = document.getElementById('mentee-modal');
+                const counselingModal = document.getElementById('counseling-modal');
+                const nameEl = document.getElementById('log-student-name');
+                const idEl = document.getElementById('log-student-id');
+                const mentorEl = document.getElementById('log-mentor-id');
+                const formEl = document.getElementById('log-form');
+
+                if (!counselingModal || !nameEl || !idEl || !mentorEl || !formEl) {
+                    console.error('Counseling modal DOM is missing required elements');
+                    showToast('Unable to open Log Session', 'error');
+                    return;
+                }
+
+                counselingModal.classList.remove('hidden');
+                if (menteeModal) menteeModal.classList.add('hidden');
+
+                nameEl.innerText = studentName || '';
+                idEl.value = studentId || '';
+                mentorEl.value = userId || '';
+                formEl.reset();
+                loadCounselingHistory(studentId);
+            } catch (err) {
+                console.error('openCounselingModal failed:', err);
+                showToast('Unable to open Log Session', 'error');
+            }
+        }
+
+        // Delegated handler (prevents bubbling and quote-related inline onclick issues)
+        document.addEventListener('click', (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('.js-open-counseling') : null;
+            if (!btn) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const sid = btn.getAttribute('data-student-id') || '';
+            const sname = btn.getAttribute('data-student-name') || '';
+            openCounselingModal(sid, sname, e);
+        }, true);
+        async function loadCounselingHistory(studentId) { 
+            const historyContainer = document.getElementById('log-history-timeline'); 
+            historyContainer.innerHTML = `<p class="p-4 text-center text-gray-400">Fetching history...</p>`; 
+            const res = await fetch(`/api/mentor/get_logs?student_id=${studentId}`); 
+            const data = await res.json(); 
+            if (data.logs.length === 0) { 
+                historyContainer.innerHTML = `<div class="text-center py-8 border-2 border-dashed border-gray-100 rounded-xl"><p class="text-gray-400 text-sm">No counseling records found.</p></div>`; 
+                return; 
+            } 
+            historyContainer.innerHTML = data.logs.map(log => { 
+                let statusColor = 'bg-blue-500'; 
+                if (log.status === 'Resolved') statusColor = 'bg-green-500'; 
+                if (log.status === 'Escalated') statusColor = 'bg-red-500'; 
+                
+                let actions = ''; 
+                // MODIFIED LOGIC START
+                if (log.status !== 'Resolved') {
+                            actions = `<div class="mt-3 flex gap-2 pt-2 border-t border-gray-100">
+                                <button type="button" onclick="updateLogStatus(${log.id}, 'Resolved', '${studentId}')" class="px-3 py-1.5 bg-green-50 text-green-700 text-[10px] font-bold rounded border border-green-200 hover:bg-green-100 transition-colors flex items-center gap-1">
+                            <i data-lucide="check" class="w-3 h-3"></i> Mark Resolved
+                        </button>`;
+                        
+                     if (log.status === 'Open') {
+                        actions += `<button type="button" onclick="updateLogStatus(${log.id}, 'Escalated', '${studentId}')" class="px-3 py-1.5 bg-red-50 text-red-700 text-[10px] font-bold rounded border border-red-200 hover:bg-red-100 transition-colors flex items-center gap-1">
+                            <i data-lucide="alert-triangle" class="w-3 h-3"></i> Escalate
+                        </button>`;
+                     }
+                     actions += `</div>`;
+                }
+                // MODIFIED LOGIC END
+
+                return `<div class="relative pl-6 pb-8 last:pb-0"><div class="absolute w-3 h-3 rounded-full mt-1.5 -left-1.5 border-2 border-white ${statusColor} ring-1 ring-gray-100 shadow-sm"></div><div class="absolute left-0 top-4 bottom-0 w-px bg-gray-200"></div><div class="bg-white rounded-lg p-4 border border-gray-100 shadow-sm hover:shadow-md transition-shadow"><div class="flex justify-between items-start mb-2"><div><span class="text-[10px] font-bold uppercase tracking-wide text-gray-400">${log.date}</span><p class="text-sm font-bold text-gray-800">${log.category}</p></div><span class="text-[10px] px-2 py-0.5 rounded font-bold border ${log.status === 'Resolved' ? 'bg-green-50 text-green-700 border-green-100' : (log.status === 'Escalated' ? 'bg-red-50 text-red-700 border-red-100' : 'bg-blue-50 text-blue-700 border-blue-100')}">${log.status}</span></div><p class="text-xs text-gray-600 mb-3 leading-relaxed">${log.remarks}</p>${log.action ? `<div class="text-[10px] text-gray-500 bg-gray-50 p-2 rounded border border-gray-100 flex gap-2"><span class="font-bold">Action:</span> <span>${log.action}</span></div>` : ''}${actions}</div></div>`; 
+            }).join(''); 
+            lucide.createIcons(); 
+        }
+        
+        async function submitMentorLog(e) { e.preventDefault(); const payload = { student_id: document.getElementById('log-student-id').value, mentor_id: userId, category: document.getElementById('log-category').value, remarks: document.getElementById('log-remarks').value, action_taken: document.getElementById('log-action').value }; const res = await fetch('/api/mentor/add_log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (res.ok) { showToast("Session recorded."); document.getElementById('log-form').reset(); loadCounselingHistory(payload.student_id); } else showToast("Failed", "error"); }
+        async function updateLogStatus(logId, status, studentId) {
+            showConfirm("Update Status", `Mark as ${status}?`, async () => {
+                const res = await fetch('/api/mentor/update_log_status', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ log_id: logId, status: status }) });
+                if(res.ok) loadCounselingHistory(studentId); else showToast("Failed", "error");
+            });
+        }
+        
+        function logout() { sessionStorage.removeItem('user_id'); window.location.href = '/'; }
+        function closeModal() { document.getElementById('report-modal').classList.add('hidden'); document.getElementById('summary-modal').classList.add('hidden'); document.getElementById('mentee-modal').classList.add('hidden'); document.getElementById('counseling-modal').classList.add('hidden'); document.getElementById('meeting-modal').classList.add('hidden'); document.getElementById('adjust-modal').classList.add('hidden'); amsMarkModalClosed(); closeActionModal(); }
+        function toggleUpcoming() { const w = document.getElementById('upcoming-wrapper'); w.classList.toggle('hidden'); document.getElementById('upcoming-icon').style.transform = w.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)'; }
+        
+        async function openReport(sid, secid) { document.getElementById('report-modal').classList.remove('hidden'); document.getElementById('report-modal-loader').classList.remove('hidden'); const headerRow = document.getElementById('report-modal-header-row'); const body = document.getElementById('report-modal-body'); headerRow.innerHTML = ''; body.innerHTML = ''; try { const res = await fetch(`/api/class_teacher/subject_report?user_id=${userId}&subject_id=${sid}&section_id=${secid}`); const data = await res.json(); reportMeta = data.meta; document.getElementById('report-modal-title').innerText = data.meta.subject; document.getElementById('report-modal-subtitle').innerText = `Report for ${data.meta.class_div}`; let headers = `<th class="p-4 bg-gray-50 border-r w-16">Roll</th><th class="p-4 bg-gray-50 border-r w-48">Name</th>`; data.dates.forEach(d => headers += `<th class="p-4 text-center min-w-[50px]">${d}</th>`); headers += `<th class="p-4 bg-gray-50 border-l text-center">Total</th><th class="p-4 bg-gray-50 border-l text-center">%</th>`; headerRow.innerHTML = headers; body.innerHTML = data.rows.map(r => { let cells = r.record.map(s => `<td class="p-4 text-center border-b border-gray-50 ${s === 'P' ? 'text-green-600 font-bold' : (s === 'OD' ? 'text-purple-600 font-bold' : 'text-red-300')}">${s}</td>`).join(''); return `<tr><td class="p-4 border-r font-mono text-xs text-gray-500">${r.roll}</td><td class="p-4 border-r font-bold text-gray-700 text-sm whitespace-nowrap">${r.name}</td>${cells}<td class="p-4 border-l text-center font-bold">${r.total}</td><td class="p-4 border-l text-center font-bold ${r.perc < 75 ? 'text-red-600' : 'text-green-600'}">${r.perc}%</td></tr>`; }).join(''); } catch (e) { console.error(e); } finally { document.getElementById('report-modal-loader').classList.add('hidden'); } }
+        function generatePDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('l', 'mm', 'a4');
+
+            const termLine = amsGetAcademicTermLine(reportMeta);
+            const subLines = [
+                reportMeta.school || 'School of Computing',
+                reportMeta.department ? `Department: ${reportMeta.department}` : ''
+            ].filter(Boolean);
+
+            const metaBits = [
+                reportMeta.class_div ? `Class: ${reportMeta.class_div}` : '',
+                reportMeta.teacher ? `Teacher: ${reportMeta.teacher}` : '',
+                termLine
+            ].filter(Boolean);
+
+            const startY = amsDrawPdfHeader(
+                doc,
+                `${reportMeta.subject || 'Subject'} Attendance Report`,
+                subLines,
+                metaBits.join(' | ')
+            );
+
+            doc.autoTable({
+                html: '#report-table',
+                startY,
+                theme: 'grid',
+                styles: { fontSize: 7, cellPadding: 1.5, halign: 'center', valign: 'middle' },
+                headStyles: { fillColor: [72, 22, 109], textColor: 255, fontStyle: 'bold' },
+                columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 40, halign: 'left' } },
+                margin: { top: 10, bottom: 25 }
+            });
+
+            const footerY = doc.internal.pageSize.height - 15;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(0, 0, 0);
+            doc.text('Class Teacher', 30, footerY);
+            doc.text('AMC Head', 140, footerY);
+            doc.text('HOD', 250, footerY);
+            doc.setLineWidth(0.5);
+            doc.line(30, footerY - 5, 60, footerY - 5);
+            doc.line(140, footerY - 5, 170, footerY - 5);
+            doc.line(250, footerY - 5, 280, footerY - 5);
+
+            doc.save(`${reportMeta.subject || 'Subject'}_${reportMeta.class_div || 'Class'}_Report.pdf`);
+        }
+
+        function downloadSummaryPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('l', 'mm', 'a4');
+
+            const termLine = amsGetAcademicTermLine(summaryMeta);
+            const subLines = [
+                'School of Computing',
+                summaryMeta.department ? `Department: ${summaryMeta.department}` : ''
+            ].filter(Boolean);
+
+            const metaBits = [
+                summaryMeta.class_name ? `Class: ${summaryMeta.class_name}` : '',
+                summaryMeta.teacher ? `Class Teacher: ${summaryMeta.teacher}` : '',
+                termLine
+            ].filter(Boolean);
+
+            const startY = amsDrawPdfHeader(
+                doc,
+                'Overall Attendance Summary',
+                subLines,
+                metaBits.join(' | ')
+            );
+
+            doc.autoTable({
+                html: '#summary-table',
+                startY,
+                theme: 'grid',
+                styles: { fontSize: 7, cellPadding: 1.5, halign: 'center', valign: 'middle' },
+                headStyles: { fillColor: [72, 22, 109], textColor: 255, fontStyle: 'bold' },
+                columnStyles: { 0: { cellWidth: 30 }, 1: { cellWidth: 50, halign: 'left' } },
+                margin: { top: 10, bottom: 25 }
+            });
+
+            const footerY = doc.internal.pageSize.height - 15;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(0, 0, 0);
+            doc.text('Class Teacher', 30, footerY);
+            doc.text('AMC Head', 140, footerY);
+            doc.text('HOD', 250, footerY);
+            doc.setLineWidth(0.5);
+            doc.line(30, footerY - 5, 60, footerY - 5);
+            doc.line(140, footerY - 5, 170, footerY - 5);
+            doc.line(250, footerY - 5, 280, footerY - 5);
+
+            doc.save(`Overall_Summary_${summaryMeta.class_name || 'Class'}.pdf`);
+        }
+
+        // --- LOAD ADJUSTMENT LOGIC ---
+        function amsEscapeHtml(str) {
+            return String(str ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        function openAdjustmentModal(id, date) {
+            document.getElementById('adjust-modal').classList.remove('hidden');
+            document.getElementById('adj-req-id').value = id;
+            document.getElementById('adj-req-date').value = date;
+            document.getElementById('adj-faculty-list').classList.add('hidden');
+            document.getElementById('adj-swap-section').classList.add('hidden');
+            document.getElementById('adj-reason').value = '';
+            document.getElementById('adj-faculty-list').innerHTML = '';
+            selectedFacultyId = null;
+            window.__amsAdjSwapSlotsById = {};
+            window.__amsAdjFacultyByKey = {};
+            document.getElementById('adj-swap-slot').innerHTML = '<option value="">-- Select Their Slot --</option>';
+            document.getElementById('adj-swap-date').value = '';
+            // Reset button text
+            const btn = document.querySelector('button[onclick="findFacultyForAdjustment()"]');
+            btn.innerHTML = `<i data-lucide="search" class="w-4 h-4"></i> Search Available Faculty`;
+            lucide.createIcons();
+        }
+
+        async function findFacultyForAdjustment() {
+            const list = document.getElementById('adj-faculty-list');
+            list.innerHTML = '<p class="text-xs text-gray-400 p-2">Searching...</p>';
+            list.classList.remove('hidden');
+            
+            try {
+                const slotId = document.getElementById('adj-req-id').value;
+                const date = document.getElementById('adj-req-date').value;
+                const res = await fetch(`/api/staff/find_adjustment_faculty?schedule_id=${slotId}&date=${date}&user_id=${userId}`);
+                if (!res.ok) throw new Error('API error');
+                const data = await res.json();
+                
+                if (data.length === 0) {
+                    list.innerHTML = '<p class="text-xs text-red-400 p-2">No available faculty found.</p>';
+                    return;
+                }
+
+                window.__amsAdjFacultyByKey = {};
+                list.innerHTML = data.map((f, idx) => {
+                    const key = `adjfac-${idx}`;
+                    window.__amsAdjFacultyByKey[key] = f;
+                    return `
+                        <div data-adj-fac-key="${key}" class="p-2 hover:bg-purple-50 cursor-pointer rounded border-b border-gray-50 last:border-0">
+                            <p class="text-xs font-bold text-gray-700">${amsEscapeHtml(f.name)}</p>
+                            <p class="text-[10px] text-gray-400">${amsEscapeHtml(f.dept)}${f.class_division ? ` • ${amsEscapeHtml(f.class_division)}` : ''}</p>
+                        </div>
+                    `;
+                }).join('');
+
+                list.querySelectorAll('[data-adj-fac-key]').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const key = el.getAttribute('data-adj-fac-key');
+                        const f = (window.__amsAdjFacultyByKey || {})[key];
+                        if (!f) return;
+                        selectFacultyForSwap(f.id, f.name, Array.isArray(f.slots) ? f.slots : []);
+                    });
+                });
+            } catch (e) {
+                console.error(e);
+                list.innerHTML = '<p class="text-xs text-red-400 p-2">Failed to load faculty. Please try again.</p>';
+            }
+        }
+
+        let selectedFacultyId = null;
+        function selectFacultyForSwap(fid, fname, slots) {
+            selectedFacultyId = fid;
+            document.getElementById('adj-faculty-list').classList.add('hidden');
+            document.getElementById('adj-swap-section').classList.remove('hidden');
+            
+            const slotSelect = document.getElementById('adj-swap-slot');
+            window.__amsAdjSwapSlotsById = {};
+            slotSelect.innerHTML = '<option value="">-- Select Their Slot --</option>' + 
+                slots.map(s => {
+                    window.__amsAdjSwapSlotsById[String(s.id)] = s;
+                    const day = s.day ? String(s.day).substring(0, 3) : '';
+                    const date = s.date_display ? String(s.date_display) : '';
+                    const label = `${s.time} - ${s.subject}${day || date ? ` (${day} ${date})` : ''}`.trim();
+                    return `<option value="${s.id}">${amsEscapeHtml(label)}</option>`;
+                }).join('');
+
+            // Auto-fill compensation date when swap slot is selected
+            slotSelect.onchange = () => {
+                const picked = window.__amsAdjSwapSlotsById[String(slotSelect.value)];
+                if (picked && picked.date_iso) {
+                    document.getElementById('adj-swap-date').value = picked.date_iso;
+                }
+            };
+            
+            // Visual feedback
+            const btn = document.querySelector('button[onclick="findFacultyForAdjustment()"]');
+            btn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-green-600"></i> Selected: ${amsEscapeHtml(fname)}`;
+            lucide.createIcons();
+        }
+
+        async function submitAdjustment() {
+            const payload = {
+                requester_id: userId,
+                schedule_id: document.getElementById('adj-req-id').value,
+                original_date: document.getElementById('adj-req-date').value,
+                substitute_id: selectedFacultyId,
+                swap_slot_id: document.getElementById('adj-swap-slot').value,
+                compensation_date: document.getElementById('adj-swap-date').value,
+                reason: document.getElementById('adj-reason').value
+            };
+
+            if (!payload.substitute_id || !payload.swap_slot_id || !payload.compensation_date) {
+                showToast("Please complete all fields.", "error");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/staff/submit_adjustment', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    showToast("Request sent successfully!");
+                    closeModal();
+                    await refreshStaffDashboard({ force: true });
+                } else {
+                    showToast("Failed to send request.", "error");
+                }
+            } catch (e) {
+                console.error(e);
+                showToast("Error sending request.", "error");
+            }
+        }
+
+        async function respondAdjustment(reqId, status) {
+            showConfirm("Respond to Request", `Are you sure you want to ${status} this request?`, async () => {
+                try {
+                    const res = await fetch('/api/staff/respond_adjustment', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ request_id: reqId, status: status })
+                    });
+                    if (res.ok) {
+                        showToast(`Request ${status}`);
+                        await refreshStaffDashboard({ force: true });
+                    } else {
+                        showToast("Action failed.", "error");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    showToast("Error processing request.", "error");
+                }
+            });
+        }
+    </script>
+    
+    <!-- Parent Tooltip Container -->
+    <div id="parent-tooltip" class="hidden absolute z-[9999] w-64 bg-white rounded-xl shadow-2xl border border-blue-100 p-4 pointer-events-none tooltip-enter"></div>
+</body>
+</html>

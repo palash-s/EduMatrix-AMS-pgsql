@@ -1,0 +1,13 @@
+Room Number,Type,Capacity,Location,Department Name
+N-605,Classroom,60,North Block,Department of Information Techonology
+N-607,Classroom,60,North Block,Department of Information Techonology
+N-609,Classroom,60,North Block,Department of Information Techonology
+N-611,Laboratory,30,North Block,Department of Information Techonology
+N-613,Laboratory,30,North Block,Department of Information Techonology
+N-614,Laboratory,30,North Block,Department of Information Techonology
+S-609,Laboratory,30,South Block,Department of Information Techonology
+S-610,Laboratory,30,South Block,Department of Information Techonology
+S-611,Laboratory,30,South Block,Department of Information Techonology
+S-614,Laboratory,30,South Block,Department of Information Techonology
+N-601,Tutorial Room,20,North Block,Department of Information Techonology
+S-601,Tutorial Room,20,South Block,Department of Information Techonology

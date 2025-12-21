@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # 1. Database (PostgreSQL)
+  db:
+    image: postgres:13
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: AdminPassword123
+      POSTGRES_DB: school_system
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ams_network
+
+  # 2. Web Application (Flask)
+  web:
+    build: .
+    restart: always
+    depends_on:
+      - db
+    command: gunicorn -w 4 -b 0.0.0.0:5000 --reload app:app
+    environment: 
+      FIREBASE_CREDENTIALS_FILE: /app/secrets/edumatrix-ams-firebase-adminsdk-fbsvc-7c1040553f.json
+      DATABASE_URL: postgresql://admin:AdminPassword123@db:5432/school_system
+    volumes: 
+      - ./secrets/edumatrix-ams-firebase-adminsdk-fbsvc-7c1040553f.json:/app/secrets/edumatrix-ams-firebase-adminsdk-fbsvc-7c1040553f.json:ro
+      - .:/app
+    networks:
+      - ams_network
+
+  # 3. Web Server (Nginx)
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./static:/app/static
+    depends_on:
+      - web
+    networks:
+      - ams_network
+
+volumes:
+  postgres_data:
+
+networks:
+  ams_network:
+    driver: bridge

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Historical Archives - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PDF Libs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 flex h-screen overflow-hidden">
+
+    <!-- SIDEBAR -->
+    <aside class="w-64 bg-mit-purple text-white flex-shrink-0 flex flex-col z-20 shadow-xl">
+        <div class="p-6 border-b border-white/10 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-10 w-auto brightness-0 invert" onerror="this.style.display='none'">
+            <div>
+                <span class="block font-bold tracking-wider text-sm">ADMIN</span>
+                <span class="block text-[10px] text-purple-200 opacity-70">Console v2.2</span>
+            </div>
+        </div>
+        <nav class="flex-grow p-4 space-y-1">
+            <a href="/admin/dashboard" class="flex items-center gap-3 px-4 py-3 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="arrow-left" class="w-4 h-4"></i> Back to Dashboard</a>
+        </nav>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-grow flex flex-col h-screen overflow-hidden relative">
+        
+        <!-- HEADER -->
+        <header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8 z-10">
+            <div class="flex items-center gap-2">
+                <i data-lucide="archive" class="w-5 h-5 text-gray-500"></i>
+                <h1 class="text-lg font-bold text-gray-800">Historical Archives</h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="relative">
+                    <i data-lucide="calendar" class="absolute left-3 top-2.5 w-4 h-4 text-gray-400"></i>
+                    <select id="year-select" onchange="fetchData()" class="pl-9 pr-4 py-2 border rounded-lg text-sm font-bold focus:ring-2 focus:ring-purple-500 outline-none bg-gray-50">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <button onclick="downloadArchiveReport()" class="flex items-center gap-2 px-4 py-2 bg-mit-purple text-white text-sm font-bold rounded-lg hover:bg-[#350f50] shadow-sm transition-colors">
+                    <i data-lucide="file-down" class="w-4 h-4"></i> Download PDF
+                </button>
+            </div>
+        </header>
+
+        <!-- SCROLLABLE CONTENT -->
+        <div class="flex-grow overflow-y-auto p-8">
+            
+            <!-- LOADING STATE -->
+            <div id="loading-state" class="text-center py-20 hidden">
+                <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-purple-600 mx-auto mb-2"></i>
+                <p class="text-gray-400 text-sm">Crunching historical data...</p>
+            </div>
+
+            <!-- EMPTY STATE -->
+            <div id="empty-state" class="text-center py-20 hidden border-2 border-dashed border-gray-200 rounded-xl">
+                <i data-lucide="folder-open" class="w-12 h-12 text-gray-300 mx-auto mb-3"></i>
+                <h3 class="text-lg font-bold text-gray-500">No Records Found</h3>
+                <p class="text-gray-400 text-sm">No session logs exist for the selected academic year.</p>
+            </div>
+
+            <!-- DASHBOARD CONTENT -->
+            <div id="content-area" class="fade-in space-y-8 hidden">
+                
+                <!-- 1. BIG NUMBERS -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                        <p class="text-xs text-gray-400 font-bold uppercase tracking-wider">Global Attendance</p>
+                        <h3 class="text-4xl font-black text-teal-600 mt-1" id="stat-att">--%</h3>
+                        <p class="text-[10px] text-gray-400 mt-1">Avg across all departments</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                        <p class="text-xs text-gray-400 font-bold uppercase">Classes Conducted</p>
+                        <h3 class="text-4xl font-black text-purple-600 mt-1" id="stat-sessions">--</h3>
+                        <p class="text-[10px] text-gray-400 mt-1">Total Sessions Logged</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                        <p class="text-xs text-gray-400 font-bold uppercase">Best Performing Class</p>
+                        <h3 class="text-xl font-bold text-gray-800 mt-2 truncate" id="stat-best-class">--</h3>
+                        <p class="text-[10px] text-green-600 font-bold mt-1" id="stat-best-score">--% Attendance</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                        <p class="text-xs text-gray-400 font-bold uppercase">Top Faculty</p>
+                        <h3 class="text-lg font-bold text-gray-800 mt-2 truncate" id="stat-top-fac">--</h3>
+                        <p class="text-[10px] text-purple-600 font-bold mt-1" id="stat-top-load">-- Sessions</p>
+                    </div>
+                </div>
+
+                <!-- 2. DETAILED BREAKDOWN -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    
+                    <!-- Student Summary -->
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                        <div class="p-5 border-b border-gray-100 bg-blue-50/50">
+                            <h3 class="font-bold text-gray-800 flex items-center gap-2">
+                                <i data-lucide="graduation-cap" class="w-5 h-5 text-blue-600"></i> Student Performance Summary
+                            </h3>
+                        </div>
+                        <div class="p-6 space-y-4">
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span class="text-sm text-gray-600">Attendance Rate</span>
+                                <span class="font-bold text-blue-700" id="sum-att">--</span>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span class="text-sm text-gray-600">Total Data Points</span>
+                                <span class="font-bold text-gray-800" id="sum-points">--</span>
+                            </div>
+                            <div class="p-4 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800 leading-relaxed">
+                                <strong class="block mb-1 uppercase">Insight:</strong>
+                                The academic year <span id="insight-year">...</span> saw strongest attendance in <span id="insight-class" class="font-bold">...</span>. 
+                                Overall compliance was <span id="insight-compliance">...</span>.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Faculty Summary -->
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                        <div class="p-5 border-b border-gray-100 bg-purple-50/50">
+                            <h3 class="font-bold text-gray-800 flex items-center gap-2">
+                                <i data-lucide="briefcase" class="w-5 h-5 text-purple-600"></i> Faculty Activity Summary
+                            </h3>
+                        </div>
+                        <div class="p-6 space-y-4">
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span class="text-sm text-gray-600">Total Sessions Held</span>
+                                <span class="font-bold text-purple-700" id="fac-total">--</span>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span class="text-sm text-gray-600">Top Performer</span>
+                                <span class="font-bold text-gray-800" id="fac-top">--</span>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                <span class="text-sm text-gray-600">Daily Avg Sessions</span>
+                                <span class="font-bold text-gray-800" id="fac-daily">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        let reportData = null;
+
+        async function initAcademicYearOptions() {
+            const select = document.getElementById('year-select');
+            if (!select) return;
+
+            function prevAcademicYear(ay) {
+                const m = String(ay || '').match(/^(\d{4})-(\d{2})$/);
+                if (!m) return null;
+                const start = parseInt(m[1], 10) - 1;
+                return `${start}-${((start + 1) % 100).toString().padStart(2, '0')}`;
+            }
+
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                if (res.ok) window.__amsCurrentTermInfo = data;
+            } catch (_) {
+                // ignore
+            }
+
+            const currentAy = window.__amsCurrentTermInfo && window.__amsCurrentTermInfo.academic_year;
+            const years = [];
+            if (currentAy) years.push(currentAy);
+            while (years.length < 4) {
+                const prev = prevAcademicYear(years[years.length - 1]);
+                if (!prev) break;
+                years.push(prev);
+            }
+
+            select.innerHTML = years.length
+                ? years.map((y, idx) => `<option value="${y}">${y}${idx === 0 ? ' (Current)' : ''}</option>`).join('')
+                : '<option value="">Select year</option>';
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initAcademicYearOptions();
+            fetchData();
+        });
+
+        async function fetchData() {
+            const year = document.getElementById('year-select').value;
+            const loader = document.getElementById('loading-state');
+            const content = document.getElementById('content-area');
+            const empty = document.getElementById('empty-state');
+
+            content.classList.add('hidden');
+            empty.classList.add('hidden');
+            loader.classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/admin/archive_stats?year=${year}`);
+                const data = await res.json();
+                
+                loader.classList.add('hidden');
+
+                if (data.no_data) {
+                    empty.classList.remove('hidden');
+                    reportData = null;
+                    return;
+                }
+
+                reportData = data;
+                content.classList.remove('hidden');
+
+                // 1. Populate KPI Cards
+                document.getElementById('stat-att').innerText = data.student_summary.avg_attendance + "%";
+                document.getElementById('stat-sessions').innerText = data.faculty_summary.total_sessions;
+                
+                // Parse Best Class string "SY-DA (95%)"
+                const bestClassStr = data.student_summary.best_class;
+                if (bestClassStr.includes('(')) {
+                    const parts = bestClassStr.split(' (');
+                    document.getElementById('stat-best-class').innerText = parts[0];
+                    document.getElementById('stat-best-score').innerText = parts[1].replace(')', '') + " Attendance";
+                    document.getElementById('insight-class').innerText = parts[0];
+                } else {
+                    document.getElementById('stat-best-class').innerText = "N/A";
+                    document.getElementById('stat-best-score').innerText = "--";
+                    document.getElementById('insight-class').innerText = "N/A";
+                }
+
+                // Parse Top Faculty
+                const topFacStr = data.faculty_summary.top_performer;
+                if (topFacStr.includes('(')) {
+                    const parts = topFacStr.split(' (');
+                    document.getElementById('stat-top-fac').innerText = parts[0];
+                    document.getElementById('stat-top-load').innerText = parts[1].replace(')', '');
+                } else {
+                    document.getElementById('stat-top-fac').innerText = "N/A";
+                    document.getElementById('stat-top-load').innerText = "--";
+                }
+
+                // 2. Detailed Summaries
+                document.getElementById('sum-att').innerText = data.student_summary.avg_attendance + "%";
+                document.getElementById('sum-points').innerText = data.student_summary.total_records.toLocaleString();
+                document.getElementById('insight-year').innerText = data.year;
+                document.getElementById('insight-compliance').innerText = data.student_summary.avg_attendance > 75 ? "Good" : "Needs Improvement";
+
+                document.getElementById('fac-total').innerText = data.faculty_summary.total_sessions;
+                document.getElementById('fac-top').innerText = data.faculty_summary.top_performer.split(' (')[0];
+                document.getElementById('fac-daily').innerText = data.faculty_summary.avg_daily_sessions;
+
+            } catch (e) {
+                console.error(e);
+                loader.classList.add('hidden');
+                empty.classList.remove('hidden');
+                empty.querySelector('h3').innerText = "Connection Error";
+                empty.querySelector('p').innerText = "Failed to load archive data.";
+            }
+        }
+
+        function downloadArchiveReport() {
+            if (!reportData) {
+                showToast("No data to download.", "error");
+                return;
+            }
+            
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'mm', 'a4');
+            const logoImg = document.getElementById('mit-logo-img');
+
+            async function amsEnsureCurrentTermInfo() {
+                if (window.__amsCurrentTermInfo) return window.__amsCurrentTermInfo;
+                try {
+                    const res = await fetch('/api/current_term');
+                    const data = await res.json();
+                    if (res.ok) {
+                        window.__amsCurrentTermInfo = data;
+                        return data;
+                    }
+                } catch (_) {
+                    // ignore
+                }
+                return null;
+            }
+
+            function amsGetAcademicTermLine() {
+                const info = window.__amsCurrentTermInfo;
+                if (info && info.academic_year && info.semester) {
+                    return `Current Term: ${info.academic_year} ${info.semester}`;
+                }
+                if (info && info.current_term) return `Current Term: ${info.current_term}`;
+                return '';
+            }
+
+            function amsDrawPdfHeader(doc, title, subLines, metaLine) {
+                const margin = 14;
+                const pageW = doc.internal.pageSize.getWidth();
+
+                let logoH = 20;
+                let logoW = 20;
+                if (logoImg && logoImg.naturalWidth && logoImg.naturalHeight) {
+                    logoW = logoH * (logoImg.naturalWidth / logoImg.naturalHeight);
+                }
+                const logoX = pageW - margin - logoW;
+                const logoY = 10;
+
+                const leftX = margin;
+                const maxW = Math.max(60, logoX - leftX - 6);
+
+                let y = 16;
+                doc.setTextColor(0, 0, 0);
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(14);
+                const uniLines = doc.splitTextToSize('MIT Art, Design and Technology University, Pune', maxW);
+                doc.text(uniLines, leftX, y);
+                y += uniLines.length * 6;
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(11);
+                (subLines || []).forEach((line) => {
+                    const parts = doc.splitTextToSize(String(line || ''), maxW);
+                    doc.text(parts, leftX, y);
+                    y += parts.length * 5;
+                });
+
+                if (title) {
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(11);
+                    const tLines = doc.splitTextToSize(String(title), maxW);
+                    doc.text(tLines, leftX, y);
+                    y += tLines.length * 5;
+                }
+
+                if (metaLine) {
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(10);
+                    const mLines = doc.splitTextToSize(String(metaLine), maxW);
+                    doc.text(mLines, leftX, y);
+                    y += mLines.length * 5;
+                }
+
+                if (logoImg && logoImg.src) {
+                    doc.addImage(logoImg, 'PNG', logoX, logoY, logoW, logoH);
+                }
+
+                const headerBottom = Math.max(y + 2, logoY + logoH + 2);
+                doc.setLineWidth(0.5);
+                doc.line(margin, headerBottom, pageW - margin, headerBottom);
+                return headerBottom + 8;
+            }
+            
+            // Header
+            (async () => {
+                await amsEnsureCurrentTermInfo();
+                const termLine = amsGetAcademicTermLine();
+                const metaBits = [`Academic Year: ${reportData.year}`, reportData.date_range, termLine].filter(Boolean);
+                const startY = amsDrawPdfHeader(doc, 'Annual Academic Report', [], metaBits.join(' | '));
+
+                // Executive Summary
+                doc.setFontSize(12); doc.setFont("helvetica", "bold");
+                doc.text("1. Executive Summary", 14, startY);
+            
+                doc.setFontSize(10); doc.setFont("helvetica", "normal");
+                const summaryText = [
+                    `Total Sessions Conducted: ${reportData.faculty_summary.total_sessions}`,
+                    `Global Average Attendance: ${reportData.student_summary.avg_attendance}%`,
+                    `Best Performing Class: ${reportData.student_summary.best_class}`,
+                    `Top Faculty Performer: ${reportData.faculty_summary.top_performer}`
+                ];
+            
+                let y = startY + 8;
+                summaryText.forEach(line => {
+                    doc.text("• " + line, 20, y);
+                    y += 6;
+                });
+
+                // Footer
+                const footerY = doc.internal.pageSize.height - 20;
+                doc.setFontSize(9); doc.setTextColor(100);
+                doc.text("Generated by EduMatrix AMS", 14, footerY);
+                doc.text(`Date: ${new Date().toLocaleDateString()}`, 160, footerY);
+
+                doc.save(`Annual_Report_${reportData.year}.pdf`);
+            })();
+        }
+    </script>
+</body>
+</html>

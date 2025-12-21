@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CA Marks Entry - MIT ADT</title>
+    
+    <!-- TAILWIND & ICONS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- CHART.JS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- PDF LIBS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        /* TOAST ANIMATIONS */
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        .toast-enter { animation: slideIn 0.3s ease-out forwards; }
+        .toast-exit { animation: fadeOut 0.3s ease-in forwards; }
+
+        /* MODAL BACKGROUND */
+        .modal-bg-image {
+            background-image: url("{{ url_for('static', filename='images/mit-tp-building.png') }}");
+            background-size: cover;
+            background-position: center;
+        }
+        .tab-btn.active { background-color: #f3e8ff; color: #6b21a8; border-bottom: 2px solid #6b21a8; }
+        .tab-btn { color: #6b7280; border-bottom: 2px solid transparent; }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <!-- HEADER -->
+    <header class="bg-white border-b border-slate-200 px-6 h-16 flex items-center justify-between shadow-sm sticky top-0 z-50">
+        <div class="flex items-center gap-4">
+            <button onclick="window.location.href='/staff/dashboard'" class="p-2 -ml-2 hover:bg-slate-100 rounded-full transition-colors"><i data-lucide="arrow-left" class="w-5 h-5 text-slate-500"></i></button>
+            <div>
+                <h1 class="font-bold text-lg text-purple-800 flex items-center gap-2"><i data-lucide="calculator" class="w-5 h-5"></i> Continuous Assessment</h1>
+                <p class="text-xs text-slate-500" id="header-subtitle">Select a subject to manage marks</p>
+            </div>
+        </div>
+        <div class="flex gap-3">
+            <select id="subject-select" onchange="loadSheet()" class="p-2 border border-slate-300 rounded-lg text-sm bg-white min-w-[300px] outline-none focus:ring-2 focus:ring-purple-500 shadow-sm transition-all"><option value="">-- Select Subject --</option></select>
+        </div>
+    </header>
+
+    <main class="p-6 max-w-[98%] mx-auto">
+        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden flex flex-col min-h-[650px]">
+            <!-- TOOLBAR -->
+            <div class="flex flex-col md:flex-row border-b border-slate-200 bg-slate-50 justify-between items-center px-2">
+                <div class="flex overflow-x-auto no-scrollbar w-full md:w-auto">
+                    <button onclick="switchTab('ta1')" class="tab-btn active px-6 py-4 text-sm font-bold transition-colors flex-shrink-0" id="btn-ta1">TA 1<span class="block text-[10px] font-normal opacity-70">Units 1-2 (20M)</span></button>
+                    <button onclick="switchTab('ta2')" class="tab-btn px-6 py-4 text-sm font-bold transition-colors flex-shrink-0" id="btn-ta2">TA 2<span class="block text-[10px] font-normal opacity-70">Units 3-4 (20M)</span></button>
+                    <button onclick="switchTab('ta3')" class="tab-btn px-6 py-4 text-sm font-bold transition-colors flex-shrink-0" id="btn-ta3">TA 3<span class="block text-[10px] font-normal opacity-70">Unit 5 (10M)</span></button>
+                    <button onclick="switchTab('final')" class="tab-btn px-6 py-4 text-sm font-bold transition-colors text-purple-700 flex-shrink-0" id="btn-final">Summary<span class="block text-[10px] font-normal opacity-70">Scaled (50M)</span></button>
+                </div>
+                <div class="flex gap-2 p-2" id="action-buttons">
+                    <button onclick="generateTermReport()" id="analysis-btn" class="hidden px-3 py-1.5 bg-purple-50 border border-purple-200 text-purple-700 text-xs font-bold rounded-lg hover:bg-purple-100 transition-colors flex items-center gap-2"><i data-lucide="bar-chart-2" class="w-4 h-4"></i> Analysis Report</button>
+                    <button onclick="downloadTemplate()" class="px-3 py-1.5 bg-white border border-slate-300 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2" title="Download Template"><i data-lucide="download" class="w-4 h-4"></i> Template</button>
+                    <input type="file" id="csv-input" accept=".csv" class="hidden" onchange="handleFileUpload()">
+                    <button onclick="document.getElementById('csv-input').click()" id="upload-btn" disabled class="px-3 py-1.5 bg-white border border-slate-300 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 disabled:opacity-50"><i data-lucide="upload" class="w-4 h-4"></i> Upload CSV</button>
+                    <button onclick="saveMarks(false)" id="save-btn" disabled class="px-4 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-2 disabled:opacity-50"><i data-lucide="save" class="w-4 h-4"></i> Save Draft</button>
+                    <button onclick="saveMarks(true)" id="publish-btn" disabled class="px-4 py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 shadow-md disabled:opacity-50"><i data-lucide="send" class="w-4 h-4"></i> Publish</button>
+                </div>
+            </div>
+            
+            <!-- STATS BAR (Dynamic) -->
+            <div id="stats-bar" class="hidden bg-slate-50 border-b border-slate-200 px-4 py-2 flex gap-6 text-xs text-slate-600 font-mono">
+                <span>Mean: <b id="stat-mean">--</b></span>
+                <span>SD: <b id="stat-sd">--</b></span>
+                <span class="text-red-600">Slow < <b id="stat-slow">--</b></span>
+                <span class="text-green-600">Adv > <b id="stat-adv">--</b></span>
+            </div>
+
+            <div id="status-banner" class="hidden bg-green-50 border-b border-green-200 p-2 text-center text-xs text-green-800 font-bold flex items-center justify-center gap-2"><i data-lucide="check-circle" class="w-4 h-4"></i> Result Published</div>
+            <div class="flex-grow overflow-auto custom-scroll p-0 relative bg-white">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-white text-slate-500 font-bold text-xs uppercase sticky top-0 z-10 shadow-sm"><tr id="table-header-row"></tr></thead>
+                    <tbody id="sheet-body" class="divide-y divide-slate-100"><tr><td class="p-20 text-center text-slate-400">Select a subject.</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- TOAST CONTAINER -->
+    <div id="toast-container" class="fixed top-20 right-6 z-[100] flex flex-col gap-3"></div>
+
+    <!-- CUSTOM CONFIRM MODAL -->
+    <div id="custom-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden z-[200] flex items-center justify-center p-4">
+        <!-- Modal Card with Background Image -->
+        <div class="relative w-full max-w-md rounded-2xl shadow-2xl overflow-hidden modal-bg-image transform scale-100 transition-all">
+            <!-- Glass Overlay for Readability -->
+            <div class="absolute inset-0 bg-white/95 backdrop-blur-sm"></div>
+            
+            <!-- Content -->
+            <div class="relative p-8 text-center z-10">
+                <div class="mx-auto w-12 h-12 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mb-4 border border-purple-200 shadow-sm">
+                    <i data-lucide="alert-circle" class="w-6 h-6"></i>
+                </div>
+                <h3 class="text-xl font-bold text-slate-800 mb-2" id="modal-title">Confirm Action</h3>
+                <p class="text-sm text-slate-600 mb-6 leading-relaxed" id="modal-msg">Are you sure you want to proceed?</p>
+                <div class="flex gap-3 justify-center">
+                    <button onclick="closeCustomModal(false)" class="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors">Cancel</button>
+                    <button id="modal-confirm-btn" class="px-5 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-bold hover:bg-purple-700 shadow-md transition-colors">Confirm</button>
+                </div>
+            </div>
+            
+            <!-- Bottom Decoration -->
+            <div class="relative h-1 w-full bg-gradient-to-r from-purple-500 via-pink-500 to-red-500"></div>
+        </div>
+    </div>
+
+    <!-- HIDDEN CANVAS -->
+    <div style="position: absolute; left: -9999px;"><canvas id="bellCurveCanvas" width="800" height="400"></canvas></div>
+    <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let currentSheetData = []; 
+        let activeTab = 'ta1'; 
+        let currentSectionId = null;
+        let currentSubjectId = null;
+        let currentSubjectName = "";
+        let publishStatus = { ta1: false, ta2: false, ta3: false };
+        let reportMeta = null;
+
+        // --- TOAST SYSTEM ---
+        function showToast(msg, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let icon = type === 'error' ? 'x-circle' : 'check-circle';
+            let colors = type === 'error' ? 'bg-white border-red-200 text-red-800' : 'bg-white border-green-200 text-green-800';
+            
+            toast.className = `flex items-center gap-3 p-4 rounded-xl shadow-lg border ${colors} toast-enter w-72`;
+            toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5 flex-shrink-0"></i><p class="text-sm font-semibold">${msg}</p>`;
+            
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            setTimeout(() => {
+                toast.classList.add('toast-exit');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- CUSTOM MODAL SYSTEM ---
+        let confirmCallback = null;
+
+        function showConfirm(title, message, onConfirm) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-msg').innerText = message;
+            document.getElementById('custom-modal').classList.remove('hidden');
+            confirmCallback = onConfirm;
+            
+            // Re-bind confirm button
+            const btn = document.getElementById('modal-confirm-btn');
+            btn.onclick = () => {
+                closeCustomModal(true);
+            };
+        }
+
+        function closeCustomModal(confirmed) {
+            document.getElementById('custom-modal').classList.add('hidden');
+            if (confirmed && confirmCallback) confirmCallback();
+            confirmCallback = null;
+        }
+        
+        // Statistical Thresholds (Calculated dynamically)
+        let stats = { mean: 0, sd: 0, slowCutoff: 0, advCutoff: 0 };
+
+        const TABS = {
+            'ta1': [ { key: 'ta1', label: 'TA1 (20)', max: 20, color: 'bg-blue-50' }, { key: 'a1', label: 'Assign 1 (10)', max: 10 }, { key: 'a2', label: 'Assign 2 (10)', max: 10 }, { key: 'status_ta1', label: 'Learner Status', readOnly: true, width: 'w-32', align: 'center' } ],
+            'ta2': [ { key: 'ta2', label: 'TA2 (20)', max: 20, color: 'bg-blue-50' }, { key: 'a3', label: 'Assign 3 (10)', max: 10 }, { key: 'a4', label: 'Assign 4 (10)', max: 10 }, { key: 'status_ta2', label: 'Learner Status', readOnly: true, width: 'w-32', align: 'center' } ],
+            'ta3': [ { key: 'ta3', label: 'TA3 (10)', max: 10, color: 'bg-blue-50' }, { key: 'a5', label: 'Assign 5 (10)', max: 10 } ],
+            'final': [ { key: 'ta1_s', label: 'TA1 (10)', readOnly: true }, { key: 'ta2_s', label: 'TA2 (10)', readOnly: true }, { key: 'ta3', label: 'TA3 (10)', readOnly: true }, { key: 'assign_s', label: 'Assign (15)', readOnly: true }, { key: 'att', label: 'Att (5)', readOnly: true }, { key: 'total', label: 'Total (50)', readOnly: true, bold: true } ]
+        };
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const res = await fetch(`/api/staff/dashboard?user_id=${userId}`);
+            const data = await res.json();
+            const select = document.getElementById('subject-select');
+            data.widgets.my_subjects.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = JSON.stringify({sub: s.subject_id, sec: s.section_id, name: s.subject_name});
+                opt.text = `${s.subject_name} (${s.class_name})`;
+                select.appendChild(opt);
+            });
+        });
+
+        async function loadSheet() {
+            const val = document.getElementById('subject-select').value;
+            const btns = [document.getElementById('save-btn'), document.getElementById('publish-btn'), document.getElementById('upload-btn')];
+            if(!val) { document.getElementById('sheet-body').innerHTML = `<tr><td class="p-12 text-center text-gray-400">Select a subject.</td></tr>`; btns.forEach(b => b.disabled = true); return; }
+            const { sub, sec, name } = JSON.parse(val);
+            currentSectionId = sec; currentSubjectId = sub; currentSubjectName = name;
+            document.getElementById('sheet-body').innerHTML = `<tr><td class="p-12 text-center text-gray-400">Loading...</td></tr>`;
+            try {
+                const res = await fetch(`/api/marks/get_ca_sheet?subject_id=${sub}&section_id=${sec}`);
+                const data = await res.json();
+                currentSheetData = data.students; publishStatus = data.publish_status; reportMeta = data.meta;
+                document.getElementById('header-subtitle').innerText = `${data.subject} - ${currentSheetData.length} Students`;
+                btns.forEach(b => b.disabled = false);
+                switchTab(activeTab); 
+            } catch(e) { console.error(e); showToast("Failed to load data", "error"); }
+        }
+
+        function switchTab(tabId) {
+            activeTab = tabId;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`btn-${tabId}`).classList.add('active');
+            
+            const actions = document.getElementById('action-buttons');
+            const banner = document.getElementById('status-banner');
+            const analysisBtn = document.getElementById('analysis-btn');
+            const statsBar = document.getElementById('stats-bar');
+            
+            if (tabId === 'final') {
+                actions.classList.add('invisible'); banner.classList.add('hidden'); analysisBtn.classList.add('hidden'); statsBar.classList.add('hidden');
+            } else {
+                actions.classList.remove('invisible');
+                if(tabId === 'ta1' || tabId === 'ta2') {
+                    analysisBtn.classList.remove('hidden');
+                    statsBar.classList.remove('hidden');
+                    calculateDynamicStats(tabId); // Recalc Mean/SD
+                } else {
+                    analysisBtn.classList.add('hidden');
+                    statsBar.classList.add('hidden');
+                }
+                if (publishStatus[tabId]) { 
+                    banner.classList.remove('hidden'); 
+                    banner.innerHTML = `<i data-lucide="check-circle" class="w-3 h-3 inline mr-1"></i> ${tabId.toUpperCase()} Published`; 
+                    document.getElementById('save-btn').disabled = true;
+                    document.getElementById('publish-btn').disabled = true;
+                    document.getElementById('upload-btn').disabled = true;
+                } else { 
+                    banner.classList.add('hidden'); 
+                    document.getElementById('save-btn').disabled = false;
+                    document.getElementById('publish-btn').disabled = false;
+                    document.getElementById('upload-btn').disabled = false;
+                }
+            }
+            renderTable(); lucide.createIcons();
+        }
+
+        // --- MATH UTILS ---
+        function calculateDynamicStats(tabId) {
+            // Only calc for TA1/TA2
+            const key = tabId; 
+            const scores = currentSheetData.map(s => parseFloat(s[key] || 0));
+            
+            if (scores.length === 0) { stats = { mean: 0, sd: 0, slowCutoff: 0, advCutoff: 0 }; return; }
+            
+            // 1. Mean
+            const sum = scores.reduce((a, b) => a + b, 0);
+            const mean = sum / scores.length;
+            
+            // 2. SD
+            const sqDiffs = scores.map(v => Math.pow(v - mean, 2));
+            const avgSqDiff = sqDiffs.reduce((a, b) => a + b, 0) / scores.length;
+            const sd = Math.sqrt(avgSqDiff);
+            
+            // 3. Thresholds (Standard Bell Curve Logic)
+            const slowCutoff = mean - sd;
+            const advCutoff = mean + sd;
+            
+            stats = { 
+                mean: mean.toFixed(2), 
+                sd: sd.toFixed(2), 
+                slowCutoff: slowCutoff, 
+                advCutoff: advCutoff 
+            };
+            
+            // Display
+            document.getElementById('stat-mean').innerText = stats.mean;
+            document.getElementById('stat-sd').innerText = stats.sd;
+            document.getElementById('stat-slow').innerText = stats.slowCutoff.toFixed(1);
+            document.getElementById('stat-adv').innerText = stats.advCutoff.toFixed(1);
+        }
+
+        function getNormalPDF(x, mean, sd) {
+            const m = parseFloat(mean); const s = parseFloat(sd);
+            if (s === 0) return 0;
+            return (1 / (s * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * Math.pow((x - m) / s, 2));
+        }
+
+        function renderTable() {
+            if (currentSheetData.length === 0) return;
+            const cols = TABS[activeTab];
+            const thead = document.getElementById('table-header-row');
+            const tbody = document.getElementById('sheet-body');
+            let headerHTML = `<th class="p-4 w-12 border-b border-slate-200">#</th><th class="p-4 w-32 border-b border-slate-200">Roll No</th><th class="p-4 w-48 border-b border-slate-200">Name</th>`;
+            cols.forEach(c => { headerHTML += `<th class="p-3 text-center border-b border-slate-200 ${c.readOnly ? 'bg-gray-50' : (c.color || 'bg-white')} ${c.width || ''}">${c.label}</th>`; });
+            thead.innerHTML = headerHTML;
+
+            tbody.innerHTML = currentSheetData.map((s, i) => {
+                const safeFloat = (v) => { let f = parseFloat(v); return isNaN(f) ? 0 : f; };
+                const t1 = safeFloat(s.ta1), t2 = safeFloat(s.ta2), t3 = safeFloat(s.ta3);
+                const a_avg = (safeFloat(s.a1)+safeFloat(s.a2)+safeFloat(s.a3)+safeFloat(s.a4)+safeFloat(s.a5))/5;
+                
+                // DYNAMIC STATUS LOGIC
+                let statusBadge = '<span class="text-slate-400 text-[10px]">-</span>';
+                let currentVal = 0;
+                
+                if (activeTab === 'ta1') currentVal = t1;
+                else if (activeTab === 'ta2') currentVal = t2;
+                
+                if (activeTab === 'ta1' || activeTab === 'ta2') {
+                    // Update the student object dynamically too
+                    let statusStr = 'Average';
+                    if (currentVal < stats.slowCutoff) { 
+                        statusBadge = '<span class="text-red-700 bg-red-50 px-2 py-0.5 rounded text-[10px] border border-red-100 font-bold">Slow</span>'; 
+                        statusStr = 'Slow Learner';
+                    }
+                    else if (currentVal > stats.advCutoff) { 
+                        statusBadge = '<span class="text-green-700 bg-green-50 px-2 py-0.5 rounded text-[10px] border border-green-100 font-bold">Advanced</span>';
+                        statusStr = 'Advanced Learner';
+                    }
+                    else {
+                        statusBadge = '<span class="text-slate-500 bg-slate-50 px-2 py-0.5 rounded text-[10px] border border-slate-200 font-medium">Average</span>';
+                    }
+                    // Save calculated status for export/save if needed, though backend recalculates logic 
+                    // Note: Backend logic currently uses hardcoded 8/16. 
+                    // Ideally, we should send the status OR update backend logic to match this.
+                    // For now, visual consistency is key.
+                    if (activeTab === 'ta1') s.status_ta1_disp = statusBadge;
+                    if (activeTab === 'ta2') s.status_ta2_disp = statusBadge;
+                }
+
+                if (activeTab === 'final') {
+                    s.ta1_s = (t1 * 0.5).toFixed(1); s.ta2_s = (t2 * 0.5).toFixed(1); s.assign_s = (a_avg * 1.5).toFixed(1); 
+                    s.att = s.att_score || 0;
+                    let total = (parseFloat(s.ta1_s) + parseFloat(s.ta2_s) + t3 + parseFloat(s.assign_s) + parseFloat(s.att));
+                    if (total > 50) total = 50; s.total = total.toFixed(1);
+                }
+
+                let rowHTML = `<tr class="hover:bg-slate-50 border-b border-slate-100 last:border-0 group transition-colors"><td class="p-4 text-xs text-slate-400 font-mono">${i+1}</td><td class="p-4 text-xs text-slate-600 font-bold font-mono">${s.roll}</td><td class="p-4 text-sm text-slate-800 font-medium truncate max-w-xs" title="${s.name}">${s.name}</td>`;
+                cols.forEach(c => {
+                    if (c.readOnly) {
+                        let content = s[c.key];
+                        if (c.key.startsWith('status') && (activeTab==='ta1' || activeTab==='ta2')) {
+                            content = (activeTab==='ta1' ? s.status_ta1_disp : s.status_ta2_disp) || statusBadge;
+                        }
+                        rowHTML += `<td class="p-3 text-center text-xs ${c.bold ? 'font-black text-slate-900' : 'text-slate-600'}">${content}</td>`;
+                    } else {
+                        const isLocked = publishStatus[activeTab];
+                        rowHTML += `<td class="p-2 ${c.color || ''}"><input type="number" class="w-full p-2 border border-slate-200 rounded text-center outline-none focus:ring-2 focus:ring-purple-500 transition-all text-sm font-medium ${isLocked ? 'bg-gray-100 cursor-not-allowed' : ''}" value="${s[c.key]}" min="0" max="${c.max}" onchange="${isLocked ? '' : `updateData(${i}, '${c.key}', this.value, ${c.max})`}" ${isLocked ? 'readonly' : ''}></td>`;
+                    }
+                });
+                return rowHTML + `</tr>`;
+            }).join('');
+        }
+
+        function updateData(index, key, value, max) {
+            if (publishStatus[activeTab]) return; // Prevent updates if published
+            
+            let val = parseFloat(value);
+            if (val > max) { showToast(`Max value is ${max}`, 'error'); val = max; setTimeout(renderTable, 0); }
+            if (isNaN(val) || val < 0) val = 0;
+            currentSheetData[index][key] = val;
+            
+            // Recalculate Stats if TA1/TA2 changed
+            if (activeTab === 'ta1' || activeTab === 'ta2') {
+                calculateDynamicStats(activeTab);
+            }
+            renderTable();
+        }
+
+        // --- REPORT & PDF ---
+        async function generateTermReport() {
+            if (!currentSheetData.length) return showToast("No data to analyze", "error");
+            const key = activeTab; const termName = activeTab === 'ta1' ? 'Term Assessment 1' : 'Term Assessment 2';
+            
+            // Use current dynamic stats
+            const mean = parseFloat(stats.mean);
+            const sd = parseFloat(stats.sd);
+            
+            // Categorize based on Bell Curve Logic
+            const marks = currentSheetData.map(s => parseFloat(s[key] || 0));
+            const slowList = currentSheetData.filter(s => parseFloat(s[key]||0) < stats.slowCutoff).map(s => [s.roll, s.name, s[key]]);
+            const advList = currentSheetData.filter(s => parseFloat(s[key]||0) > stats.advCutoff).map(s => [s.roll, s.name, s[key]]);
+            
+            // Bell Curve Data Points (0 to 20)
+            const xLabels = Array.from({length: 21}, (_, i) => i); // 0, 1, ... 20
+            const bellCurveData = xLabels.map(x => getNormalPDF(x, mean, sd));
+            
+            // Histogram Data
+            const histogramData = new Array(21).fill(0);
+            marks.forEach(m => {
+                let idx = Math.round(m);
+                if (idx >= 0 && idx <= 20) histogramData[idx]++;
+            });
+            
+            // Scale Bell Curve to match Histogram height roughly
+            const maxHist = Math.max(...histogramData);
+            const maxBell = Math.max(...bellCurveData);
+            const scalingFactor = maxBell > 0 ? maxHist / maxBell : 1;
+            const scaledBellCurve = bellCurveData.map(v => v * scalingFactor);
+
+            const ctx = document.getElementById('bellCurveCanvas').getContext('2d');
+            if(window.myChart) window.myChart.destroy();
+            
+            window.myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: xLabels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Student Count',
+                            data: histogramData,
+                            backgroundColor: 'rgba(147, 51, 234, 0.5)',
+                            borderColor: 'rgba(147, 51, 234, 1)',
+                            borderWidth: 1,
+                            barPercentage: 0.8
+                        },
+                        {
+                            type: 'line',
+                            label: 'Normal Distribution',
+                            data: scaledBellCurve,
+                            borderColor: '#db2777', // Pink line
+                            borderWidth: 2,
+                            tension: 0.4,
+                            pointRadius: 0
+                        }
+                    ]
+                },
+                options: { responsive: false, animation: false, scales: { y: { beginAtZero: true } }, plugins: { legend: {display: true} } }
+            });
+
+            setTimeout(async () => {
+                const chartImg = document.getElementById('bellCurveCanvas').toDataURL("image/png");
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                const logoImg = document.getElementById('mit-logo-img');
+
+                async function amsEnsureCurrentTermInfo() {
+                    if (window.__amsCurrentTermInfo) return window.__amsCurrentTermInfo;
+                    try {
+                        const res = await fetch('/api/current_term');
+                        const data = await res.json();
+                        if (res.ok) {
+                            window.__amsCurrentTermInfo = data;
+                            return data;
+                        }
+                    } catch (_) {
+                        // ignore
+                    }
+                    return null;
+                }
+
+                function amsGetAcademicTermLine() {
+                    const info = window.__amsCurrentTermInfo;
+                    if (info && info.academic_year && info.semester) {
+                        return `Academic Year: ${info.academic_year} | ${info.semester}`;
+                    }
+                    if (info && info.current_term) return `Academic Term: ${info.current_term}`;
+                    return '';
+                }
+
+                function amsDrawPdfHeader(doc, title, subLines, metaLine) {
+                    const margin = 14;
+                    const pageW = doc.internal.pageSize.getWidth();
+
+                    let logoH = 20;
+                    let logoW = 20;
+                    if (logoImg && logoImg.naturalWidth && logoImg.naturalHeight) {
+                        logoW = logoH * (logoImg.naturalWidth / logoImg.naturalHeight);
+                    }
+                    const logoX = pageW - margin - logoW;
+                    const logoY = 8;
+
+                    const leftX = margin;
+                    const maxW = Math.max(60, logoX - leftX - 6);
+
+                    let y = 15;
+                    doc.setTextColor(0, 0, 0);
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(14);
+                    const uniLines = doc.splitTextToSize(String(reportMeta.school || 'MIT Art, Design and Technology University, Pune'), maxW);
+                    doc.text(uniLines, leftX, y);
+                    y += uniLines.length * 6;
+
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(10);
+                    (subLines || []).forEach((line) => {
+                        const parts = doc.splitTextToSize(String(line || ''), maxW);
+                        doc.text(parts, leftX, y);
+                        y += parts.length * 5;
+                    });
+
+                    if (title) {
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(11);
+                        doc.setTextColor(107, 33, 168);
+                        const tLines = doc.splitTextToSize(String(title), maxW);
+                        doc.text(tLines, leftX, y);
+                        y += tLines.length * 5;
+                        doc.setTextColor(0, 0, 0);
+                    }
+
+                    if (metaLine) {
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(9);
+                        const mLines = doc.splitTextToSize(String(metaLine), maxW);
+                        doc.text(mLines, leftX, y);
+                        y += mLines.length * 4.5;
+                    }
+
+                    if (logoImg && logoImg.src) {
+                        doc.addImage(logoImg, 'PNG', logoX, logoY, logoW, logoH);
+                    }
+
+                    const headerBottom = Math.max(y + 2, logoY + logoH + 2);
+                    doc.setDrawColor(191, 157, 85);
+                    doc.setLineWidth(0.8);
+                    doc.line(margin, headerBottom, pageW - margin, headerBottom);
+                    return headerBottom + 6;
+                }
+
+                await amsEnsureCurrentTermInfo();
+                const termLine = amsGetAcademicTermLine();
+                
+                const metaBits = [
+                    `Class: ${reportMeta.class_name}`,
+                    `Subject: ${reportMeta.subject_name} (${reportMeta.subject_code})`,
+                    `Assessment: ${termName}`,
+                    `Faculty: ${reportMeta.teacher}`,
+                    termLine
+                ].filter(Boolean);
+
+                const startY = amsDrawPdfHeader(
+                    doc,
+                    'RESULT ANALYSIS REPORT',
+                    ['Department of Information Technology'],
+                    metaBits.join(' | ')
+                );
+                
+                // Stats Box
+                doc.setFillColor(248, 250, 252); doc.rect(14, startY, 180, 12, 'F');
+                doc.setFont("helvetica", "bold"); doc.text(`Mean: ${stats.mean} | SD: ${stats.sd} | Slow < ${stats.slowCutoff.toFixed(1)} | Adv > ${stats.advCutoff.toFixed(1)}`, 16, startY + 7);
+
+                // Chart
+                doc.addImage(chartImg, 'PNG', 14, startY + 17, 180, 80);
+                
+                let y = startY + 107;
+                doc.setFontSize(11); doc.setTextColor(220, 38, 38);
+                doc.text(`2. Slow Learners - Count: ${slowList.length}`, 14, y);
+                doc.setTextColor(0, 0, 0);
+                if (slowList.length > 0) {
+                    doc.autoTable({ startY: y+5, head: [['Roll No', 'Name', 'Marks']], body: slowList, theme: 'grid', headStyles: { fillColor: [220, 38, 38] } });
+                    y = doc.lastAutoTable.finalY + 15;
+                } else { doc.setFont("helvetica", "italic"); doc.text("None.", 14, y+8); y += 20; }
+                
+                if(y > 250) { doc.addPage(); y = 20; }
+                
+                doc.setFont("helvetica", "bold"); doc.setTextColor(22, 163, 74);
+                doc.text(`3. Advanced Learners - Count: ${advList.length}`, 14, y);
+                doc.setTextColor(0, 0, 0);
+                if (advList.length > 0) {
+                    doc.autoTable({ startY: y+5, head: [['Roll No', 'Name', 'Marks']], body: advList, theme: 'grid', headStyles: { fillColor: [22, 163, 74] } });
+                } else { doc.setFont("helvetica", "italic"); doc.text("None.", 14, y+8); }
+                
+                doc.save(`${reportMeta.subject_name}_${termName}_Analysis.pdf`);
+            }, 500);
+        }
+
+        // --- Helpers (Same) ---
+        function downloadTemplate() { if (!currentSectionId) return showToast("Select subject first", "error"); if (activeTab === 'final') return showToast("Cannot upload for Summary", "error"); window.location.href = `/api/marks/download_template?section_id=${currentSectionId}&subject_id=${currentSubjectId}&term=${activeTab}`; }
+        async function handleFileUpload() { 
+            if (publishStatus[activeTab]) {
+                showToast(`${activeTab.toUpperCase()} is already published and locked. Cannot upload new data.`, "error");
+                return;
+            }
+            
+            const input = document.getElementById('csv-input'); 
+            const file = input.files[0]; 
+            if (!file) return; 
+            const formData = new FormData(); 
+            formData.append('file', file); 
+            formData.append('section_id', currentSectionId); 
+            formData.append('term', activeTab); 
+            const btn = document.getElementById('upload-btn'); 
+            btn.innerText = "Processing..."; 
+            btn.disabled = true; 
+            try { 
+                const res = await fetch('/api/marks/upload_csv', { method: 'POST', body: formData }); 
+                const data = await res.json(); 
+                if (res.ok) { 
+                    data.data.forEach(imported => { 
+                        const existing = currentSheetData.find(s => s.student_id === imported.student_id); 
+                        if (existing) { 
+                            Object.keys(imported).forEach(k => { 
+                                if(k !== 'student_id') existing[k] = imported[k]; 
+                            }); 
+                        } 
+                    }); 
+                    showToast(`Imported marks for ${activeTab.toUpperCase()}`, 'success'); 
+                    renderTable(); 
+                } else showToast("Upload Failed", "error"); 
+            } catch(e) { showToast("Network Error", "error"); } 
+            btn.innerText = "Upload"; 
+            btn.disabled = false; 
+            input.value = ""; 
+        }
+        async function saveMarks(publish) { 
+            const val = document.getElementById('subject-select').value; 
+            if(!val) return; 
+            
+            if (publish) {
+                // Check if data is filled for the current tab
+                let hasData = false;
+                if (activeTab === 'ta1') {
+                    hasData = currentSheetData.some(s => parseFloat(s.ta1 || 0) > 0 || parseFloat(s.a1 || 0) > 0 || parseFloat(s.a2 || 0) > 0);
+                } else if (activeTab === 'ta2') {
+                    hasData = currentSheetData.some(s => parseFloat(s.ta2 || 0) > 0 || parseFloat(s.a3 || 0) > 0 || parseFloat(s.a4 || 0) > 0);
+                } else if (activeTab === 'ta3') {
+                    hasData = currentSheetData.some(s => parseFloat(s.ta3 || 0) > 0 || parseFloat(s.a5 || 0) > 0);
+                }
+                
+                if (!hasData) {
+                    showToast(`Please enter marks data for ${activeTab.toUpperCase()} before publishing.`, "error");
+                    return;
+                }
+                
+                // CUSTOM MODAL CALL
+                showConfirm("Publish Results?", "Once published, marks will be locked and visible to students immediately. This action cannot be undone.", () => executeSave(true));
+            } else {
+                executeSave(false);
+            }
+        }
+
+        async function executeSave(publish) {
+            const val = document.getElementById('subject-select').value;
+            const { sub, sec } = JSON.parse(val);
+            const btn = document.getElementById(publish ? 'publish-btn' : 'save-btn');
+            const orgText = btn.innerHTML;
+            btn.innerText = "Saving..."; btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/marks/submit_ca', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ subject_id: sub, section_id: sec, marks: currentSheetData, term: activeTab, publish: publish }) });
+                if(res.ok) { 
+                    showToast(publish ? "Published Successfully!" : "Draft Saved", "success"); 
+                    if(publish) { 
+                        publishStatus[activeTab] = true; 
+                        switchTab(activeTab); 
+                    } 
+                } else showToast("Failed to save", "error");
+            } catch(e) { showToast("Network Error", "error"); }
+            btn.innerHTML = orgText; btn.disabled = false;
+        }
+    </script>
+</body>
+</html>

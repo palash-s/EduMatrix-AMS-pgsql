@@ -1,0 +1,137 @@
+<!-- Shared Notifications Bell + Dropdown -->
+<div class="relative" id="shared-notif-container">
+    <button type="button" onclick="window.__amsToggleSharedNotif && window.__amsToggleSharedNotif()" class="relative p-2 hover:bg-gray-100 rounded-full" aria-label="Notifications">
+        <i data-lucide="bell" class="w-5 h-5 text-gray-600"></i>
+        <span id="shared-notif-badge" class="hidden absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+    </button>
+
+    <div id="shared-notif-dropdown" class="hidden absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
+        <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+            <h3 class="font-bold text-gray-800 text-sm">Notifications</h3>
+            <button type="button" onclick="window.__amsMarkAllSharedNotifRead && window.__amsMarkAllSharedNotifRead()" class="text-[10px] text-purple-600 hover:underline">Mark all read</button>
+        </div>
+        <div id="shared-notif-list" class="max-h-64 overflow-y-auto custom-scroll">
+            <p class="p-4 text-center text-gray-400 text-xs">Loading...</p>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='script.js', v='20251215') }}"></script>
+
+<script>
+    (function initSharedNotifications() {
+        if (window.__amsSharedNotifBound) return;
+        window.__amsSharedNotifBound = true;
+
+        const POLL_MS = 30000;
+
+        function getUserId() {
+            return sessionStorage.getItem('user_id');
+        }
+
+        function el(id) {
+            return document.getElementById(id);
+        }
+
+        function closeDropdown() {
+            const dd = el('shared-notif-dropdown');
+            if (dd) dd.classList.add('hidden');
+        }
+
+        async function loadNotifications() {
+            const userId = getUserId();
+            if (!userId) return;
+
+            try {
+                const res = await fetch(`/api/notifications?user_id=${userId}`);
+                const data = await res.json();
+
+                const badge = el('shared-notif-badge');
+                if (badge) {
+                    if (data.unread > 0) badge.classList.remove('hidden');
+                    else badge.classList.add('hidden');
+                }
+
+                const list = el('shared-notif-list');
+                if (!list) return;
+
+                if (!data.notifications || data.notifications.length === 0) {
+                    list.innerHTML = '<p class="p-4 text-center text-gray-400 text-xs">No notifications.</p>';
+                    return;
+                }
+
+                list.innerHTML = data.notifications.map(n => {
+                    const bg = n.is_read ? 'bg-white opacity-60' : 'bg-blue-50/50';
+                    let iconColor = 'text-gray-400';
+                    if (n.type === 'danger') iconColor = 'text-red-500';
+                    if (n.type === 'success') iconColor = 'text-green-500';
+                    if (n.type === 'warning') iconColor = 'text-yellow-500';
+
+                    return `
+                        <div onclick="window.__amsMarkSharedNotifRead && window.__amsMarkSharedNotifRead('${n.id}', '${n.link}')" class="p-3 border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors ${bg}">
+                            <div class="flex gap-3">
+                                <div class="mt-1"><i data-lucide="circle-alert" class="w-4 h-4 ${iconColor}"></i></div>
+                                <div>
+                                    <p class="text-sm font-bold text-gray-800">${n.title}</p>
+                                    <p class="text-xs text-gray-600 leading-snug">${n.message}</p>
+                                    <p class="text-[9px] text-gray-400 mt-1">${n.time}</p>
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+
+                if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
+            } catch (e) {
+                // Silent fail: notifications should never break the dashboard
+            }
+        }
+
+        // Allow dashboards to manually refresh notifications (e.g., their auto-refresh tick)
+        window.__amsLoadSharedNotifications = loadNotifications;
+
+        window.__amsToggleSharedNotif = function () {
+            const dd = el('shared-notif-dropdown');
+            if (!dd) return;
+            dd.classList.toggle('hidden');
+            if (!dd.classList.contains('hidden')) loadNotifications();
+        };
+
+        window.__amsMarkAllSharedNotifRead = async function () {
+            const userId = getUserId();
+            if (!userId) return;
+            await fetch('/api/notifications/mark_read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: 'all', user_id: userId })
+            });
+            loadNotifications();
+        };
+
+        window.__amsMarkSharedNotifRead = async function (id, link) {
+            await fetch('/api/notifications/mark_read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id })
+            });
+
+            if (link && link !== 'null') {
+                window.location.href = link;
+            } else {
+                loadNotifications();
+            }
+        };
+
+        document.addEventListener('click', function (e) {
+            const container = el('shared-notif-container');
+            const dd = el('shared-notif-dropdown');
+            if (!container || !dd) return;
+            if (!dd.classList.contains('hidden') && !container.contains(e.target)) closeDropdown();
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initial paint
+            loadNotifications();
+            // Auto-refresh is disabled globally.
+        });
+    })();
+</script>

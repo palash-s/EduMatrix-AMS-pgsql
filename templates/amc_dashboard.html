@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AMC Dashboard - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PDF Libs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .tab-btn.active { border-bottom: 2px solid #2563eb; color: #1e40af; background: #eff6ff; }
+        .tab-btn { border-bottom: 2px solid transparent; color: #64748b; }
+        .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 h-16 flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-3">
+            <button onclick="window.location.href='/staff/dashboard'" class="p-2 -ml-2 hover:bg-slate-100 rounded-full"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+            <h1 class="font-bold text-lg text-slate-800">AMC Monitor</h1>
+        </div>
+        <div class="flex items-center gap-4">
+            {% include '_notifications.html' %}
+            <span id="current-term-badge" class="hidden sm:inline-flex px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 shadow-sm">Loading term...</span>
+            <input type="date" id="global-date" class="p-2 border rounded-lg text-sm bg-slate-50 outline-none focus:ring-2 focus:ring-blue-500" onchange="refreshAll()">
+            <select id="class-select" onchange="refreshAll()" class="hidden p-2 border rounded-lg text-sm bg-slate-50 min-w-[200px] outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">-- Select Class --</option>
+            </select>
+        </div>
+    </nav>
+
+    <main class="p-6 max-w-7xl mx-auto space-y-6">
+        
+        <!-- TABS -->
+        <div class="flex border-b border-slate-200 bg-white rounded-t-xl overflow-hidden shadow-sm">
+            <button onclick="switchTab('compliance')" id="tab-compliance" class="tab-btn active w-1/4 py-4 text-sm font-bold transition-colors flex items-center justify-center gap-2"><i data-lucide="clipboard-check" class="w-4 h-4"></i> Attendance</button>
+            <button onclick="switchTab('results')" id="tab-results" class="tab-btn w-1/4 py-4 text-sm font-bold transition-colors flex items-center justify-center gap-2"><i data-lucide="bar-chart-2" class="w-4 h-4"></i> Result Analysis</button>
+            <button onclick="switchTab('syllabus')" id="tab-syllabus" class="tab-btn w-1/4 py-4 text-sm font-bold transition-colors flex items-center justify-center gap-2 text-indigo-600"><i data-lucide="book-open-check" class="w-4 h-4"></i> Syllabus</button>
+            <button onclick="switchTab('termgrant')" id="tab-termgrant" class="tab-btn w-1/4 py-4 text-sm font-bold transition-colors flex items-center justify-center gap-2 text-purple-600"><i data-lucide="scroll-text" class="w-4 h-4"></i> Term Grant</button>
+        </div>
+
+        <!-- VIEW 1: COMPLIANCE -->
+        <div id="view-compliance" class="view-section space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm"><p class="text-xs text-slate-400 font-bold uppercase">Scheduled</p><h3 class="text-3xl font-black text-slate-800 mt-1" id="stat-total">--</h3></div>
+                <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm"><p class="text-xs text-slate-400 font-bold uppercase">Conducted</p><h3 class="text-3xl font-black text-green-600 mt-1" id="stat-conducted">--</h3></div>
+                <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm"><p class="text-xs text-slate-400 font-bold uppercase">Missing</p><h3 class="text-3xl font-black text-red-500 mt-1" id="stat-missing">--</h3></div>
+                <div class="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm"><p class="text-xs text-blue-600 font-bold uppercase">Compliance Rate</p><h3 class="text-3xl font-black text-blue-700 mt-1" id="stat-rate">--%</h3></div>
+            </div>
+            <div id="hierarchy-container" class="space-y-4"></div>
+            <div id="detail-container" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center"><div class="flex items-center gap-2"><button onclick="showHierarchy()" class="p-1 hover:bg-slate-200 rounded text-slate-500"><i data-lucide="arrow-left" class="w-4 h-4"></i></button><h3 class="font-bold text-slate-700 text-sm" id="detail-title">Session Log</h3></div><span class="text-[10px] bg-slate-200 px-2 py-1 rounded text-slate-600 font-mono" id="current-date-display">Today</span></div><div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-slate-50 text-slate-500 font-bold text-xs uppercase border-b border-slate-100"><tr><th class="p-4">Time</th><th class="p-4">Teacher</th><th class="p-4">Subject</th><th class="p-4">Batch</th><th class="p-4 text-center">Status</th><th class="p-4 text-center">Str</th><th class="p-4 text-center">P</th><th class="p-4 text-center">A</th></tr></thead><tbody id="compliance-list" class="divide-y divide-slate-100"></tbody></table></div></div>
+        </div>
+
+        <!-- VIEW 2: RESULTS -->
+        <div id="view-results" class="view-section space-y-6 hidden">
+            <div class="flex justify-between items-center"><h2 class="text-lg font-bold text-slate-800">CA Performance Matrix</h2><button onclick="downloadResultPDF()" class="px-4 py-2 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700 flex items-center gap-2"><i data-lucide="file-down" class="w-3 h-3"></i> Export Report</button></div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div class="p-3 border-b border-slate-100 bg-purple-50"><h3 class="font-bold text-purple-800 text-xs uppercase tracking-wider">Marks Distribution</h3></div><div class="overflow-x-auto"><table class="w-full text-left text-sm" id="dist-table"><thead class="bg-white text-slate-500 font-bold text-xs border-b border-slate-100"><tr><th class="p-3 w-24">Code</th><th class="p-3 w-1/3">Subject</th><th class="p-3 text-center">0-9</th><th class="p-3 text-center">10-19</th><th class="p-3 text-center">20-30</th><th class="p-3 text-center">31-40</th><th class="p-3 text-center">41-50</th><th class="p-3 text-center font-black">Total</th></tr></thead><tbody id="dist-body" class="divide-y divide-slate-100"></tbody></table></div></div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div class="p-3 border-b border-slate-100 bg-slate-50"><h3 class="font-bold text-slate-700 text-xs uppercase tracking-wider">Student Score Sheet (Total / 50)</h3></div><div class="overflow-auto custom-scroll max-h-[500px]"><table class="w-full text-left text-sm border-collapse" id="matrix-table"><thead class="bg-white text-slate-500 font-bold text-xs sticky top-0 z-10 shadow-sm"><tr id="matrix-header"></tr></thead><tbody id="matrix-body" class="divide-y divide-slate-100 bg-white"></tbody></table></div></div>
+        </div>
+
+        <!-- VIEW 3: SYLLABUS MONITOR -->
+        <div id="view-syllabus" class="view-section space-y-6 hidden">
+            <div class="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div><h2 class="text-lg font-bold text-slate-800 flex items-center gap-2"><i data-lucide="book-open-check" class="w-5 h-5 text-indigo-600"></i> Syllabus Completion Status</h2><p class="text-xs text-gray-500">Monitoring against Teaching Plan</p></div>
+                <div class="flex gap-2"><select id="syllabus-term" onchange="loadSyllabusData()" class="p-2 border rounded-lg text-sm bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500"><option value="ta1">Target: TA 1 (Unit 1-2)</option><option value="ta2">Target: TA 2 (Unit 3-4)</option><option value="ta3">Target: TA 3 (Unit 5-6)</option></select><button onclick="downloadSyllabusReport()" class="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 flex items-center gap-2"><i data-lucide="file-down" class="w-3 h-3"></i> Report</button></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-left text-sm" id="syllabus-table"><thead class="bg-indigo-50 text-indigo-900 font-bold text-xs uppercase border-b border-indigo-100"><tr><th class="p-4 w-48">Coordinator</th><th class="p-4 w-64">Subject</th><th class="p-4 text-center">Planned</th><th class="p-4 text-center">Conducted</th><th class="p-4 text-center">Units Done</th><th class="p-4 text-center">% Covered</th><th class="p-4 text-center text-red-600">Extra Req.</th><th class="p-4 w-32">Remark</th></tr></thead><tbody id="syllabus-body" class="divide-y divide-slate-100"><tr><td colspan="8" class="p-12 text-center text-slate-400">Select Class & Term.</td></tr></tbody></table></div></div>
+        </div>
+
+        <!-- VIEW 4: TERM GRANT -->
+        <div id="view-termgrant" class="view-section space-y-6 hidden">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="bg-green-50 p-5 rounded-xl border border-green-100 shadow-sm"><p class="text-xs text-green-600 font-bold uppercase">Granted</p><h3 class="text-3xl font-black text-green-700 mt-1" id="grant-ok">--</h3></div>
+                <div class="bg-yellow-50 p-5 rounded-xl border border-yellow-100 shadow-sm"><p class="text-xs text-yellow-600 font-bold uppercase">Provisional</p><h3 class="text-3xl font-black text-yellow-700 mt-1" id="grant-prov">--</h3></div>
+                <div class="bg-red-50 p-5 rounded-xl border border-red-100 shadow-sm"><p class="text-xs text-red-600 font-bold uppercase">Detained</p><h3 class="text-3xl font-black text-red-700 mt-1" id="grant-fail">--</h3></div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-3">
+                    <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 pb-2">Grant Rules</h3>
+                    <div class="flex gap-2">
+                        <div class="flex-1"><label class="block text-[10px] text-gray-400 mb-1">Min Att %</label><input type="number" id="rule-att" value="75" min="0" max="100" class="w-full p-1.5 border rounded text-sm font-bold text-center bg-slate-50"></div>
+                        <div class="flex-1"><label class="block text-[10px] text-gray-400 mb-1">Min Marks</label><input type="number" id="rule-marks" value="20" min="0" max="50" class="w-full p-1.5 border rounded text-sm font-bold text-center bg-slate-50"></div>
+                    </div>
+                    <button onclick="generateTermGrant()" class="w-full py-1.5 bg-slate-800 text-white text-xs font-bold rounded-lg hover:bg-black transition-colors flex items-center justify-center gap-2"><i data-lucide="cpu" class="w-3 h-3"></i> Run Engine</button>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center"><h3 class="font-bold text-slate-700 text-sm">Eligibility List</h3><div class="flex gap-2"><button onclick="filterGrant('All')" class="text-[10px] px-2 py-1 rounded bg-white border hover:bg-slate-50">All</button><button onclick="filterGrant('Detained')" class="text-[10px] px-2 py-1 rounded bg-red-50 text-red-600 border border-red-100 hover:bg-red-100">Detained Only</button><button onclick="downloadSummaryReport()" class="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded hover:bg-red-700 flex items-center gap-1"><i data-lucide="file-warning" class="w-3 h-3"></i> PDF</button></div></div>
+                <div class="overflow-auto custom-scroll max-h-[500px]"><table class="w-full text-left text-sm border-collapse"><thead class="bg-white text-slate-500 font-bold text-xs uppercase sticky top-0 z-10 shadow-sm"><tr><th class="p-4 w-24">Roll No</th><th class="p-4">Name</th><th class="p-4 text-center">Att %</th><th class="p-4 text-center">Avg Marks</th><th class="p-4 text-center">Fails</th><th class="p-4 text-center">Detentions</th><th class="p-4 text-center">Status</th><th class="p-4 w-64">Remarks</th><th class="p-4 text-right">Action</th></tr></thead><tbody id="grant-body" class="divide-y divide-slate-100 bg-white"><tr><td colspan="9" class="p-12 text-center text-slate-400">Select a class and click Generate.</td></tr></tbody></table></div>
+            </div>
+        </div>
+
+    </main>
+    
+    <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let currentReportData = null;
+        let currentSyllabusData = null;
+        let currentGrantData = [];
+        const AUTO_REFRESH_MS = 30000;
+
+        let __amsCurrentTermInfo = null;
+        async function loadCurrentTermBadge() {
+            const el = document.getElementById('current-term-badge');
+            if (!el) return;
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                __amsCurrentTermInfo = data;
+                const ay = data && data.academic_year ? data.academic_year : null;
+                const sem = data && data.semester ? data.semester : null;
+                el.textContent = (ay && sem) ? `AY ${ay} • ${sem}` : (data && data.current_term ? data.current_term : '-');
+            } catch (e) {
+                el.textContent = '-';
+            }
+        }
+
+        function amsGetAcademicTermLine(meta) {
+            const ayRaw = (meta && meta.year) ? meta.year : (__amsCurrentTermInfo && __amsCurrentTermInfo.academic_year);
+            const semRaw = (meta && meta.semester) ? meta.semester : (__amsCurrentTermInfo && __amsCurrentTermInfo.semester);
+            const ay = (ayRaw || '').toString().trim();
+            const sem = (semRaw || '').toString().trim();
+            if (ay && sem) {
+                const semLabel = sem.toLowerCase().includes('sem') ? sem : `Sem ${sem}`;
+                return `Academic Year: ${ay} | ${semLabel}`;
+            }
+            if (__amsCurrentTermInfo && __amsCurrentTermInfo.current_term) {
+                return `Academic Term: ${__amsCurrentTermInfo.current_term}`;
+            }
+            return '';
+        }
+
+        function amsDrawPdfHeader(doc, title, subLines, metaLine) {
+            const margin = 14;
+            const pageW = doc.internal.pageSize.getWidth();
+            const logoImg = document.getElementById('mit-logo-img');
+
+            let logoH = 20;
+            let logoW = 20;
+            if (logoImg && logoImg.naturalWidth && logoImg.naturalHeight) {
+                logoW = logoH * (logoImg.naturalWidth / logoImg.naturalHeight);
+            }
+            const logoX = pageW - margin - logoW;
+            const logoY = 10;
+
+            const leftX = margin;
+            const maxW = Math.max(60, logoX - leftX - 6);
+
+            let y = 16;
+            doc.setTextColor(0, 0, 0);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            const uniLines = doc.splitTextToSize('MIT Art, Design and Technology University, Pune', maxW);
+            doc.text(uniLines, leftX, y);
+            y += uniLines.length * 6;
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            (subLines || []).forEach((line) => {
+                const parts = doc.splitTextToSize(String(line || ''), maxW);
+                doc.text(parts, leftX, y);
+                y += parts.length * 5;
+            });
+
+            if (title) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(11);
+                const tLines = doc.splitTextToSize(String(title), maxW);
+                doc.text(tLines, leftX, y);
+                y += tLines.length * 5;
+            }
+
+            if (metaLine) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                const mLines = doc.splitTextToSize(String(metaLine), maxW);
+                doc.text(mLines, leftX, y);
+                y += mLines.length * 4.5;
+            }
+
+            if (logoImg && logoImg.src) {
+                doc.addImage(logoImg, 'PNG', logoX, logoY, logoW, logoH);
+            }
+
+            const headerBottom = Math.max(y + 2, logoY + logoH + 2);
+            doc.setDrawColor(191, 157, 85);
+            doc.setLineWidth(0.6);
+            doc.line(margin, headerBottom, pageW - margin, headerBottom);
+            return headerBottom + 6;
+        }
+
+        function shouldSkipAutoRefresh() {
+            if (document.hidden) return true;
+            if (window.__amsActionModalOpen) return true;
+            return !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        }
+
+        function isComplianceDetailOpen() {
+            const detail = document.getElementById('detail-container');
+            return detail && !detail.classList.contains('hidden');
+        }
+
+        async function refreshAmcDashboard() {
+            if (shouldSkipAutoRefresh()) return;
+            // Avoid pulling the user out of a drilled-down compliance detail view.
+            if (document.getElementById('tab-compliance').classList.contains('active') && isComplianceDetailOpen()) return;
+            refreshAll();
+        }
+
+        document.getElementById('global-date').valueAsDate = new Date();
+        document.getElementById('current-date-display').innerText = new Date().toLocaleDateString();
+        document.getElementById('global-date').max = new Date().toISOString().split('T')[0];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            if(!userId) window.location.href = '/';
+            loadCurrentTermBadge();
+            const res = await fetch('/api/core/classes');
+            const data = await res.json();
+            const select = document.getElementById('class-select');
+            data.classes.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id; opt.text = c.name;
+                select.appendChild(opt);
+            });
+            refreshAll();
+
+            // Auto-refresh is disabled globally.
+        });
+
+        function switchTab(tab) {
+            document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`view-${tab}`).classList.remove('hidden');
+            document.getElementById(`tab-${tab}`).classList.add('active');
+
+            const classSelect = document.getElementById('class-select');
+            const datePicker = document.getElementById('global-date');
+
+            if (tab === 'compliance') {
+                classSelect.classList.add('hidden');
+                datePicker.classList.remove('hidden');
+                loadComplianceHierarchy();
+            } else {
+                classSelect.classList.remove('hidden');
+                datePicker.classList.add('hidden');
+                refreshAll();
+            }
+        }
+
+        function refreshAll() {
+            const classVal = document.getElementById('class-select').value;
+            if (document.getElementById('tab-compliance').classList.contains('active')) loadComplianceHierarchy();
+            else if (document.getElementById('tab-results').classList.contains('active') && classVal) loadResultsData();
+            else if (document.getElementById('tab-syllabus').classList.contains('active') && classVal) loadSyllabusData();
+            else if (document.getElementById('tab-termgrant').classList.contains('active') && classVal) loadTermGrantData();
+        }
+
+        // --- COMPLIANCE ---
+        async function loadComplianceHierarchy() {
+            const dateVal = document.getElementById('global-date').value;
+            try {
+                const res = await fetch(`/api/amc/compliance_hierarchy?date=${dateVal}`);
+                const data = await res.json();
+                let t=0, c=0, m=0; Object.values(data).forEach(lvl => { t+=lvl.total_scheduled; c+=lvl.conducted; m+=lvl.missing; });
+                document.getElementById('stat-total').innerText = t; document.getElementById('stat-conducted').innerText = c;
+                document.getElementById('stat-missing').innerText = m; document.getElementById('stat-rate').innerText = (t>0 ? Math.round((c/t)*100) : 0) + "%";
+                const container = document.getElementById('hierarchy-container');
+                if (Object.keys(data).length === 0) { container.innerHTML = '<p class="text-center text-gray-400 py-10">No schedule data.</p>'; return; }
+                container.innerHTML = Object.keys(data).sort().map(lvl => {
+                    const info = data[lvl];
+                    const sections = info.sections.map(sec => `<div onclick="loadSectionDetail(${sec.id}, '${sec.name}', '${lvl}')" class="cursor-pointer bg-white border border-slate-200 rounded-lg p-3 hover:border-blue-300 hover:shadow-sm transition-all text-center min-w-[100px]"><h4 class="font-bold text-slate-700">Div ${sec.name}</h4><div class="mt-2 text-xs grid grid-cols-2 gap-1 text-slate-500"><span>${sec.stats.conducted}/${sec.stats.total}</span><span class="${sec.stats.compliance < 75 ? 'text-red-500' : 'text-green-600'} font-bold">${sec.stats.compliance}%</span></div></div>`).join('');
+                    return `<div class="bg-slate-50 rounded-xl p-4 border border-slate-200"><div class="flex justify-between items-center mb-3"><h3 class="font-bold text-lg text-slate-800">${lvl} <span class="text-sm font-normal text-slate-500">(${info.compliance}%)</span></h3><div class="text-xs text-slate-400">Scheduled: ${info.total_scheduled}</div></div><div class="flex flex-wrap gap-4">${sections}</div></div>`;
+                }).join('');
+                showHierarchy(); 
+            } catch(e) { console.error(e); }
+        }
+
+        async function loadSectionDetail(sid, name, lvl) {
+            const dateVal = document.getElementById('global-date').value;
+            document.getElementById('hierarchy-container').classList.add('hidden'); document.getElementById('detail-container').classList.remove('hidden');
+            document.getElementById('detail-title').innerText = `Session Log: ${lvl} - ${name}`; document.getElementById('current-date-display').innerText = dateVal;
+            const tbody = document.getElementById('compliance-list'); tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">Loading details...</td></tr>`;
+            try {
+                const res = await fetch(`/api/amc/dashboard?user_id=${userId}&date=${dateVal}&section_id=${sid}`);
+                const data = await res.json();
+                if (data.compliance_list.length === 0) { tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">No sessions scheduled for this class.</td></tr>`; return; }
+                tbody.innerHTML = data.compliance_list.map(c => {
+                    let statusBadge = '';
+                    if (c.status === 'Conducted') statusBadge = '<span class="text-green-700 bg-green-50 px-2 py-0.5 rounded font-bold text-[10px] border border-green-200">Conducted</span>';
+                    else if (c.status === 'Missing') statusBadge = '<span class="text-red-700 bg-red-50 px-2 py-0.5 rounded font-bold text-[10px] border border-red-200">Missing</span>';
+                    else statusBadge = '<span class="text-slate-500 bg-slate-100 px-2 py-0.5 rounded font-bold text-[10px]">Pending</span>';
+                    return `<tr class="hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0"><td class="p-4 font-mono text-xs text-slate-500">${c.time.split(' - ')[0]}</td><td class="p-4 font-bold text-slate-700 text-xs">${c.teacher}</td><td class="p-4 text-xs text-slate-600">${c.subject}</td><td class="p-4 text-xs text-slate-500">${c.batch}</td><td class="p-4 text-center">${statusBadge}</td><td class="p-4 text-center text-xs font-mono font-bold text-slate-400">${c.strength}</td><td class="p-4 text-center text-xs font-mono font-bold text-green-600">${c.present}</td><td class="p-4 text-center text-xs font-mono font-bold text-red-500">${c.absent}</td></tr>`;
+                }).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        function showHierarchy() { document.getElementById('hierarchy-container').classList.remove('hidden'); document.getElementById('detail-container').classList.add('hidden'); }
+
+        // --- RESULTS ---
+        async function loadResultsData() {
+             const sectionId = document.getElementById('class-select').value;
+             if(!sectionId) return;
+             try { 
+                 const res = await fetch(`/api/amc/class_ca_summary?section_id=${sectionId}`); 
+                 const data = await res.json(); 
+                 currentReportData = data; 
+                 document.getElementById('dist-body').innerHTML = data.distribution.map((d, i) => { const code = data.headers[i] ? data.headers[i].code : '-'; return `<tr class="hover:bg-purple-50 transition-colors"><td class="p-3 font-mono text-xs text-slate-500">${code}</td><td class="p-3 font-bold text-slate-700 text-xs">${d.subject}</td><td class="p-3 text-center text-slate-500">${d.ranges[0]}</td><td class="p-3 text-center text-slate-500">${d.ranges[1]}</td><td class="p-3 text-center text-slate-500">${d.ranges[2]}</td><td class="p-3 text-center text-slate-500">${d.ranges[3]}</td><td class="p-3 text-center text-slate-500">${d.ranges[4]}</td><td class="p-3 text-center font-bold text-purple-700">${d.total_students}</td></tr>`; }).join(''); 
+                 let headerHTML = `<th class="p-3 w-16 bg-slate-50">Roll</th><th class="p-3 bg-slate-50 w-48">Name</th>`; data.headers.forEach(h => { headerHTML += `<th class="p-3 text-center bg-slate-50 whitespace-nowrap" title="${h.name}">${h.code}</th>`; }); document.getElementById('matrix-header').innerHTML = headerHTML; 
+                 document.getElementById('matrix-body').innerHTML = data.rows.map((r, index) => { let cols = r.scores.map(s => { let color = 'text-slate-400'; if (typeof s === 'number') { if (s < 20) color = 'text-red-600 font-bold'; else if (s >= 40) color = 'text-green-600 font-bold'; else color = 'text-slate-700'; } return `<td class="p-3 text-center border-l border-slate-50 ${color}">${s}</td>`; }).join(''); return `<tr class="hover:bg-slate-50 border-b border-slate-50 last:border-0"><td class="p-3 font-mono text-xs text-slate-500">${r.roll}</td><td class="p-3 text-xs font-bold text-slate-700 truncate max-w-[200px]" title="${r.name}">${r.name}</td>${cols}</tr>`; }).join(''); 
+             } catch(e) { console.error(e); }
+        }
+        
+        function downloadResultPDF() {
+            if (!currentReportData) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('l', 'mm', 'a4');
+
+            const termLine = amsGetAcademicTermLine();
+            const metaLine = `Class: ${currentReportData.meta.class_name} | Date: ${new Date().toLocaleDateString()}${termLine ? ' | ' + termLine : ''}`;
+            const startY = amsDrawPdfHeader(
+                doc,
+                'AMC - CONTINUOUS ASSESSMENT REPORT',
+                ['Department of Information Technology'],
+                metaLine
+            );
+
+            doc.autoTable({
+                html: '#dist-table',
+                startY,
+                theme: 'grid',
+                headStyles: { fillColor: [72, 22, 109], textColor: 255 },
+                styles: { fontSize: 8, cellPadding: 2 }
+            });
+
+            doc.addPage();
+            const startY2 = amsDrawPdfHeader(
+                doc,
+                'Student Score Matrix (Total / 50)',
+                ['Department of Information Technology'],
+                metaLine
+            );
+            doc.autoTable({
+                html: '#matrix-table',
+                startY: startY2,
+                theme: 'grid',
+                headStyles: { fillColor: [50, 50, 50], textColor: 255 },
+                styles: { fontSize: 7, cellPadding: 1.5, halign: 'center' },
+                columnStyles: { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 30, halign: 'center' }, 2: { halign: 'left' } }
+            });
+
+            doc.save('AMC_Result_Report.pdf');
+        }
+
+        // --- SYLLABUS ---
+        async function loadSyllabusData() {
+            const sectionId = document.getElementById('class-select').value;
+            const term = document.getElementById('syllabus-term').value;
+            if(!sectionId) return;
+            const tbody = document.getElementById('syllabus-body');
+            tbody.innerHTML = `<tr><td colspan="8" class="p-12 text-center text-slate-400">Loading...</td></tr>`;
+            try {
+                const res = await fetch(`/api/amc/syllabus_report?section_id=${sectionId}&term=${term}`);
+                const data = await res.json();
+                currentSyllabusData = data;
+                tbody.innerHTML = data.data.map(r => `
+                    <tr class="hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0">
+                        <td class="p-4 text-xs font-bold text-slate-700">${r.teacher}</td>
+                        <td class="p-4 text-sm font-medium text-slate-800">${r.subject}<span class="block text-[10px] text-slate-400 font-mono">${r.code}</span></td>
+                        <td class="p-4 text-center text-xs font-mono text-slate-500">${r.planned}</td>
+                        <td class="p-4 text-center text-xs font-mono text-slate-500">${r.conducted}</td>
+                        <td class="p-4 text-center text-xs font-mono font-bold text-slate-700">${r.units_covered}</td>
+                        <td class="p-4 text-center text-xs font-bold ${parseInt(r.percentage)<50?'text-red-600':(parseInt(r.percentage)<80?'text-yellow-600':'text-green-600')}">${r.percentage}</td>
+                        <td class="p-4 text-center text-xs font-bold text-red-600 bg-red-50">${r.required_hours}</td>
+                        <td class="p-4 text-xs text-slate-500">${r.remark}</td>
+                    </tr>`).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        function downloadSyllabusReport() {
+            if (!currentSyllabusData) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('l', 'mm', 'a4');
+            const term = document.getElementById('syllabus-term').value.toUpperCase();
+            const cls = document.getElementById('class-select').options[document.getElementById('class-select').selectedIndex].text;
+
+            const termLine = amsGetAcademicTermLine();
+            const metaBits = [
+                `Class: ${cls}`,
+                `Target Term: ${term}`,
+                `Date: ${new Date().toLocaleDateString()}`,
+                termLine
+            ].filter(Boolean);
+
+            const startY = amsDrawPdfHeader(
+                doc,
+                'SYLLABUS COMPLETION REPORT',
+                ['Department of Information Technology'],
+                metaBits.join(' | ')
+            );
+
+            doc.autoTable({
+                html: '#syllabus-table',
+                startY,
+                theme: 'grid',
+                headStyles: { fillColor: [79, 70, 229], textColor: 255 },
+                styles: { fontSize: 8, cellPadding: 2, halign: 'center' },
+                columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' }, 7: { halign: 'left' } }
+            });
+
+            doc.save(`Syllabus_Report_${term}.pdf`);
+        }
+
+        // --- TERM GRANT ---
+        async function generateTermGrant() {
+            const sectionId = document.getElementById('class-select').value;
+            if(!sectionId) return showToast("Select a class first.", "error");
+            const minAtt = document.getElementById('rule-att').value;
+            const minMarks = document.getElementById('rule-marks').value;
+
+            return showConfirm("Confirm Action", "Generate Term Grant list?", async () => {
+                try {
+                    const res = await fetch('/api/amc/generate_term_grant', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ section_id: sectionId, min_attendance: minAtt, min_marks: minMarks }) });
+                    if (res.ok) loadTermGrantData();
+                    else showToast("Failed.", "error");
+                } catch(e) { showToast("Error", "error"); }
+            }, "Term Grant");
+        }
+        async function loadTermGrantData() { const sectionId = document.getElementById('class-select').value; if(!sectionId) return; try { const res = await fetch(`/api/amc/term_grant_list?section_id=${sectionId}`); const data = await res.json(); currentGrantData = data.students; document.getElementById('grant-ok').innerText = data.stats.Granted || 0; document.getElementById('grant-prov').innerText = data.stats.Provisional || 0; document.getElementById('grant-fail').innerText = data.stats.Detained || 0; renderGrantTable(currentGrantData); } catch(e) { console.error(e); } }
+        function renderGrantTable(data) { const tbody = document.getElementById('grant-body'); if (data.length === 0) { tbody.innerHTML = `<tr><td colspan="9" class="p-12 text-center text-slate-400">No records.</td></tr>`; return; } const ruleAtt = parseFloat(document.getElementById('rule-att').value); const ruleMarks = parseFloat(document.getElementById('rule-marks').value); tbody.innerHTML = data.map(s => { let badge = ''; if(s.status === 'Granted') badge = '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Granted</span>'; else if(s.status === 'Provisional') badge = '<span class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-bold">Provisional</span>'; else badge = '<span class="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">Detained</span>'; const attClass = s.att < ruleAtt ? 'text-red-600 font-bold' : 'text-green-600'; const markClass = s.ca_avg < ruleMarks ? 'text-red-600 font-bold' : 'text-slate-600'; return `<tr class="hover:bg-slate-50 border-b border-slate-50 last:border-0"><td class="p-4 font-mono text-xs text-slate-500">${s.roll}</td><td class="p-4 font-bold text-slate-700 text-xs">${s.name}</td><td class="p-4 text-center text-xs ${attClass}">${s.att}%</td><td class="p-4 text-center text-xs ${markClass}">${s.ca_avg}</td><td class="p-4 text-center text-xs ${s.fails > 0 ? 'text-red-600 font-bold': 'text-slate-400'}">${s.fails}</td><td class="p-4 text-center text-xs ${s.det > 0 ? 'text-red-600 font-bold': 'text-slate-400'}">${s.det}</td><td class="p-4 text-center">${badge}</td><td class="p-4 text-xs text-slate-500 truncate max-w-[200px]" title="${s.remarks}">${s.remarks}</td><td class="p-4 text-right">${s.status !== 'Granted' ? `<button onclick="grantCondonation(${s.id})" class="text-blue-600 text-xs font-bold hover:underline">Condone</button>` : ''}</td></tr>`; }).join(''); lucide.createIcons(); }
+        async function grantCondonation(id) {
+            return showPrompt(
+                "Condonation Remark",
+                "Enter a short remark for this condonation.",
+                async (remark) => {
+                    const cleaned = (remark || "").trim();
+                    if (!cleaned) {
+                        showToast("Remark is required.", "error");
+                        return;
+                    }
+
+                    try {
+                        const res = await fetch('/api/amc/update_grant_status', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ record_id: id, status: 'Granted', remarks: `Condoned: ${cleaned}` })
+                        });
+                        if (res.ok) loadTermGrantData();
+                        else showToast("Failed.", "error");
+                    } catch (e) {
+                        showToast("Error", "error");
+                    }
+                },
+                "Term Grant"
+            );
+        }
+        function filterGrant(type) { if (type === 'All') renderGrantTable(currentGrantData); else renderGrantTable(currentGrantData.filter(s => s.status === 'Detained')); }
+        function downloadSummaryReport() {
+            if (!currentGrantData || currentGrantData.length === 0) return showToast('No data.', 'error');
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            const granted = document.getElementById('grant-ok').innerText;
+            const detained = document.getElementById('grant-fail').innerText;
+            const termLine = amsGetAcademicTermLine();
+            const metaBits = [
+                `Total Students: ${currentGrantData.length}`,
+                `Eligible: ${granted}`,
+                `Detained: ${detained}`,
+                termLine
+            ].filter(Boolean);
+
+            const startY = amsDrawPdfHeader(
+                doc,
+                'FINAL DEFAULTER & ELIGIBILITY REPORT',
+                [],
+                metaBits.join(' | ')
+            );
+
+            const rows = currentGrantData.map((s, i) => [ i + 1, s.roll, s.name, `${s.att}%`, s.status, s.remarks ]);
+            doc.autoTable({
+                startY,
+                head: [['#', 'Roll No', 'Name', 'Att%', 'Status', 'Remarks']],
+                body: rows,
+                theme: 'grid',
+                headStyles: { fillColor: [50, 50, 50] },
+                columnStyles: { 4: { fontStyle: 'bold' }, 5: { fontSize: 8 } },
+                didParseCell: function(hookData) {
+                    if (hookData.section === 'body' && hookData.column.index === 4) {
+                        if (hookData.cell.raw === 'Detained') hookData.cell.styles.textColor = [200, 0, 0];
+                        if (hookData.cell.raw === 'Granted') hookData.cell.styles.textColor = [0, 128, 0];
+                    }
+                }
+            });
+
+            const finalY = doc.lastAutoTable.finalY + 30;
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(10);
+            doc.text('Class Teacher', 30, finalY);
+            doc.text('HOD', 100, finalY);
+            doc.text('Principal', 160, finalY);
+            doc.save('Final_Defaulter_List.pdf');
+        }
+    </script>
+</body>
+</html>

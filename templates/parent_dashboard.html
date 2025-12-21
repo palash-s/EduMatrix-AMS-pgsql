@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parent Portal - MIT ADT</title>
+    
+    <!-- LIBRARIES -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; } /* Slate-100 */
+        .serif { font-family: 'Merriweather', serif; }
+        
+        .mit-purple { color: #48166d; }
+        .mit-teal { color: #00a887; }
+
+        /* Bento Grid Utilities */
+        .bento-card {
+            background: white;
+            border-radius: 1.5rem; /* Rounded-3xl */
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            transition: all 0.2s ease;
+            overflow: hidden;
+        }
+        .bento-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Scrollbar */
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        /* Animations */
+        .fade-in-up { animation: fadeInUp 0.5s ease-out forwards; opacity: 0; }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .delay-100 { animation-delay: 0.1s; }
+        .delay-200 { animation-delay: 0.2s; }
+        .delay-300 { animation-delay: 0.3s; }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <!-- NAV -->
+    <nav class="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50 h-16 shadow-sm">
+        <div class="max-w-7xl mx-auto px-6 h-full flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-9 w-auto" onerror="this.style.display='none'">
+                <div class="hidden sm:block border-l border-slate-300 pl-3">
+                    <span class="block text-xs font-bold text-slate-400 uppercase tracking-widest">Parent Portal</span>
+                    <span class="block text-sm font-bold text-slate-800 leading-none">Dashboard</span>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                {% include '_notifications.html' %}
+                
+                <button onclick="logout()" class="p-2.5 rounded-full hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors" title="Sign Out">
+                    <i data-lucide="log-out" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="max-w-7xl mx-auto px-6 py-8 space-y-6">
+        
+        <!-- HEADER -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-2 fade-in-up">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-900 serif">Hello, <span id="parent-greeting" class="text-transparent bg-clip-text bg-gradient-to-r from-purple-700 to-blue-600">Parent</span></h1>
+                <p class="text-slate-500 mt-1 flex items-center gap-2">
+                    Monitoring <span class="font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200" id="student-name">...</span>
+                    <span class="text-xs text-slate-400" id="student-meta">...</span>
+                </p>
+            </div>
+            
+            <!-- Term + Term Grant (Pills) -->
+            <div class="flex flex-wrap gap-2 mt-4 md:mt-0">
+                <div id="current-term-pill" class="px-4 py-2 rounded-full border text-sm font-bold flex items-center gap-2 shadow-sm bg-white text-slate-700 border-slate-200">Loading term...</div>
+                <div id="term-grant-pill" class="hidden px-4 py-2 rounded-full border text-sm font-bold flex items-center gap-2 shadow-sm"></div>
+            </div>
+        </div>
+
+        <!-- BENTO GRID -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <!-- ROW 1: HEALTH METRICS -->
+            
+            <!-- 1. Attendance -->
+            <div onclick="openAttendanceModal()" class="bento-card p-6 flex items-center justify-between relative fade-in-up delay-100 cursor-pointer group hover:border-blue-300 transition-all">
+                <div>
+                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                        Attendance <i data-lucide="external-link" class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity text-blue-500"></i>
+                    </p>
+                    <h3 class="text-4xl font-black text-slate-900" id="att-perc">--%</h3>
+                    <p class="text-xs text-slate-500 mt-2 font-medium" id="att-stats">--/-- Lectures</p>
+                </div>
+                <div class="w-24 h-24 relative">
+                    <canvas id="attDonut"></canvas>
+                    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <i data-lucide="activity" class="w-6 h-6 text-slate-300 group-hover:text-blue-500 transition-colors"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Academic Status -->
+            <div class="bento-card p-6 flex flex-col justify-between fade-in-up delay-100 relative overflow-hidden">
+                <div class="absolute top-0 right-0 p-4 opacity-10"><i data-lucide="graduation-cap" class="w-24 h-24 text-blue-600"></i></div>
+                <div>
+                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Academic Standing</p>
+                    <div id="status-badge-container">
+                        <span class="text-xl font-bold text-slate-800">Calculating...</span>
+                    </div>
+                </div>
+                <div class="mt-4">
+                     <p class="text-xs text-slate-500" id="leave-balance-text">Leave Balance: -- days</p>
+                     <div class="w-full bg-slate-100 h-1.5 rounded-full mt-1.5 overflow-hidden">
+                         <div id="leave-bar" class="h-full bg-blue-500 rounded-full" style="width: 0%"></div>
+                     </div>
+                </div>
+            </div>
+
+            <!-- 3. Action Items (Updated Logic) -->
+            <div class="bento-card p-6 flex flex-col justify-center items-center text-center fade-in-up delay-100" id="action-card">
+                <!-- Dynamic Content -->
+                <div class="animate-pulse bg-slate-100 w-12 h-12 rounded-full mb-3"></div>
+                <div class="h-4 w-24 bg-slate-100 rounded"></div>
+            </div>
+
+
+            <!-- ROW 2: PERFORMANCE & ACTIVITY -->
+
+            <!-- 4. Exam Performance -->
+            <div class="bento-card md:col-span-2 p-6 fade-in-up delay-200">
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h3 class="font-bold text-slate-800 text-lg">Exam Performance</h3>
+                        <p class="text-xs text-slate-500">Internal Assessment scores across subjects</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <span class="flex items-center gap-1 text-[10px] font-bold text-slate-500"><span class="w-2 h-2 rounded-full bg-purple-500"></span> TA1</span>
+                        <span class="flex items-center gap-1 text-[10px] font-bold text-slate-500"><span class="w-2 h-2 rounded-full bg-blue-500"></span> TA2</span>
+                    </div>
+                </div>
+                <div class="h-64 w-full"><canvas id="marksChart"></canvas></div>
+            </div>
+
+            <!-- 5. Recent Activity -->
+            <div class="bento-card p-0 flex flex-col fade-in-up delay-200 row-span-2">
+                <div class="p-5 border-b border-slate-100 bg-slate-50/50">
+                    <h3 class="font-bold text-slate-800 text-sm">Recent Activity</h3>
+                </div>
+                <div id="activity-feed" class="flex-grow overflow-y-auto p-5 space-y-6 custom-scroll" style="max-height: 500px;">
+                    <p class="text-center text-xs text-slate-400">Loading stream...</p>
+                </div>
+            </div>
+
+
+            <!-- ROW 3: MENTOR CONNECT -->
+
+            <!-- 6. Mentor Card -->
+            <div class="bento-card md:col-span-2 p-6 flex items-center justify-between bg-gradient-to-r from-slate-900 to-slate-800 text-white fade-in-up delay-300">
+                <div class="flex items-center gap-5">
+                    <div class="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center text-2xl font-bold border-2 border-white/20" id="mentor-initial">?</div>
+                    <div>
+                        <p class="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Assigned Mentor</p>
+                        <h3 class="text-xl font-bold text-white" id="mentor-name">...</h3>
+                        <p class="text-xs text-slate-400 mt-0.5" id="mentor-email">...</p>
+                    </div>
+                </div>
+                
+                <div class="flex flex-col gap-2 items-end">
+                    <span id="log-nudge" class="hidden text-[10px] font-bold bg-red-500 text-white px-2 py-0.5 rounded-full animate-pulse mb-1">Update Available</span>
+                    <div class="flex gap-3">
+                        <button onclick="openLogModal()" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition-colors border border-white/10">View Log</button>
+                        <a id="mentor-mailto" href="#" class="px-4 py-2 bg-white text-slate-900 text-xs font-bold rounded-lg hover:bg-purple-50 transition-colors flex items-center gap-2">
+                            <i data-lucide="mail" class="w-3 h-3"></i> Contact
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- COUNSELING LOG MODAL -->
+    <div id="log-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 class="font-bold text-slate-800">Counseling History</h3>
+                <button onclick="document.getElementById('log-modal').classList.add('hidden')" class="p-1 hover:bg-slate-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-slate-500"></i></button>
+            </div>
+            <div id="log-content" class="p-5 overflow-y-auto custom-scroll space-y-4 bg-white"></div>
+        </div>
+    </div>
+
+    <!-- ATTENDANCE MODAL -->
+    <div id="attendance-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden z-[60] flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <div><h3 class="font-bold text-lg text-slate-800">Subject Attendance</h3><p class="text-xs text-slate-500">Detailed breakdown by course</p></div>
+                <button onclick="document.getElementById('attendance-modal').classList.add('hidden')" class="p-1 hover:bg-slate-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-slate-500"></i></button>
+            </div>
+            <div class="flex-grow overflow-y-auto p-0 custom-scroll bg-white">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-slate-50 text-slate-500 font-bold text-xs uppercase sticky top-0"><tr><th class="p-4">Subject</th><th class="p-4 text-center">Conducted</th><th class="p-4 text-center">Attended</th><th class="p-4 text-right">Percentage</th></tr></thead>
+                    <tbody id="attendance-modal-list" class="divide-y divide-slate-100"><tr><td colspan="4" class="p-8 text-center text-slate-400">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let logData = [];
+        let subjectData = [];
+        let attChart = null;
+        let marksChart = null;
+        const AUTO_REFRESH_MS = 30000;
+
+        async function loadCurrentTermPill() {
+            const el = document.getElementById('current-term-pill');
+            if (!el) return;
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                const ay = data && data.academic_year ? data.academic_year : null;
+                const sem = data && data.semester ? data.semester : null;
+                el.textContent = (ay && sem) ? `AY ${ay} • ${sem}` : (data && data.current_term ? data.current_term : '-');
+            } catch (e) {
+                el.textContent = '-';
+            }
+        }
+
+        function shouldSkipAutoRefresh() {
+            if (document.hidden) return true;
+            if (window.__amsActionModalOpen) return true;
+            return !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        }
+
+        async function refreshParentDashboard() {
+            if (shouldSkipAutoRefresh()) return;
+            try {
+                const response = await fetch(`/api/parent/dashboard?user_id=${userId}`);
+                if (!response.ok) return;
+                const data = await response.json();
+                subjectData = data.subjects || [];
+                renderBento(data);
+            } catch (e) {
+                console.error('Auto-refresh failed:', e);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (!userId) { window.location.replace('/'); return; }
+            try {
+                loadCurrentTermPill();
+                const response = await fetch(`/api/parent/dashboard?user_id=${userId}`);
+                if (!response.ok) throw new Error("Failed");
+                const data = await response.json();
+                subjectData = data.subjects || [];
+                renderBento(data);
+                // Auto-refresh is disabled globally.
+            } catch (e) { console.error(e); }
+        });
+
+        function renderBento(data) {
+            // Header
+            document.getElementById('student-name').innerText = data.student.name;
+            document.getElementById('student-meta').innerText = `${data.student.class} | ${data.student.roll}`;
+
+            // Term Grant
+            const grant = data.term_grant;
+            const grantPill = document.getElementById('term-grant-pill');
+            if (grant) {
+                grantPill.classList.remove('hidden');
+                if (grant.status === 'Granted') {
+                    grantPill.className = "mt-4 md:mt-0 px-4 py-1.5 rounded-full border border-green-200 bg-green-50 text-green-700 text-xs font-bold flex items-center gap-2 shadow-sm";
+                    grantPill.innerHTML = `<i data-lucide="check-circle" class="w-4 h-4"></i> Eligible for Exam`;
+                } else if (grant.status === 'Provisional') {
+                    grantPill.className = "mt-4 md:mt-0 px-4 py-1.5 rounded-full border border-yellow-200 bg-yellow-50 text-yellow-700 text-xs font-bold flex items-center gap-2 shadow-sm";
+                    grantPill.innerHTML = `<i data-lucide="alert-triangle" class="w-4 h-4"></i> Provisional`;
+                } else {
+                    grantPill.className = "mt-4 md:mt-0 px-4 py-1.5 rounded-full border border-red-200 bg-red-50 text-red-700 text-xs font-bold flex items-center gap-2 shadow-sm";
+                    grantPill.innerHTML = `<i data-lucide="x-circle" class="w-4 h-4"></i> Detained`;
+                }
+            }
+
+            // Attendance Donut
+            document.getElementById('att-perc').innerText = `${data.stats.percentage}%`;
+            document.getElementById('att-stats').innerText = `${data.stats.attended} / ${data.stats.total} Lectures`;
+            
+            const attCtx = document.getElementById('attDonut').getContext('2d');
+            const attColor = data.stats.percentage < 75 ? '#ef4444' : '#00a887';
+            
+            if (attChart) attChart.destroy();
+            attChart = new Chart(attCtx, {
+                type: 'doughnut',
+                data: { labels: ['Attended', 'Missed'], datasets: [{ data: [data.stats.attended, data.stats.total - data.stats.attended], backgroundColor: [attColor, '#f1f5f9'], borderWidth: 0, hoverOffset: 4 }] },
+                options: { cutout: '75%', responsive: true, plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+            });
+
+            // Academic Status
+            const statusContainer = document.getElementById('status-badge-container');
+            if (data.stats.is_defaulter) statusContainer.innerHTML = `<div class="inline-flex items-center gap-2 bg-red-50 text-red-700 px-3 py-1.5 rounded-lg border border-red-100"><i data-lucide="alert-octagon" class="w-5 h-5"></i><span class="font-bold text-sm">Action Needed</span></div>`;
+            else statusContainer.innerHTML = `<div class="inline-flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-100"><i data-lucide="shield-check" class="w-5 h-5"></i><span class="font-bold text-sm">Good Standing</span></div>`;
+            
+            let usedLeaves = 0;
+            if (data.leaves) usedLeaves = data.leaves.reduce((sum, l) => l.status === 'Approved' ? sum + l.days : sum, 0);
+            const remaining = Math.max(0, 20 - usedLeaves);
+            document.getElementById('leave-balance-text').innerText = `Leave Balance: ${remaining} days`;
+            document.getElementById('leave-bar').style.width = `${(remaining/20)*100}%`;
+
+
+            // --- ACTION CARD (UPDATED) ---
+            const actionCard = document.getElementById('action-card');
+            
+            if (data.detention) {
+                // Priority 1: DETENTION
+                actionCard.className = "bento-card p-6 flex flex-col justify-center items-center text-center fade-in-up delay-100 bg-red-50 border-red-200 cursor-pointer hover:bg-red-100";
+                actionCard.innerHTML = `
+                    <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center text-red-600 mb-3 shadow-sm"><i data-lucide="shield-alert" class="w-6 h-6"></i></div>
+                    <h3 class="font-bold text-red-800 text-sm">Active Detention</h3>
+                    <p class="text-xs text-red-600 mt-1 line-clamp-2">${data.detention.reason}</p>
+                    <span class="mt-3 px-3 py-1 bg-white text-red-700 text-[10px] font-bold rounded-full border border-red-100 shadow-sm">View Tasks</span>
+                `;
+            } else if (data.escalation) {
+                // Priority 2: ESCALATED COUNSELING
+                actionCard.className = "bento-card p-6 flex flex-col justify-center items-center text-center fade-in-up delay-100 bg-orange-50 border-orange-200 cursor-pointer hover:bg-orange-100";
+                actionCard.innerHTML = `
+                    <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center text-orange-600 mb-3 shadow-sm"><i data-lucide="alert-triangle" class="w-6 h-6"></i></div>
+                    <h3 class="font-bold text-orange-800 text-sm">Escalated Issue</h3>
+                    <p class="text-xs text-orange-700 mt-1 line-clamp-2">${data.escalation.category}: ${data.escalation.remarks}</p>
+                    <span class="mt-3 px-3 py-1 bg-white text-orange-700 text-[10px] font-bold rounded-full border border-orange-100 shadow-sm">View Log</span>
+                `;
+                actionCard.onclick = openLogModal;
+            } else {
+                // Priority 3: ALL CLEAR
+                actionCard.className = "bento-card p-6 flex flex-col justify-center items-center text-center fade-in-up delay-100";
+                actionCard.innerHTML = `
+                    <div class="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center text-green-600 mb-3"><i data-lucide="check" class="w-6 h-6"></i></div>
+                    <h3 class="font-bold text-slate-800 text-sm">All Clear</h3>
+                    <p class="text-xs text-slate-400 mt-1">No pending disciplinary actions.</p>
+                `;
+                actionCard.onclick = null;
+            }
+
+            // Exam Performance
+            const labels = []; const ta1Data = []; const ta2Data = [];
+            if (data.results && data.results.length > 0) {
+                data.results.forEach(r => { labels.push(r.code); ta1Data.push(r.ta1 === '-' ? 0 : r.ta1); ta2Data.push(r.ta2 === '-' ? 0 : r.ta2); });
+            }
+            const marksCtx = document.getElementById('marksChart').getContext('2d');
+            if (marksChart) marksChart.destroy();
+            marksChart = new Chart(marksCtx, { type: 'bar', data: { labels: labels.length ? labels : ['No Data'], datasets: [ { label: 'TA1 (20)', data: ta1Data, backgroundColor: '#a855f7', borderRadius: 4 }, { label: 'TA2 (20)', data: ta2Data, backgroundColor: '#3b82f6', borderRadius: 4 } ] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 20 }, x: { grid: { display: false } } }, plugins: { legend: { position: 'bottom' } } } });
+
+            // Activity Feed
+            const feed = document.getElementById('activity-feed');
+            let feedHTML = '';
+            if (data.recent_activity && data.recent_activity.length > 0) {
+                feedHTML += data.recent_activity.map(a => `<div class="relative pl-6 pb-2 border-l-2 ${a.status === 'Present' ? 'border-green-300' : 'border-red-300'} last:border-0"><div class="absolute -left-[5px] top-1 w-2.5 h-2.5 rounded-full border-2 border-white ${a.status === 'Present' ? 'bg-green-500' : 'bg-red-500'}"></div><p class="text-xs font-bold text-slate-700">${a.subject}</p><p class="text-[10px] text-slate-400">${a.date} • ${a.time}</p></div>`).join('');
+            }
+            if (data.meeting) {
+                feedHTML = `<div class="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-4"><div class="flex gap-2 items-center text-blue-700 font-bold text-xs"><i data-lucide="calendar" class="w-3 h-3"></i> Upcoming Meeting</div><p class="text-[10px] text-blue-600 mt-1">${data.meeting.date} @ ${data.meeting.time}</p><p class="text-[10px] text-blue-800 font-medium mt-0.5">${data.meeting.agenda}</p></div>` + feedHTML;
+            }
+            feed.innerHTML = feedHTML || '<p class="text-center text-xs text-slate-400">No recent activity.</p>';
+
+            // Mentor
+            if (data.mentor) {
+                document.getElementById('mentor-name').innerText = data.mentor.name;
+                document.getElementById('mentor-email').innerText = data.mentor.email;
+                document.getElementById('mentor-mailto').href = `mailto:${data.mentor.email}`;
+                document.getElementById('mentor-initial').innerText = data.mentor.name.charAt(0);
+                logData = data.logs || [];
+                const lastSeenCount = parseInt(localStorage.getItem(`counseling_seen_${userId}`) || 0);
+                if (logData.length > lastSeenCount) document.getElementById('log-nudge').classList.remove('hidden');
+            }
+            lucide.createIcons();
+        }
+
+        // --- HELPERS ---
+        function openAttendanceModal() {
+            document.getElementById('attendance-modal').classList.remove('hidden');
+            const tbody = document.getElementById('attendance-modal-list');
+            if (!subjectData || subjectData.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-slate-400">No subject data available.</td></tr>'; return; }
+            tbody.innerHTML = subjectData.map(s => { const color = s.percentage >= 75 ? 'text-green-600 bg-green-50 border-green-200' : 'text-red-600 bg-red-50 border-red-200'; return `<tr class="hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0"><td class="p-4 font-bold text-slate-700 text-sm">${s.subject}<span class="block text-[10px] font-normal text-slate-400 font-mono">${s.code}</span></td><td class="p-4 text-center text-slate-600 font-medium text-xs">${s.conducted}</td><td class="p-4 text-center text-slate-600 font-medium text-xs">${s.attended}</td><td class="p-4 text-right"><span class="text-xs font-bold px-2 py-1 rounded border ${color}">${s.percentage}%</span></td></tr>`; }).join('');
+        }
+        function openLogModal() { document.getElementById('log-nudge').classList.add('hidden'); localStorage.setItem(`counseling_seen_${userId}`, logData.length); document.getElementById('log-modal').classList.remove('hidden'); const container = document.getElementById('log-content'); if (!logData.length) { container.innerHTML = `<p class="text-center text-slate-400 mt-10 text-sm">No counseling records.</p>`; return; } container.innerHTML = logData.map(l => `<div class="relative pl-6 pb-6 border-l border-slate-200 last:border-0"><div class="absolute -left-1.5 top-0 w-3 h-3 rounded-full border-2 border-white ${l.status==='Resolved'?'bg-green-500':'bg-blue-500'}"></div><div class="bg-slate-50 p-3 rounded-lg border border-slate-100"><div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-slate-400 uppercase">${l.date}</span><span class="text-[9px] px-1.5 py-0.5 rounded font-bold bg-white border border-slate-200">${l.status}</span></div><p class="text-xs text-slate-700 mb-1">${l.remarks}</p><p class="text-[10px] text-slate-400">Category: ${l.category}</p></div></div>`).join(''); }
+        
+        function logout() { sessionStorage.removeItem('user_id'); window.location.replace('/'); }
+    </script>
+</body>
+</html>

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Lesson Planner - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b px-6 h-16 flex items-center justify-between sticky top-0 z-50 shadow-sm">
+        <div class="flex items-center gap-3">
+            <button onclick="window.location.href='/staff/dashboard'" class="p-2 -ml-2 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
+            <div>
+                <h1 class="font-bold text-lg text-purple-800 flex items-center gap-2"><i data-lucide="book-open" class="w-5 h-5"></i> Syllabus Planner</h1>
+                <p class="text-xs text-gray-500">Define teaching plan & track coverage</p>
+            </div>
+        </div>
+        <select id="subject-select" onchange="loadSyllabus()" class="p-2 border rounded-lg text-sm bg-white min-w-[250px] outline-none focus:ring-2 focus:ring-purple-500"><option value="">-- Select Subject --</option></select>
+    </header>
+
+    <main class="p-6 max-w-6xl mx-auto"> <!-- Increased width slightly for extra column -->
+        
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- LEFT: INPUT TOOLS -->
+            <div class="lg:col-span-1 space-y-6">
+                
+                <!-- Manual Add -->
+                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                    <h3 class="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2"><i data-lucide="plus-circle" class="w-4 h-4 text-green-600"></i> Add Single Topic</h3>
+                    <div class="space-y-3">
+                        <div class="flex gap-2">
+                            <input type="number" id="new-unit" placeholder="Unit" class="w-16 p-2 border rounded text-sm text-center">
+                            <input type="text" id="new-sub-unit" placeholder="1.1" class="w-16 p-2 border rounded text-sm text-center">
+                            <input type="number" id="new-hours" placeholder="Hrs" class="w-16 p-2 border rounded text-sm text-center" value="1">
+                        </div>
+                        <input type="text" id="new-topic" placeholder="Topic Name (e.g. Intro to AI)" class="w-full p-2 border rounded text-sm">
+                        <button onclick="addTopic()" class="w-full py-2 bg-slate-800 text-white text-xs font-bold rounded hover:bg-black">Add to Staging</button>
+                    </div>
+                </div>
+
+                <!-- Bulk Upload -->
+                <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                    <h3 class="font-bold text-gray-800 mb-3 text-sm flex items-center gap-2"><i data-lucide="upload-cloud" class="w-4 h-4 text-blue-600"></i> Bulk Upload</h3>
+                    <p class="text-[10px] text-gray-400 mb-3">CSV: <strong>Unit, Sub Unit, Topic, Hours</strong></p>
+                    
+                    <div class="flex gap-2">
+                        <button onclick="downloadTemplate()" class="flex-1 py-2 bg-white border border-gray-300 text-gray-600 text-xs font-bold rounded hover:bg-gray-50 flex justify-center items-center gap-1">
+                            <i data-lucide="download" class="w-3 h-3"></i> Template
+                        </button>
+                        <button onclick="confirmCsvUpload()" class="flex-1 py-2 bg-blue-50 text-blue-700 text-xs font-bold rounded border border-blue-100 hover:bg-blue-100 flex justify-center items-center gap-1">
+                            <i data-lucide="file-up" class="w-3 h-3"></i> Upload
+                        </button>
+                        <input type="file" id="csv-input" accept=".csv" class="hidden" onchange="handleFileUpload()">
+                    </div>
+                </div>
+
+                <!-- Staging Area -->
+                <div id="staging-container" class="hidden bg-yellow-50 p-4 rounded-xl border border-yellow-200">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold text-yellow-800 text-xs uppercase">Unsaved Changes</h3>
+                        <button onclick="savePlan()" class="text-xs bg-yellow-600 text-white px-2 py-1 rounded hover:bg-yellow-700">Save All</button>
+                    </div>
+                    <div id="staging-list" class="space-y-1 max-h-40 overflow-y-auto custom-scroll"></div>
+                </div>
+
+            </div>
+
+            <!-- RIGHT: SYLLABUS TABLE -->
+            <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
+                <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
+                    <h3 class="font-bold text-gray-700 text-sm">Syllabus Tracker</h3>
+                    <span class="text-xs font-bold bg-green-100 text-green-700 px-2 py-1 rounded border border-green-200" id="progress-badge">0% Completed</span>
+                </div>
+                <div class="flex-grow overflow-auto custom-scroll">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-white text-gray-500 font-bold text-xs uppercase border-b sticky top-0 shadow-sm z-10">
+                            <tr>
+                                <th class="p-4 w-20 text-center">Sub Unit</th>
+                                <th class="p-4">Topic Name</th>
+                                <th class="p-4 w-16 text-center">Hrs</th>
+                                <th class="p-4 w-24 text-center">Status</th>
+                                <th class="p-4 w-32 text-center">Conducted On</th>
+                            </tr>
+                        </thead>
+                        <tbody id="syllabus-body" class="divide-y divide-gray-100">
+                            <tr><td colspan="5" class="p-12 text-center text-gray-400">Select a subject.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let stagingList = [];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const res = await fetch(`/api/staff/dashboard?user_id=${userId}`);
+            const data = await res.json();
+            const select = document.getElementById('subject-select');
+            data.widgets.my_subjects.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.subject_id;
+                opt.text = `${s.subject_name} (${s.class_name})`;
+                select.appendChild(opt);
+            });
+        });
+
+        async function loadSyllabus() {
+            const subId = document.getElementById('subject-select').value;
+            if(!subId) return;
+            
+            const tbody = document.getElementById('syllabus-body');
+            tbody.innerHTML = '<tr><td colspan="5" class="p-12 text-center text-gray-400">Loading...</td></tr>';
+            
+            try {
+                const res = await fetch(`/api/academic/get_syllabus?subject_id=${subId}`);
+                const data = await res.json();
+                
+                document.getElementById('progress-badge').innerText = `${data.progress}% Completed`;
+                
+                if(data.syllabus.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="p-12 text-center text-gray-400">No syllabus defined yet. Use the tools on the left.</td></tr>`;
+                } else {
+                    let lastUnit = null;
+                    let html = '';
+                    
+                    data.syllabus.forEach(s => {
+                        // Insert Unit Header
+                        if (s.unit !== lastUnit) {
+                            html += `
+                            <tr class="bg-purple-50 border-y border-purple-100">
+                                <td colspan="2" class="p-2 pl-4 font-bold text-purple-800 text-xs uppercase">Unit ${s.unit}</td>
+                                <td class="p-2 text-center text-xs font-bold text-purple-800">${s.unit_total_hours} Hrs</td>
+                                <td colspan="2"></td>
+                            </tr>`;
+                            lastUnit = s.unit;
+                        }
+
+                        // Status Badge
+                        const statusBadge = s.status === 'Completed' 
+                            ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">Done</span>' 
+                            : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500 border border-gray-200">Pending</span>';
+
+                        // Date Text
+                        const dateText = s.conducted_date 
+                            ? `<span class="text-xs font-mono text-gray-700 font-bold">${s.conducted_date}</span>` 
+                            : `<span class="text-gray-300 text-xs">-</span>`;
+
+                        html += `
+                        <tr class="hover:bg-slate-50 transition-colors">
+                            <td class="p-4 text-center font-mono text-xs text-gray-500">${s.sub_unit || '-'}</td>
+                            <td class="p-4 font-medium text-gray-800">${s.topic}</td>
+                            <td class="p-4 text-center font-mono text-xs text-gray-500">${s.hours}</td>
+                            <td class="p-4 text-center align-middle">${statusBadge}</td>
+                            <td class="p-4 text-center align-middle">${dateText}</td>
+                        </tr>`;
+                    });
+                    
+                    tbody.innerHTML = html;
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        // --- MANUAL ADD ---
+        function addTopic() {
+            const unit = document.getElementById('new-unit').value;
+            const subUnit = document.getElementById('new-sub-unit').value;
+            const topic = document.getElementById('new-topic').value;
+            const hours = document.getElementById('new-hours').value;
+            if(!unit || !topic) return showToast("Please fill Unit and Topic.", 'error');
+            
+            stagingList.push({ unit, sub_unit: subUnit, topic, hours });
+            renderStaging();
+            document.getElementById('new-topic').value = "";
+            document.getElementById('new-topic').focus();
+        }
+
+        function renderStaging() {
+            const container = document.getElementById('staging-container');
+            const list = document.getElementById('staging-list');
+            if(stagingList.length > 0) {
+                container.classList.remove('hidden');
+                list.innerHTML = stagingList.map(s => `
+                    <div class="p-2 bg-white rounded border border-yellow-200 text-xs flex justify-between items-center shadow-sm">
+                        <span class="font-bold text-gray-700 w-10 truncate">${s.sub_unit || 'U'+s.unit}</span>
+                        <span class="truncate flex-1 px-2 text-gray-600">${s.topic}</span>
+                        <span class="text-gray-400 font-mono">${s.hours}h</span>
+                    </div>`).join('');
+            } else { container.classList.add('hidden'); }
+        }
+
+        async function savePlan() {
+            const subId = document.getElementById('subject-select').value;
+            if(!subId) return showToast("Select subject", 'error');
+            
+            const res = await fetch('/api/academic/create_plan', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ subject_id: subId, teacher_id: userId, topics: stagingList })
+            });
+            
+            if(res.ok) {
+                showToast("Syllabus Updated!");
+                stagingList = [];
+                renderStaging();
+                loadSyllabus();
+            } else showToast("Failed", 'error');
+        }
+
+        // --- CSV UPLOAD ---
+        function confirmCsvUpload() {
+            const subId = document.getElementById('subject-select').value;
+            if(!subId) {
+                showToast('Please select a subject first.', 'error');
+                return;
+            }
+
+            showConfirm(
+                'Upload CSV?',
+                'Please confirm you want to upload a syllabus CSV for the selected subject.',
+                () => document.getElementById('csv-input').click(),
+                'Syllabus Planner'
+            );
+        }
+
+        function downloadTemplate() {
+            const csvContent = "data:text/csv;charset=utf-8,Unit,Sub Unit,Topic,Hours\n1,1.1,Introduction to AI,1\n1,1.2,History of AI,1\n2,2.1,Neural Networks,2";
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "Syllabus_Template.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        async function handleFileUpload() {
+            const file = document.getElementById('csv-input').files[0];
+            const subId = document.getElementById('subject-select').value;
+            
+            if(!subId) return showToast("Please select a subject first.", 'error');
+            if(!file) return;
+
+            // Validate CSV header
+            try {
+                const text = await file.text();
+                const firstLine = (text.split(/\r?\n/)[0] || '').trim();
+                const normalizeToken = (t) => (t || '').trim().toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+                const tokens = firstLine.split(',').map(normalizeToken).filter(Boolean);
+                const expected = ['unit', 'subunit', 'topic', 'hours'];
+                const matches = tokens.length >= 4 && expected.every((exp, idx) => tokens[idx] === exp);
+
+                if (!matches) {
+                    showToast('Wrong file. Please use the provided template.', 'error');
+                    document.getElementById('csv-input').value = "";
+                    return;
+                }
+            } catch (e) {
+                showToast('Wrong file. Please use the provided template.', 'error');
+                document.getElementById('csv-input').value = "";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('subject_id', subId);
+            formData.append('teacher_id', userId);
+
+            try {
+                const res = await fetch('/api/upload/syllabus', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(res.ok) {
+                    showToast('Successfully uploaded.');
+                    loadSyllabus();
+                } else {
+                    showToast("Upload Failed: " + data.error, 'error');
+                }
+            } catch(e) { showToast("Network Error", 'error'); }
+            
+            document.getElementById('csv-input').value = ""; 
+        }
+    </script>
+</body>
+</html>

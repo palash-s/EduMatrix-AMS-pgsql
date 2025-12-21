@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Portal - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- PDF LIBRARIES (Added Fix) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; }
+        .serif { font-family: 'Merriweather', serif; }
+        .mit-purple { color: #48166d; } .mit-bg-purple { background-color: #48166d; }
+        .mit-teal { color: #00a887; } .mit-bg-teal { background-color: #00a887; }
+        .mit-orange { color: #f17736; }
+
+        @keyframes aurora-shift { 0% { background-position: 0% 50%; } 100% { background-position: 100% 50%; } }
+        .aurora-loader { background: linear-gradient(90deg, #f3e5f5, #e0f2f1, #fff3e0, #f3e5f5); background-size: 200% 100%; animation: aurora-shift 1.5s linear infinite; border-radius: 0.5rem; }
+        .aurora-text { background: linear-gradient(90deg, #48166d, #f17736, #00a887); background-size: 200% auto; color: transparent; background-clip: text; -webkit-background-clip: text; animation: aurora-shift 3s linear infinite; }
+        
+        /* Tooltip Animation */
+        .tooltip-enter { animation: tooltipFade 0.15s ease-out forwards; }
+        @keyframes tooltipFade { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 pb-20">
+
+    <nav class="bg-white border-b border-gray-200 sticky top-0 z-50 h-16 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 h-full relative flex items-center justify-between">
+            <div class="flex items-center"><span class="text-xs font-bold uppercase tracking-wider text-gray-400 border border-gray-200 px-2 py-1 rounded">Student</span></div>
+            <div class="absolute left-1/2 transform -translate-x-1/2 flex items-center gap-2">
+                <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-10 w-auto" onerror="this.style.display='none'">
+                <span class="hidden sm:block font-bold text-lg mit-purple serif tracking-tight"></span>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                {% include '_notifications.html' %}
+                
+                <button onclick="logout()" class="p-2 text-gray-400 hover:text-red-600 transition-colors"><i data-lucide="log-out" class="w-5 h-5"></i></button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Welcome Hero -->
+        <div class="flex justify-between items-end mb-6 border-b border-gray-200 pb-4">
+            <div><h1 class="text-2xl font-bold text-gray-900 serif">Hello, <span id="student-name-hero" class="mit-purple aurora-text">Loading...</span></h1><p id="student-class" class="text-sm text-gray-500 mt-1">...</p></div>
+            <div class="hidden sm:block text-right"><p class="text-xs font-bold text-gray-400 uppercase">Academic Term</p><p class="text-sm font-bold text-gray-700" id="current-date">Loading...</p></div>
+        </div>
+        
+        <!-- 1. FEEDBACK ALERT (NEW) -->
+        <div id="feedback-alert-container"></div>
+
+        <!-- 2. DETENTION ALERT -->
+        <div id="detention-alert-card" class="hidden bg-red-50 p-4 rounded-xl border border-red-300 shadow-md flex justify-between items-center transition-all mb-6">
+            <div class="flex items-center gap-3">
+                <i data-lucide="shield-alert" class="w-6 h-6 text-red-700"></i>
+                <div>
+                    <p class="font-bold text-red-800 title">ACTION REQUIRED: Active Detention</p>
+                    <p class="text-sm text-red-600 desc" id="detention-count-text">...</p>
+                </div>
+            </div>
+            <button onclick="openDetentionModal()" id="alert-btn" class="px-3 py-1.5 bg-red-700 text-white text-xs font-bold rounded-lg hover:bg-red-800 shadow-sm">View Tasks</button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- LEFT COLUMN -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Overall Attendance -->
+                <div class="bg-white rounded-xl shadow-sm border border-purple-100 p-6 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-6">
+                    <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-[#48166d] to-[#00a887]"></div>
+                    <div class="flex-1"><div class="flex items-center gap-3 mb-2"><h3 class="text-gray-500 font-bold text-xs uppercase tracking-wider">Overall Attendance</h3><span id="status-badge" class="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-bold rounded-full">Checking...</span></div><div class="flex items-baseline gap-2"><span class="text-4xl font-black mit-purple" id="attended-count">--</span><span class="text-sm text-gray-400">/ <span id="total-count">--</span> Sessions</span></div><p class="text-xs text-gray-400 mt-2">Maintain 75% to appear for exams.</p></div>
+                    <div class="relative w-24 h-24 flex-shrink-0"><svg class="w-full h-full transform -rotate-90"><circle cx="48" cy="48" r="40" stroke="#f3f4f6" stroke-width="8" fill="transparent"></circle><circle id="progress-ring" cx="48" cy="48" r="40" stroke="#48166d" stroke-width="8" fill="transparent" stroke-dasharray="251" stroke-dashoffset="251" class="transition-all duration-1000 ease-out" stroke-linecap="round"></circle></svg><span id="percentage-text" class="absolute inset-0 flex items-center justify-center text-xl font-bold text-gray-800">0%</span></div>
+                </div>
+                <!-- Subject Performance -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="p-4 border-b border-gray-50 bg-gray-50/30 flex justify-between items-center"><h3 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="bar-chart-2" class="w-4 h-4 text-gray-400"></i> Subject Performance</h3></div>
+                    <div id="subject-list" class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4"><div class="h-20 w-full aurora-loader"></div><div class="h-20 w-full aurora-loader"></div></div>
+                </div>
+            </div>
+            <!-- RIGHT COLUMN -->
+            <div class="space-y-6">
+                <!-- Quick Actions -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase mb-3">Quick Actions</h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button onclick="window.location.href='/student/apply_leave'" class="flex flex-col items-center justify-center p-3 rounded-lg border border-purple-100 bg-purple-50 hover:bg-purple-100 transition-colors group"><i data-lucide="file-plus" class="w-6 h-6 mit-purple mb-2 group-hover:scale-110 transition-transform"></i><span class="text-xs font-bold text-gray-700">Apply Leave</span></button>
+                        <button class="flex flex-col items-center justify-center p-3 rounded-lg border border-teal-100 bg-teal-50 hover:bg-teal-100 transition-colors group"><i data-lucide="calendar" class="w-6 h-6 text-[#00a887] mb-2 group-hover:scale-110 transition-transform"></i><span class="text-xs font-bold text-gray-700">Timetable</span></button>
+                        <!-- VIEW RESULTS BUTTON -->
+                        <button onclick="openResultsModal()" class="col-span-2 flex flex-row items-center justify-center gap-3 p-3 rounded-lg border border-blue-100 bg-blue-50 hover:bg-blue-100 transition-colors group">
+                            <i data-lucide="graduation-cap" class="w-5 h-5 text-blue-600 group-hover:scale-110 transition-transform"></i>
+                            <span class="text-xs font-bold text-gray-700">View Exam Results</span>
+                        </button>
+                    </div>
+                </div>
+                <!-- Dynamic Containers -->
+                <div id="elective-container"></div>
+                <div id="mentor-container"></div>
+                <!-- Event History -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2"><i data-lucide="award" class="w-4 h-4 text-yellow-500"></i> Event History</h3>
+                    <div id="event-list" class="space-y-3"><div class="h-10 w-full aurora-loader"></div></div>
+                </div>
+                <!-- Activity -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase mb-4">Recent Activity</h3>
+                    <div id="activity-list" class="space-y-0 relative border-l border-gray-200 ml-2"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- DETENTION SUBMISSION MODAL -->
+    <div id="detention-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md relative">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold mit-purple serif">Detention Task</h2>
+                <button onclick="document.getElementById('detention-modal').classList.add('hidden')" class="p-1 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div id="detention-task-details" class="space-y-3 mb-4 max-h-48 overflow-y-auto p-3 bg-gray-50 rounded-lg border border-gray-200"></div>
+            <input type="hidden" id="submission-detention-id">
+            <form onsubmit="submitDetentionTask(event)" class="space-y-4">
+                <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Submission Link (Google Drive/PDF)</label><input type="url" id="submission-url" required placeholder="Paste link here" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm"></div>
+                <button type="submit" class="w-full py-3 bg-mit-purple text-white font-bold rounded-lg hover:bg-[#350f50] shadow-md transition-colors">Submit Task</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- RESULTS MODAL -->
+    <div id="results-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-4xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div><h2 class="text-xl font-bold mit-purple serif">Progress Card</h2><p class="text-xs text-gray-500">Internal Assessment Scores</p></div>
+                <button onclick="document.getElementById('results-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            <div class="flex-grow overflow-auto p-0">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead class="bg-gray-100 text-gray-600 font-bold uppercase sticky top-0 z-10">
+                        <tr>
+                            <th class="p-4">Subject</th>
+                            <th class="p-4 text-center">TA1 (20)</th>
+                            <th class="p-4 text-center">TA2 (20)</th>
+                            <th class="p-4 text-center">TA3 (10)</th>
+                            <th class="p-4 text-center">Assignments</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-list" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Image for PDF -->
+    <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let detentionData = null;
+        const AUTO_REFRESH_MS = 30000;
+
+        function shouldSkipAutoRefresh() {
+            if (document.hidden) return true;
+            if (window.__amsActionModalOpen) return true;
+            return !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        }
+
+        async function refreshStudentDashboard() {
+            if (shouldSkipAutoRefresh()) return;
+            try {
+                const response = await fetch(`/api/student/dashboard?user_id=${userId}`);
+                if (!response.ok) return;
+                const data = await response.json();
+                renderDashboard(data);
+                // Keep this in sync too (lightweight)
+                checkFeedbackStatus();
+            } catch (e) {
+                console.error('Auto-refresh failed:', e);
+            }
+        }
+
+        let __amsCurrentTermInfo = null;
+        async function loadCurrentTermHeader() {
+            const el = document.getElementById('current-date');
+            if (!el) return;
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                __amsCurrentTermInfo = data;
+                const ay = data && data.academic_year ? data.academic_year : null;
+                const sem = data && data.semester ? data.semester : null;
+                if (ay && sem) el.innerText = `${ay} • ${sem}`;
+                else if (data && data.current_term) el.innerText = data.current_term;
+                else el.innerText = '-';
+            } catch (e) {
+                el.innerText = '-';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (!userId) { window.location.href = '/'; return; }
+            try {
+                loadCurrentTermHeader();
+                const response = await fetch(`/api/student/dashboard?user_id=${userId}`);
+                const data = await response.json();
+                renderDashboard(data);
+                
+                // --- NEW: FEEDBACK CHECK ---
+                checkFeedbackStatus();
+                // ---------------------------
+
+                // Auto-refresh is disabled globally.
+            } catch (e) { console.error(e); showToast("Session Error", "error"); window.location.href = '/'; }
+        });
+
+        // --- NEW: FEEDBACK CHECK FUNCTION ---
+        async function checkFeedbackStatus() {
+            try {
+                const res = await fetch(`/api/feedback/pending_list?user_id=${userId}`);
+                const data = await res.json();
+                console.log("Feedback Status:", data); // Debugging
+
+                if (data.active && data.subjects.length > 0) {
+                    const container = document.getElementById('feedback-alert-container');
+                    container.innerHTML = `
+                    <div class="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-r shadow-sm flex justify-between items-center mb-6">
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="message-square-plus" class="w-6 h-6 text-purple-600"></i>
+                            <div>
+                                <h4 class="text-sm font-bold text-purple-800">Feedback Required</h4>
+                                <p class="text-xs text-purple-600 mt-1">${data.cycle_name}: ${data.subjects.length} subjects pending.</p>
+                            </div>
+                        </div>
+                        <button onclick="window.location.href='/student/feedback'" class="px-4 py-2 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700 shadow-md transition-colors animate-pulse">
+                            Give Feedback
+                        </button>
+                    </div>`;
+                    lucide.createIcons();
+                }
+            } catch(e) { console.error("Feedback Check Error", e); }
+        }
+
+        function renderDashboard(data) {
+            // ... (Keep Profile & Stats Rendering) ...
+            document.getElementById('student-name-hero').innerText = data.profile.name;
+            document.getElementById('student-name-hero').classList.remove('aurora-text');
+            document.getElementById('student-class').innerText = `${data.profile.class} | Roll No: ${data.profile.roll}`;
+            
+            const perc = data.stats.percentage;
+            document.getElementById('percentage-text').innerText = `${perc}%`;
+            document.getElementById('attended-count').innerText = data.stats.attended;
+            document.getElementById('total-count').innerText = data.stats.total_lectures;
+            const ring = document.getElementById('progress-ring');
+            const offset = (2 * Math.PI * 40) - (perc / 100) * (2 * Math.PI * 40);
+            ring.style.strokeDashoffset = offset;
+            const badge = document.getElementById('status-badge');
+            if (data.stats.is_defaulter) { badge.innerText = "Risk: Defaulter"; badge.className = "px-2 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded-full"; ring.setAttribute('stroke', '#ef4444'); } 
+            else { badge.innerText = "Good Standing"; badge.className = "px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-full"; ring.setAttribute('stroke', '#00a887'); }
+
+            // ... (Keep Subject List & Events) ...
+            const subList = document.getElementById('subject-list');
+            if (!data.subject_wise || data.subject_wise.length === 0) subList.innerHTML = `<div class="col-span-2 text-center text-gray-400 py-4 text-sm">No data available.</div>`;
+            else subList.innerHTML = data.subject_wise.map(sub => {
+                const color = sub.percentage >= 75 ? 'bg-[#00a887]' : 'bg-[#ef4444]';
+                const txtColor = sub.percentage >= 75 ? 'text-green-700' : 'text-red-600';
+                return `<div class="p-3 border border-gray-100 rounded-lg hover:shadow-sm transition-shadow"><div class="flex justify-between items-center mb-2"><h4 class="font-bold text-gray-700 text-xs truncate w-3/4" title="${sub.subject}">${sub.subject}</h4><span class="text-xs font-bold ${txtColor}">${sub.percentage}%</span></div><div class="w-full bg-gray-100 rounded-full h-1.5 mb-2 overflow-hidden"><div class="${color} h-1.5 rounded-full" style="width: ${sub.percentage}%"></div></div><p class="text-[10px] text-gray-400 text-right">${sub.attended}/${sub.conducted} Attended</p></div>`;
+            }).join('');
+
+            const evtList = document.getElementById('event-list');
+            if (!data.events || data.events.length === 0) evtList.innerHTML = `<div class="text-center text-gray-400 py-2 text-xs">No events participated yet.</div>`;
+            else evtList.innerHTML = data.events.map(evt => `<div class="flex justify-between items-start p-2 border-b border-gray-50 last:border-0"><div><h4 class="font-bold text-gray-800 text-xs">${evt.name}</h4><p class="text-[10px] text-gray-500">${evt.date}</p></div><div class="text-right"><span class="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-700">${evt.role}</span></div></div>`).join('');
+
+            const list = document.getElementById('activity-list');
+            if (data.recent_activity.length === 0) list.innerHTML = `<div class="text-center text-gray-400 py-4 text-sm">No recent activity.</div>`;
+            else list.innerHTML = data.recent_activity.map((item) => {
+                const isPresent = item.status === 'Present' || item.status === 'OnDuty';
+                const dotColor = isPresent ? 'bg-green-500' : 'bg-red-500';
+                return `<div class="pl-4 pb-6 relative group last:pb-0"><div class="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full ${dotColor} border-2 border-white ring-1 ring-gray-100"></div><div class="flex justify-between items-start"><div><h4 class="font-bold text-gray-800 text-sm">${item.subject}</h4><p class="text-[10px] text-gray-400 mt-0.5">${item.date} • ${item.time}</p></div><span class="text-[10px] font-bold px-2 py-0.5 rounded ${isPresent ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">${item.status}</span></div></div>`;
+            }).join('');
+
+            // MENTOR & MEETING (UPDATED)
+            const mentorContainer = document.getElementById('mentor-container');
+            let mentorHTML = '';
+            
+            if (data.mentor) {
+                const m = data.mentor;
+                mentorHTML += `
+                <div class="bg-white rounded-xl shadow-sm border border-teal-100 p-4 mb-4 relative overflow-hidden">
+                    <div class="absolute top-0 left-0 w-1 h-full bg-teal-500"></div>
+                    <h3 class="text-xs font-bold text-gray-400 uppercase mb-3 flex items-center gap-2"><i data-lucide="heart-handshake" class="w-4 h-4 text-teal-500"></i> My Mentor</h3>
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-teal-50 flex items-center justify-center font-bold text-teal-700 text-sm">${m.name.charAt(0)}</div>
+                        <div><p class="text-sm font-bold text-gray-800">${m.name}</p><a href="mailto:${m.email}" class="text-xs text-blue-600 hover:underline">${m.email}</a></div>
+                    </div>
+                    <p class="text-[10px] text-gray-400 mt-2 text-right">Group: ${m.batch_name}</p>
+                </div>`;
+                
+                if (data.meeting) {
+                    mentorHTML += `
+                    <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 shadow-sm">
+                        <div class="flex items-start gap-3">
+                            <div class="p-2 bg-blue-100 text-blue-600 rounded-lg"><i data-lucide="calendar-clock" class="w-5 h-5"></i></div>
+                            <div>
+                                <h4 class="font-bold text-blue-900 text-sm">Upcoming Mentor Meeting</h4>
+                                <p class="text-xs text-blue-700 mt-1 font-medium">${data.meeting.agenda}</p>
+                                <div class="mt-2 flex gap-3 text-xs text-blue-600 font-mono">
+                                    <span class="bg-white px-2 py-1 rounded border border-blue-100">${data.meeting.date}</span>
+                                    <span class="bg-white px-2 py-1 rounded border border-blue-100">${data.meeting.time}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+            }
+            mentorContainer.innerHTML = mentorHTML;
+            
+            // Detention (Same as before)
+            detentionData = data.detention;
+            const dCard = document.getElementById('detention-alert-card');
+            if (detentionData) {
+                dCard.classList.remove('hidden');
+                const dText = document.getElementById('detention-count-text');
+                const dBtn = document.getElementById('alert-btn');
+                
+                if (detentionData.status === 'In_Review') {
+                     dCard.className = "bg-yellow-50 p-4 rounded-xl border border-yellow-300 shadow-md flex justify-between items-center transition-all mb-6";
+                     dCard.querySelector('i').className = "w-6 h-6 text-yellow-600";
+                     dCard.querySelector('.title').className = "font-bold text-yellow-800";
+                     dCard.querySelector('.title').innerText = "STATUS: UNDER REVIEW";
+                     dText.className = "text-sm text-yellow-700";
+                     dText.innerText = "Faculty is reviewing your submission.";
+                     dBtn.className = "px-3 py-1.5 bg-yellow-600 text-white text-xs font-bold rounded-lg hover:bg-yellow-700 shadow-sm";
+                     dBtn.innerText = "View Status";
+                } else {
+                     dCard.className = "bg-red-50 p-4 rounded-xl border border-red-300 shadow-md flex justify-between items-center transition-all mb-6";
+                     dCard.querySelector('.title').innerText = "ACTION REQUIRED: Active Detention";
+                     dText.innerText = `Pending: ${detentionData.reason}`;
+                     dBtn.innerText = "Submit Task";
+                }
+            } else { dCard.classList.add('hidden'); }
+            
+            // 3. TERM GRANT ALERT (NEW)
+            const grant = data.term_grant;
+            const main = document.querySelector('main');
+            const existingAlert = document.getElementById('grant-alert-container');
+            if(existingAlert) existingAlert.remove();
+            
+            if (grant) {
+                let grantHTML = '';
+                if (grant.status === 'Granted') {
+                    grantHTML = `
+                    <div class="bg-gradient-to-r from-green-600 to-teal-600 rounded-xl p-6 text-white shadow-lg mb-8 flex flex-col sm:flex-row justify-between items-center relative overflow-hidden gap-4">
+                        <div class="relative z-10">
+                            <h2 class="text-2xl font-bold flex items-center gap-2"><i data-lucide="ticket" class="w-8 h-8"></i> Term Grant Ticket Issued</h2>
+                            <p class="text-green-100 mt-1">You are eligible for the End Semester Examination.</p>
+                        </div>
+                        <button onclick="downloadHallTicket('${data.profile.name}', '${data.profile.roll}', '${data.profile.class}')" class="relative z-10 bg-white text-green-700 px-6 py-3 rounded-lg font-bold hover:bg-green-50 transition-colors shadow-md flex items-center gap-2">
+                            <i data-lucide="download" class="w-4 h-4"></i> Download Ticket
+                        </button>
+                        <i data-lucide="check-circle" class="absolute -bottom-4 -right-4 w-40 h-40 text-white opacity-10"></i>
+                    </div>`;
+                } else if (grant.status === 'Provisional') {
+                    grantHTML = `
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-6 mb-8 flex items-start gap-4">
+                        <div class="p-3 bg-yellow-100 text-yellow-700 rounded-full"><i data-lucide="alert-triangle" class="w-6 h-6"></i></div>
+                        <div>
+                            <h2 class="text-lg font-bold text-yellow-800">Provisional Eligibility</h2>
+                            <p class="text-sm text-yellow-700 mt-1">Your eligibility is conditional. Please contact your Class Teacher immediately.</p>
+                            <p class="text-xs text-yellow-600 mt-2 font-mono bg-yellow-100/50 p-2 rounded">Reason: ${grant.remarks}</p>
+                        </div>
+                    </div>`;
+                } else { // Detained
+                    grantHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded-xl p-6 mb-8 flex items-start gap-4">
+                        <div class="p-3 bg-red-100 text-red-700 rounded-full"><i data-lucide="x-circle" class="w-6 h-6"></i></div>
+                        <div>
+                            <h2 class="text-lg font-bold text-red-800">Not Eligible (Detained)</h2>
+                            <p class="text-sm text-red-700 mt-1">You have been detained due to non-compliance with university norms.</p>
+                            <p class="text-xs text-red-600 mt-2 font-mono bg-red-100/50 p-2 rounded">Reason: ${grant.remarks}</p>
+                        </div>
+                    </div>`;
+                }
+                
+                const div = document.createElement('div');
+                div.id = 'grant-alert-container';
+                div.innerHTML = grantHTML;
+                main.prepend(div);
+            }
+
+            lucide.createIcons();
+        }
+
+        // --- RESULTS & NOTIFICATIONS ---
+        async function openResultsModal() {
+            document.getElementById('results-modal').classList.remove('hidden');
+            const list = document.getElementById('results-list');
+            list.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-gray-400">Loading...</td></tr>';
+            try {
+                const res = await fetch(`/api/student/dashboard?user_id=${userId}`);
+                const data = await res.json();
+                if (!data.results || data.results.length === 0) { list.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-gray-400">No results published yet.</td></tr>'; return; }
+                list.innerHTML = data.results.map(r => `
+                    <tr class="hover:bg-purple-50 transition-colors border-b border-gray-50 last:border-0">
+                        <td class="p-4 font-bold text-gray-800">${r.subject} <span class="text-gray-400 font-mono text-[10px] block">${r.code}</span></td>
+                        <td class="p-4 text-center font-mono ${r.ta1 !== '-' ? 'text-blue-600' : 'text-gray-300'}">${r.ta1}</td>
+                        <td class="p-4 text-center font-mono ${r.ta2 !== '-' ? 'text-blue-600' : 'text-gray-300'}">${r.ta2}</td>
+                        <td class="p-4 text-center font-mono ${r.ta3 !== '-' ? 'text-blue-600' : 'text-gray-300'}">${r.ta3}</td>
+                        <td class="p-4 text-center text-xs text-gray-500">${r.a1 !== '-' ? `A1:${r.a1} ` : ''} ${r.a2 !== '-' ? `A2:${r.a2} ` : ''}</td>
+                    </tr>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+
+                // --- HALL TICKET GENERATOR (UPDATED) ---
+        function downloadHallTicket(name, roll, cls) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const logoImg = document.getElementById('mit-logo-img');
+
+            // Styling
+            doc.setLineWidth(2);
+            doc.setDrawColor(72, 22, 109);
+            doc.rect(5, 5, 200, 287); // Border
+
+            const margin = 14;
+            const pageW = doc.internal.pageSize.getWidth();
+
+            // Logo strictly right-aligned
+            let logoH = 22;
+            let logoW = 22;
+            if (logoImg && logoImg.naturalWidth && logoImg.naturalHeight) {
+                logoW = logoH * (logoImg.naturalWidth / logoImg.naturalHeight);
+            }
+            const logoX = pageW - margin - logoW;
+            const logoY = 14;
+            const leftX = 20;
+            const maxW = Math.max(60, logoX - leftX - 6);
+
+            const ay = __amsCurrentTermInfo && __amsCurrentTermInfo.academic_year ? __amsCurrentTermInfo.academic_year : null;
+            const sem = __amsCurrentTermInfo && __amsCurrentTermInfo.semester ? __amsCurrentTermInfo.semester : null;
+            const termLine = (ay && sem)
+                ? `Academic Year: ${ay} | ${sem}`
+                : `Academic Term: ${(__amsCurrentTermInfo && __amsCurrentTermInfo.current_term) ? __amsCurrentTermInfo.current_term : '-'}`;
+
+            // Header text strictly left-aligned with max width
+            doc.setTextColor(72, 22, 109);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            const uniLines = doc.splitTextToSize('MIT Art, Design and Technology University', maxW);
+            doc.text(uniLines, leftX, 25);
+
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(14);
+            doc.text('TERM GRANT CERTIFICATE', leftX, 35);
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            doc.text('For End Semester Practical & Jury Exam', leftX, 42);
+            doc.text(termLine, leftX, 48);
+
+            if (logoImg && logoImg.src) {
+                doc.addImage(logoImg, 'PNG', logoX, logoY, logoW, logoH);
+            }
+
+            doc.setLineWidth(0.5);
+            doc.line(15, 52, 195, 52);
+
+            doc.setFontSize(11);
+            doc.text(`Student Name:  ${name}`, 20, 65);
+            doc.text(`Roll Number:   ${roll}`, 20, 75);
+            doc.text(`Class / Div:   ${cls}`, 130, 65);
+
+            doc.rect(160, 70, 30, 35);
+            doc.setFontSize(8);
+            doc.text('Student Photo', 165, 90);
+
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Important Instructions:', 20, 110);
+            doc.setFont('helvetica', 'normal');
+
+            const rules = [
+                '1. This certificate is mandatory for Practical/Jury Exams.',
+                '2. Student must carry College ID card.',
+                '3. Reporting time is 30 minutes before schedule.'
+            ];
+            let ry = 118;
+            rules.forEach(r => { doc.text(r, 20, ry); ry += 6; });
+
+            doc.text('Head of Department', 150, 250);
+            doc.text('(Signature)', 160, 260);
+
+            doc.save(`TermGrant_${roll}.pdf`);
+        }
+
+        function openDetentionModal() { document.getElementById('detention-modal').classList.remove('hidden'); const container = document.getElementById('detention-task-details'); if(detentionData) { container.innerHTML = `<h4 class="font-bold text-sm text-red-800">Reason: ${detentionData.reason}</h4><p class="text-xs text-gray-600 mt-1">${detentionData.task || "Contact Faculty for task details."}</p>`; document.getElementById('submission-detention-id').value = detentionData.id; } }
+        async function submitDetentionTask(e) {
+            e.preventDefault();
+            const url = document.getElementById('submission-url').value;
+            const id = document.getElementById('submission-detention-id').value;
+            try {
+                const res = await fetch('/api/detention/submit_task', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ detention_id: id, submission_url: url })
+                });
+                if(res.ok) {
+                    showToast("Submitted!");
+                    document.getElementById('detention-modal').classList.add('hidden');
+                    // Refresh data in-place (no full page reload)
+                    refreshStudentDashboard();
+                } else {
+                    showToast("Failed", "error");
+                }
+            } catch(e) {
+                showToast("Error", "error");
+            }
+        }
+        function logout() { sessionStorage.removeItem('user_id'); window.location.replace('/'); }
+    </script>
+</body>
+</html>

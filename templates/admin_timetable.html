@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Course Structure & Scheduler - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PDF Libs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .break-row { background-color: #fff7ed; color: #c2410c; font-size: 10px; font-weight: 800; text-align: center; letter-spacing: 0.05em; padding: 6px; border-top: 2px solid #ffedd5; border-bottom: 2px solid #ffedd5; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="p-8 max-w-7xl mx-auto">
+        
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900">Course Structure Manager</h1>
+                <p class="text-gray-500 text-sm">View allocations, L-T-P loads, and generate the weekly timetable.</p>
+            </div>
+            <div class="flex gap-3">
+                <select id="view-class" class="p-2 border border-gray-300 rounded-lg text-sm shadow-sm outline-none focus:ring-2 focus:ring-purple-500 bg-white min-w-[200px]" onchange="loadView()">
+                    <option value="">-- Select Class to View --</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- Scheduler Actions & Status -->
+        <div id="timetable-actions" class="bg-white p-6 rounded-xl shadow border border-gray-200 mb-8 flex justify-between items-center hidden">
+             <div id="timetable-status">
+                 <h3 class="font-bold text-lg text-gray-800">Weekly Timetable Generation</h3>
+                 <p class="text-sm text-gray-500" id="timetable-message">Ready to generate schedule for the selected class.</p>
+             </div>
+             <div class="flex gap-3">
+                 <button onclick="generate()" class="bg-purple-700 text-white px-4 py-2 rounded-lg font-bold hover:bg-purple-800 flex gap-2 text-sm shadow-md transition-transform active:scale-95">
+                    <i data-lucide="cpu"></i> Auto-Generate
+                </button>
+             </div>
+        </div>
+
+        <!-- 1. COURSE STRUCTURE TABLE (Main Static View) -->
+        <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden mb-8">
+            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                    <i data-lucide="book-open" class="w-4 h-4 text-blue-500"></i> Course Structure & Allocation
+                </h3>
+                <button onclick="downloadCourseStructurePDF()" class="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50" id="print-btn" disabled>
+                    <i data-lucide="printer" class="w-4 h-4 inline mr-1"></i> Print Report
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left" id="course-structure-table">
+                    <thead class="bg-white text-xs font-bold text-gray-500 uppercase border-b border-gray-100">
+                        <tr>
+                            <th class="p-4 w-32">Course Code</th>
+                            <th class="p-4 w-1/3">Subject Name & Type</th>
+                            <th class="p-4">Assigned Faculty</th>
+                            <th class="p-4 w-32 text-right">L-T-P-C Load</th>
+                        </tr>
+                    </thead>
+                    <tbody id="subject-ref-body" class="divide-y divide-gray-50">
+                        <tr><td colspan="4" class="p-8 text-center text-gray-400 text-sm">Select a class to load its course structure.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- 2. GENERATED TIMETABLE GRID (Dynamic View) -->
+        <div id="timetable-grid-container" class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden hidden">
+            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
+                <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                    <i data-lucide="calendar" class="w-4 h-4 text-purple-600"></i> Generated Weekly Timetable
+                </h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left border-collapse table-fixed">
+                    <thead class="bg-gray-50 text-gray-500 font-bold uppercase text-xs">
+                        <tr>
+                            <th class="p-3 border w-24 text-center bg-gray-100">Time</th>
+                            <th class="p-3 border w-1/5 text-center">Monday</th>
+                            <th class="p-3 border w-1/5 text-center">Tuesday</th>
+                            <th class="p-3 border w-1/5 text-center">Wednesday</th>
+                            <th class="p-3 border w-1/5 text-center">Thursday</th>
+                            <th class="p-3 border w-1/5 text-center">Friday</th>
+                        </tr>
+                    </thead>
+                    <tbody id="timetable-body" class="divide-y divide-gray-100">
+                        <!-- Content Injected via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="log-console" class="mt-6 p-4 bg-gray-900 text-green-400 font-mono text-xs rounded-xl h-48 overflow-y-auto hidden shadow-inner border border-gray-700"></div>
+    </div>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        
+        // --- TIME SLOTS CONFIG (Used for Grid Rendering) ---
+        const timeSlots = [
+            { start: "08:45 AM", end: "09:40 AM", label: "08:45 - 09:40" },
+            { start: "09:40 AM", end: "10:35 AM", label: "09:40 - 10:35" },
+            { type: "break", label: "SHORT BREAK (10:35 - 10:50)" },
+            { start: "10:50 AM", end: "11:45 AM", label: "10:50 - 11:45" },
+            { start: "11:45 AM", end: "12:40 PM", label: "11:45 - 12:40" },
+            { type: "break", label: "LUNCH BREAK (12:40 - 01:40)" },
+            { start: "01:40 PM", end: "02:40 PM", label: "01:40 - 02:40" },
+            { start: "02:40 PM", end: "03:40 PM", label: "02:40 - 03:40" },
+            { start: "03:40 PM", end: "04:30 PM", label: "03:40 - 04:30" }
+        ];
+        
+        const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+        // Load Classes Dropdown
+        fetch('/api/core/classes').then(r=>r.json()).then(d => {
+             document.getElementById('view-class').innerHTML += d.classes.map(c => `<option value="${c.id}">${c.name}</option>`);
+        });
+
+        function initTimeTableGrid() {
+            // Renders the empty timetable structure
+            const tbody = document.getElementById('timetable-body');
+            tbody.innerHTML = timeSlots.map(slot => {
+                if(slot.type === 'break') return `<tr><td colspan="6" class="break-row">${slot.label}</td></tr>`;
+                const cells = days.map(day => `<td class="p-1 border align-top h-24 relative group bg-white hover:bg-gray-50 transition-colors" id="${day}-${slot.start}"></td>`).join('');
+                return `<tr><td class="p-3 border-r font-mono text-xs font-bold text-gray-500 bg-gray-50 text-center align-middle">${slot.label}</td>${cells}</tr>`;
+            }).join('');
+        }
+
+        async function loadView() {
+            const sectionId = document.getElementById('view-class').value;
+            const refBody = document.getElementById('subject-ref-body');
+            const ttActions = document.getElementById('timetable-actions');
+            
+            refBody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400 text-sm">Loading structure...</td></tr>`;
+            ttActions.classList.add('hidden');
+            document.getElementById('timetable-grid-container').classList.add('hidden');
+
+            if(!sectionId) return;
+
+            try {
+                // 1. Fetch the static course structure (LTP details)
+                const res = await fetch(`/api/admin/course_structure?section_id=${sectionId}`);
+                const data = await res.json();
+                
+                ttActions.classList.remove('hidden');
+
+                // 2. Populate Reference Table
+                if (data.courses && data.courses.length > 0) {
+                    refBody.innerHTML = data.courses.map(s => `
+                        <tr class="hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0">
+                            <td class="p-4 font-mono text-xs text-purple-700 font-bold">${s.code}</td>
+                            <td class="p-4">
+                                <p class="text-sm font-medium text-gray-800">${s.name}</p>
+                                <p class="text-[10px] text-gray-500 uppercase font-bold">${s.type}</p>
+                            </td>
+                            <td class="p-4 text-sm text-gray-600">${s.teacher}</td>
+                            <td class="p-4 text-right text-xs font-mono text-gray-600 bg-gray-50 rounded">${s.load}</td>
+                        </tr>
+                    `).join('');
+                    document.getElementById('print-btn').disabled = false;
+                    document.getElementById('timetable-message').innerText = `${data.courses.length} subjects found. Click 'Auto-Generate' to build schedule.`;
+                } else {
+                    refBody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-red-400 text-sm">No subjects allocated yet. Go to 'Subject Allocation' to assign faculty.</td></tr>`;
+                    document.getElementById('print-btn').disabled = true;
+                    document.getElementById('timetable-message').innerText = `No subjects allocated. Timetable cannot be generated.`;
+                }
+
+                // 3. Check for existing schedule and load if found
+                const scheduleRes = await fetch(`/api/admin/get_class_schedule?section_id=${sectionId}`);
+                const scheduleData = await scheduleRes.json();
+                
+                if (scheduleData.schedule && scheduleData.schedule.length > 0) {
+                    document.getElementById('timetable-grid-container').classList.remove('hidden');
+                    renderTimetableGrid(scheduleData.schedule);
+                }
+
+
+            } catch(e) { console.error(e); showToast("Failed to load course structure.", "error"); }
+        }
+
+        function renderTimetableGrid(schedule) {
+            initTimeTableGrid(); // Draw empty grid
+            
+            schedule.forEach(slot => {
+                const cellId = `${slot.day}-${slot.start_time}`; 
+                const cell = document.getElementById(cellId);
+                
+                if (cell) {
+                    let bgColor = "bg-blue-50 border-blue-200 text-blue-800"; 
+                    let icon = "book-open";
+                    if (slot.type === 'Practical') {
+                        bgColor = "bg-green-50 border-green-200 text-green-800";
+                        icon = "flask-conical";
+                    }
+                    
+                    const batchBadge = slot.batch ? `<span class="text-[9px] font-bold uppercase bg-white/80 px-1.5 py-0.5 rounded border border-black/10 ml-1 shadow-sm tracking-wider">${slot.batch}</span>` : '';
+
+                    const cardHTML = `
+                    <div class="p-2 rounded-lg border ${bgColor} mb-1 shadow-sm hover:shadow-md transition-all h-full flex flex-col justify-between cursor-pointer">
+                        <div>
+                            <div class="font-bold text-xs flex justify-between items-start leading-tight mb-1">
+                                <span class="truncate pr-1" title="${slot.subject}">${slot.subject}</span>
+                                <i data-lucide="${icon}" class="w-3 h-3 opacity-50 flex-shrink-0"></i>
+                            </div>
+                            <div class="text-[10px] opacity-80 truncate">${slot.teacher}</div>
+                        </div>
+                        <div class="flex justify-between items-end mt-1 pt-1 border-t border-black/5">
+                            <span class="text-[9px] font-mono opacity-60">${slot.code}</span>
+                            <div class="flex items-center gap-1">${batchBadge}<span class="text-[9px] font-bold bg-white/50 px-1 rounded text-gray-700 flex items-center gap-0.5" title="Room"><i data-lucide="map-pin" class="w-2 h-2 inline"></i> ${slot.room || 'TBD'}</span></div>
+                        </div>
+                    </div>`;
+                    
+                    cell.innerHTML += cardHTML;
+                }
+            });
+            lucide.createIcons();
+        }
+
+        async function generate() {
+            return showConfirm(
+                "Confirm Action",
+                "This action will DELETE and overwrite the existing schedule slots. Continue?",
+                async () => {
+                    const btn = document.querySelector('button[onclick="generate()"]');
+                    btn.disabled = true; btn.innerHTML = `<i data-lucide="loader-2" class="animate-spin"></i> Processing...`;
+                    const logs = document.getElementById('log-console');
+                    logs.classList.remove('hidden');
+                    logs.innerHTML = "> Initializing Scheduling Engine...\n";
+
+                    try {
+                        const res = await fetch('/api/admin/generate_timetable', { method: 'POST' });
+                        const data = await res.json();
+
+                        if(res.ok) {
+                            logs.innerHTML += data.logs.join('\n') + "\n> GENERATION COMPLETE.\n";
+                            showToast("Timetable Generated Successfully!");
+
+                            // Show and load the new grid
+                            document.getElementById('timetable-grid-container').classList.remove('hidden');
+                            loadView();
+                        } else {
+                            logs.innerHTML += `\n> ERROR: ${data.error}`;
+                            showToast("Generation failed", "error");
+                        }
+                    } catch(e) {
+                        console.error(e);
+                        logs.innerHTML += `\n> NETWORK ERROR: ${e.message}`;
+                        showToast("Network Error", "error");
+                    } finally {
+                        btn.disabled = false; btn.innerHTML = `<i data-lucide="cpu"></i> Auto-Generate`;
+                        lucide.createIcons();
+                    }
+                },
+                "Timetable"
+            );
+        }
+        
+        function downloadCourseStructurePDF() {
+            return showConfirm(
+                "Confirm Action",
+                "Download Course Structure (LTP) Report?",
+                async () => {
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF('p', 'mm', 'a4');
+                    const selectedClass = document.getElementById('view-class').options[document.getElementById('view-class').selectedIndex].text;
+
+                    async function amsEnsureCurrentTermInfo() {
+                        if (window.__amsCurrentTermInfo) return window.__amsCurrentTermInfo;
+                        try {
+                            const res = await fetch('/api/current_term');
+                            const data = await res.json();
+                            if (res.ok) {
+                                window.__amsCurrentTermInfo = data;
+                                return data;
+                            }
+                        } catch (_) {
+                            // ignore
+                        }
+                        return null;
+                    }
+
+                    function amsGetAcademicTermLine() {
+                        const info = window.__amsCurrentTermInfo;
+                        if (info && info.academic_year && info.semester) {
+                            return `Academic Year: ${info.academic_year} | ${info.semester}`;
+                        }
+                        if (info && info.current_term) return `Academic Term: ${info.current_term}`;
+                        return '';
+                    }
+
+                    function amsDrawPdfHeader(doc, title, subLines, metaLine) {
+                        const margin = 14;
+                        const pageW = doc.internal.pageSize.getWidth();
+                        const logoImg = document.getElementById('mit-logo-img');
+
+                        let logoH = 20;
+                        let logoW = 20;
+                        if (logoImg && logoImg.naturalWidth && logoImg.naturalHeight) {
+                            logoW = logoH * (logoImg.naturalWidth / logoImg.naturalHeight);
+                        }
+                        const logoX = pageW - margin - logoW;
+                        const logoY = 10;
+
+                        const leftX = margin;
+                        const maxW = Math.max(60, logoX - leftX - 6);
+
+                        let y = 16;
+                        doc.setTextColor(0, 0, 0);
+
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(14);
+                        const uniLines = doc.splitTextToSize('MIT Art, Design and Technology University, Pune', maxW);
+                        doc.text(uniLines, leftX, y);
+                        y += uniLines.length * 6;
+
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(10);
+                        (subLines || []).forEach((line) => {
+                            const parts = doc.splitTextToSize(String(line || ''), maxW);
+                            doc.text(parts, leftX, y);
+                            y += parts.length * 5;
+                        });
+
+                        if (title) {
+                            doc.setFont('helvetica', 'bold');
+                            doc.setFontSize(11);
+                            const tLines = doc.splitTextToSize(String(title), maxW);
+                            doc.text(tLines, leftX, y);
+                            y += tLines.length * 5;
+                        }
+
+                        if (metaLine) {
+                            doc.setFont('helvetica', 'normal');
+                            doc.setFontSize(9);
+                            const mLines = doc.splitTextToSize(String(metaLine), maxW);
+                            doc.text(mLines, leftX, y);
+                            y += mLines.length * 4.5;
+                        }
+
+                        if (logoImg && logoImg.src) {
+                            doc.addImage(logoImg, 'PNG', logoX, logoY, logoW, logoH);
+                        }
+
+                        const headerBottom = Math.max(y + 2, logoY + logoH + 2);
+                        doc.setDrawColor(191, 157, 85);
+                        doc.setLineWidth(0.6);
+                        doc.line(margin, headerBottom, pageW - margin, headerBottom);
+                        return headerBottom + 6;
+                    }
+
+                    await amsEnsureCurrentTermInfo();
+                    const termLine = amsGetAcademicTermLine();
+                    const metaBits = [`Class: ${selectedClass}`, `Date: ${new Date().toLocaleDateString()}`, termLine].filter(Boolean);
+
+                    const startY = amsDrawPdfHeader(
+                        doc,
+                        'Course Structure Report (LTP)',
+                        [],
+                        metaBits.join(' | ')
+                    );
+
+                    doc.autoTable({
+                        html: '#course-structure-table',
+                        startY,
+                        theme: 'grid',
+                        headStyles: { fillColor: [72, 22, 109], textColor: 255 },
+                        styles: { fontSize: 8, cellPadding: 2, halign: 'center' },
+                        columnStyles: { 1: { halign: 'left', cellWidth: 50 }, 2: { halign: 'left' } }
+                    });
+
+                    doc.save(`Course_Structure_${selectedClass}.pdf`);
+                },
+                "Timetable"
+            );
+        }
+    </script>
+</body>
+</html>

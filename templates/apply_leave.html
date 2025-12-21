@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apply for Leave - Student</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+        
+        /* Scrollbar */
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f9fafb; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-50 px-6 h-16 flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-3">
+            <button onclick="history.back()" class="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <h1 class="font-bold text-lg mit-purple" style="font-family: 'Merriweather', serif;">Leave Portal</h1>
+        </div>
+        <div class="text-xs text-gray-400 font-mono" id="current-date">...</div>
+    </header>
+
+    <main class="max-w-5xl mx-auto mt-8 p-4">
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+            
+            <!-- LEFT COLUMN: APPLICATION FORM -->
+            <div class="bg-white p-6 rounded-xl shadow-lg border border-purple-100">
+                <h2 class="text-lg font-bold mit-purple mb-1 flex items-center gap-2"><i data-lucide="file-plus" class="w-5 h-5"></i> New Request</h2>
+                <p class="text-xs text-gray-500 mb-6">Submit a new leave application for approval.</p>
+
+                <form id="leave-form" class="space-y-5">
+                    <input type="hidden" id="student-id">
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Leave Category</label>
+                        <select id="leave-type" class="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none bg-white text-sm" required>
+                            <option value="Casual">Casual Leave (Personal)</option>
+                            <option value="Sick">Medical / Sick Leave</option>
+                            <option value="Event">Event / On Duty (OD)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">From</label>
+                            <input type="date" id="start-date" class="w-full p-3 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-purple-500 text-sm" required onchange="validateAndCalculate()">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">To</label>
+                            <input type="date" id="end-date" class="w-full p-3 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-purple-500 text-sm" required onchange="validateAndCalculate()">
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between items-end mb-1">
+                            <label class="block text-xs font-bold text-gray-500 uppercase">Duration</label>
+                            <span class="text-xs font-bold mit-purple bg-purple-50 px-2 py-0.5 rounded" id="days-badge">0 Days</span>
+                        </div>
+                        <input type="hidden" id="total-days" value="0">
+                        
+                        <!-- Alerts Container -->
+                        <div id="alerts-area" class="space-y-2 mt-2">
+                            <p id="approval-notice" class="text-xs text-orange-600 bg-orange-50 p-2 rounded border border-orange-100 hidden flex items-center gap-2">
+                                <i data-lucide="alert-triangle" class="w-3 h-3"></i> Requires HOD Approval (>15 Days).
+                            </p>
+                            <p id="error-msg" class="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-100 hidden flex items-center gap-2">
+                                <!-- Error text injected here -->
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Reason</label>
+                        <textarea id="reason" rows="4" placeholder="Please provide a valid reason..." class="w-full p-3 border border-gray-200 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 outline-none text-sm" required></textarea>
+                    </div>
+
+                    <button type="submit" id="submit-btn" class="w-full py-3 bg-mit-purple text-white font-bold rounded-lg hover:bg-[#350f50] shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-400 flex justify-center items-center gap-2">
+                        <i data-lucide="send" class="w-4 h-4"></i> Submit Application
+                    </button>
+                </form>
+            </div>
+
+            <!-- RIGHT COLUMN: BALANCE & HISTORY -->
+            <div class="space-y-6">
+                
+                <!-- Balance Card -->
+                <div class="bg-gradient-to-br from-purple-600 to-blue-600 rounded-xl p-6 text-white shadow-lg relative overflow-hidden">
+                    <div class="absolute right-0 top-0 p-4 opacity-10"><i data-lucide="pie-chart" class="w-24 h-24 text-white"></i></div>
+                    <h3 class="text-xs font-bold uppercase tracking-wider text-purple-200 mb-1">Annual Quota</h3>
+                    <div class="flex items-end gap-2">
+                        <span class="text-4xl font-black" id="balance-count">--</span>
+                        <span class="text-sm text-purple-200 mb-1.5">Days Remaining</span>
+                    </div>
+                    <div class="mt-4 w-full bg-white/20 rounded-full h-1.5">
+                        <div id="balance-bar" class="bg-white h-1.5 rounded-full transition-all duration-1000" style="width: 0%"></div>
+                    </div>
+                    <p class="text-[10px] text-purple-100 mt-2 text-right" id="balance-detail">Used: -- / 20</p>
+                </div>
+
+                <!-- History List -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[500px]">
+                    <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                        <h3 class="font-bold text-gray-700 text-sm flex items-center gap-2"><i data-lucide="history" class="w-4 h-4 text-gray-400"></i> Application History</h3>
+                        <span class="text-[10px] text-gray-400 uppercase">Recent</span>
+                    </div>
+                    <div id="history-list" class="flex-grow overflow-y-auto custom-scroll p-2 space-y-2">
+                        <p class="text-xs text-gray-400 text-center py-10">Loading history...</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        document.getElementById('current-date').innerText = new Date().toLocaleDateString();
+        const studentId = sessionStorage.getItem('user_id');
+        document.getElementById('student-id').value = studentId;
+        
+        let currentBalance = 0;
+        let blockedDates = [];
+
+        document.addEventListener('DOMContentLoaded', loadLeaveData);
+
+        async function loadLeaveData() {
+            try {
+                const res = await fetch(`/api/student/leaves?user_id=${studentId}`);
+                const data = await res.json();
+                
+                // 1. Update Balance Card
+                currentBalance = data.balance.remaining;
+                const total = data.balance.total;
+                const used = data.balance.used;
+                
+                document.getElementById('balance-count').innerText = currentBalance;
+                document.getElementById('balance-detail').innerText = `Used: ${used} / ${total}`;
+                
+                // Bar Logic
+                const perc = (currentBalance / total) * 100;
+                document.getElementById('balance-bar').style.width = `${perc}%`;
+                
+                blockedDates = data.blocked_dates || [];
+
+                // Disable submit if empty
+                if (currentBalance <= 0) showError("Annual leave quota exceeded.");
+
+                // 2. Update History
+                const historyList = document.getElementById('history-list');
+                if (data.history.length === 0) {
+                    historyList.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-gray-300"><i data-lucide="clipboard-list" class="w-8 h-8 mb-2 opacity-20"></i><p class="text-xs">No history found</p></div>`;
+                    lucide.createIcons();
+                    return;
+                }
+                
+                historyList.innerHTML = data.history.map(l => `
+                    <div class="p-3 bg-white border border-gray-100 rounded-lg hover:border-purple-200 transition-colors shadow-sm group">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="font-bold text-xs text-gray-700">${l.type}</span>
+                            <span class="text-[9px] font-bold px-1.5 py-0.5 rounded border ${l.status_color}">${l.status}</span>
+                        </div>
+                        <div class="flex justify-between items-end">
+                            <p class="text-[10px] text-gray-500 font-mono">${l.date_display}</p>
+                            <span class="text-[10px] font-bold text-gray-400 group-hover:text-purple-600 transition-colors">${l.days} Days</span>
+                        </div>
+                    </div>
+                `).join('');
+                lucide.createIcons();
+
+            } catch(e) { console.error(e); }
+        }
+
+        // --- VALIDATION ---
+        function validateAndCalculate() {
+            const startInput = document.getElementById('start-date');
+            const endInput = document.getElementById('end-date');
+            const badge = document.getElementById('days-badge');
+            const notice = document.getElementById('approval-notice');
+            
+            hideError();
+            notice.classList.add('hidden');
+            document.getElementById('total-days').value = 0;
+            badge.innerText = "0 Days";
+
+            if (!startInput.value || !endInput.value) return;
+
+            const start = new Date(startInput.value);
+            const end = new Date(endInput.value);
+
+            if (end < start) {
+                showError("End date cannot be before start date.");
+                endInput.value = "";
+                return;
+            }
+
+            // Conflict Check
+            let conflict = false;
+            let check = new Date(start);
+            while (check <= end) {
+                if (blockedDates.includes(check.toISOString().split('T')[0])) {
+                    conflict = true; break;
+                }
+                check.setDate(check.getDate() + 1);
+            }
+
+            if (conflict) {
+                showError("Selected dates overlap with an existing leave.");
+                return;
+            }
+
+            const dayDiff = Math.ceil((end - start) / (1000 * 3600 * 24)) + 1;
+            
+            document.getElementById('total-days').value = dayDiff;
+            badge.innerText = `${dayDiff} Days`;
+
+            if (dayDiff > currentBalance) {
+                showError(`Insufficient Balance (Max: ${currentBalance})`);
+                return;
+            }
+
+            if (dayDiff > 15) notice.classList.remove('hidden');
+            
+            document.getElementById('submit-btn').disabled = false;
+            document.getElementById('submit-btn').classList.remove('bg-gray-400', 'cursor-not-allowed');
+            document.getElementById('submit-btn').classList.add('bg-mit-purple');
+        }
+
+        function showError(msg) {
+            const err = document.getElementById('error-msg');
+            err.innerHTML = `<i data-lucide="x-circle" class="w-3 h-3"></i> ${msg}`;
+            err.classList.remove('hidden');
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            btn.classList.add('bg-gray-400', 'cursor-not-allowed');
+            btn.classList.remove('bg-mit-purple');
+            lucide.createIcons();
+        }
+
+        function hideError() { document.getElementById('error-msg').classList.add('hidden'); }
+
+        // --- SUBMIT ---
+        document.getElementById('leave-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            if (document.getElementById('submit-btn').disabled) return;
+
+            const btn = document.getElementById('submit-btn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Submitting...`;
+            btn.disabled = true;
+            lucide.createIcons();
+
+            const payload = {
+                student_id: studentId,
+                start_date: document.getElementById('start-date').value,
+                end_date: document.getElementById('end-date').value,
+                total_days: parseFloat(document.getElementById('total-days').value),
+                reason: document.getElementById('reason').value,
+                leave_type: document.getElementById('leave-type').value
+            };
+
+            try {
+                const res = await fetch('/api/leave/apply', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (res.ok) {
+                    showToast("Leave Applied Successfully!");
+                    document.getElementById('leave-form').reset();
+                    document.getElementById('days-badge').innerText = "0 Days";
+                    loadLeaveData(); 
+                } else { showToast(data.error || "Failed", "error"); }
+            } catch(e) { showToast("Network Error", "error"); }
+
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>

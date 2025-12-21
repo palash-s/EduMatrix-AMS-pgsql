@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HOD Console - MIT ADT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; }
+        .serif { font-family: 'Merriweather', serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+        
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f9fafb; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+        
+        .tooltip-enter { animation: tooltipFade 0.15s ease-out forwards; }
+        @keyframes tooltipFade { from { opacity: 0; transform: translateY(5px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-50 px-6 h-16 flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-3">
+            <button onclick="window.location.href='/staff/dashboard'" class="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <div><h1 class="font-bold text-lg mit-purple serif">Head of Department</h1><p class="text-xs text-gray-500" id="dept-name">Loading...</p></div>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="current-term-badge" class="hidden sm:inline-flex px-3 py-1 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-600 shadow-sm">Loading term...</span>
+            {% include '_notifications.html' %}
+        </div>
+    </header>
+
+    <main class="max-w-[95%] mx-auto p-6 space-y-6">
+        
+        <!-- KPI CARDS -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            
+            <!-- 1. Students -->
+            <div onclick="openStudentHierarchy()" class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-purple-300 cursor-pointer transition-all group relative overflow-hidden">
+                <div class="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20"><i data-lucide="users" class="w-12 h-12 text-purple-900"></i></div>
+                <p class="text-xs text-gray-400 font-bold uppercase">Students</p>
+                <h3 class="text-2xl font-bold text-gray-800 mt-1" id="stat-students">--</h3>
+                <p class="text-[10px] text-purple-600 mt-1 font-bold group-hover:underline">View List ↗</p>
+            </div>
+
+            <!-- 2. Faculty -->
+            <div onclick="openFacultyRoles()" class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-purple-300 cursor-pointer transition-all group relative overflow-hidden">
+                <div class="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20"><i data-lucide="briefcase" class="w-12 h-12 text-purple-900"></i></div>
+                <p class="text-xs text-gray-400 font-bold uppercase">Faculty</p>
+                <h3 class="text-2xl font-bold text-purple-600 mt-1" id="stat-faculty">--</h3>
+                <p class="text-[10px] text-purple-600 mt-1 font-bold group-hover:underline">Roles ↗</p>
+            </div>
+            
+            <!-- 3. Attendance -->
+            <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                <div class="absolute right-0 top-0 p-3 opacity-5"><i data-lucide="activity" class="w-12 h-12 text-teal-600"></i></div>
+                <p class="text-xs text-gray-400 font-bold uppercase">Attendance</p>
+                <h3 class="text-2xl font-bold text-teal-600 mt-1" id="stat-att">--%</h3>
+                <p class="text-[10px] text-gray-400 mt-1">Dept Avg</p>
+            </div>
+
+            <!-- 4. SYLLABUS STATUS (NEW) -->
+            <div onclick="openSyllabusModal()" class="bg-indigo-50 p-5 rounded-xl border border-indigo-100 shadow-sm hover:shadow-md cursor-pointer transition-all group relative overflow-hidden">
+                <div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="book-open" class="w-12 h-12 text-indigo-600"></i></div>
+                <p class="text-xs text-indigo-600 font-bold uppercase">Syllabus</p>
+                <h3 class="text-2xl font-bold text-indigo-700 mt-1">Track</h3>
+                <p class="text-[10px] text-indigo-600 mt-1 font-bold group-hover:underline">Check Completion ↗</p>
+            </div>
+
+            <!-- 5. Feedback -->
+            <div onclick="openFeedbackScorecard()" class="bg-gradient-to-br from-pink-50 to-white p-5 rounded-xl border border-pink-100 shadow-sm hover:shadow-md hover:border-pink-300 cursor-pointer transition-all group relative overflow-hidden">
+                <div class="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20"><i data-lucide="star" class="w-12 h-12 text-pink-600"></i></div>
+                <p class="text-xs text-pink-500 font-bold uppercase">Feedback</p>
+                <h3 class="text-2xl font-bold text-pink-700 mt-1" id="stat-feedback">--/5</h3>
+                <p class="text-[10px] text-pink-600 mt-1 font-bold group-hover:underline">Analysis ↗</p>
+            </div>
+
+            <!-- 6. Approvals -->
+            <div class="bg-orange-50 p-5 rounded-xl border border-orange-100 shadow-sm">
+                <div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="clock" class="w-12 h-12 text-orange-600"></i></div>
+                <p class="text-xs text-orange-600 font-bold uppercase">Pending</p>
+                <h3 class="text-2xl font-bold text-orange-700 mt-1" id="stat-pending">--</h3>
+                <p class="text-[10px] text-orange-600 mt-1">Requests</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- LEFT: FACULTY MONITORING -->
+            <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
+                <div class="p-5 border-b border-gray-100">
+                    <h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="users" class="w-4 h-4 text-gray-400"></i> Faculty Performance</h2>
+                </div>
+                <div class="overflow-x-auto max-h-[500px] overflow-y-auto custom-scroll">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-gray-50 text-gray-500 font-bold uppercase text-xs sticky top-0 z-10">
+                            <tr><th class="p-4">Faculty Name</th><th class="p-4 text-center">Load</th><th class="p-4 text-right">Avg Att.</th></tr>
+                        </thead>
+                        <tbody id="faculty-list" class="divide-y divide-gray-100"><tr><td colspan="3" class="p-8 text-center text-gray-400">Loading...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- RIGHT: APPROVAL INBOX -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[500px]">
+                <div class="p-5 border-b border-gray-100 bg-gray-50">
+                    <h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="inbox" class="w-4 h-4 text-gray-400"></i> Approval Inbox</h2>
+                    <p class="text-xs text-gray-500 mt-1">Long Leaves (>15 Days)</p>
+                </div>
+                <div id="approval-list" class="flex-grow overflow-y-auto p-4 space-y-3 custom-scroll">
+                    <p class="text-center text-gray-400 text-sm mt-10">No pending approvals.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- LOAD ADJUSTMENT MONITOR (NEW) -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div class="p-5 border-b border-gray-100 bg-gray-50 flex items-start justify-between gap-4">
+                <div>
+                    <h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="shuffle" class="w-4 h-4 text-gray-400"></i> Load Adjustment Monitor</h2>
+                    <p class="text-xs text-gray-500 mt-1">All swap requests & approvals (date-wise)</p>
+                </div>
+                <span id="load-adjustment-count" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-white border border-gray-200 text-gray-600">--</span>
+            </div>
+            <div class="overflow-x-auto">
+                <div class="max-h-[520px] overflow-y-auto custom-scroll">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-gray-50 text-gray-500 font-bold uppercase text-xs sticky top-0 z-10">
+                            <tr>
+                                <th class="p-4 w-44">Class</th>
+                                <th class="p-4 w-56">Requester</th>
+                                <th class="p-4 w-56">Adjusted Faculty</th>
+                                <th class="p-4">Requested Slot</th>
+                                <th class="p-4">Swap Slot</th>
+                                <th class="p-4">Reason</th>
+                                <th class="p-4 w-24 text-right">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="load-adjustment-list" class="divide-y divide-gray-100">
+                            <tr><td colspan="7" class="p-10 text-center text-gray-400">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- HISTORICAL DEPARTMENT HIGHLIGHTS (moved from Admin "Historical Archives") -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div class="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gray-50">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="star" class="w-4 h-4 text-pink-600"></i>
+                    <h2 class="font-bold text-gray-800">Historical Dept Highlights</h2>
+                    <span class="text-xs text-gray-500" id="hod-archive-dept"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="relative">
+                        <i data-lucide="calendar" class="absolute left-3 top-2.5 w-4 h-4 text-gray-400"></i>
+                        <select id="hod-archive-year" class="pl-9 pr-4 py-2 border rounded-lg text-sm font-bold focus:ring-2 focus:ring-purple-500 outline-none bg-white min-w-[180px]"></select>
+                    </div>
+                    <select id="hod-archive-sem" class="px-3 py-2 border rounded-lg text-sm font-bold focus:ring-2 focus:ring-purple-500 outline-none bg-white min-w-[110px]">
+                        <option value="all">All</option>
+                        <option value="1">Sem 1</option>
+                        <option value="2">Sem 2</option>
+                    </select>
+                    <button onclick="fetchHodArchiveHighlights()" class="px-4 py-2 bg-mit-purple text-white text-sm font-bold rounded-lg hover:opacity-90 shadow-sm transition-opacity">Analyze</button>
+                </div>
+            </div>
+
+            <div class="p-6">
+                <div id="hod-archive-loading" class="hidden text-center py-10">
+                    <i data-lucide="loader-2" class="w-7 h-7 animate-spin text-purple-600 mx-auto mb-2"></i>
+                    <p class="text-gray-400 text-sm">Loading highlights...</p>
+                </div>
+
+                <div id="hod-archive-empty" class="hidden text-center py-10 border-2 border-dashed border-gray-200 rounded-xl">
+                    <i data-lucide="folder-open" class="w-10 h-10 text-gray-300 mx-auto mb-2"></i>
+                    <h3 class="text-sm font-bold text-gray-500">No Records Found</h3>
+                    <p class="text-xs text-gray-400" id="hod-archive-empty-msg">No session logs exist for the selected academic year.</p>
+                </div>
+
+                <div id="hod-archive-content" class="hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                            <p class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Dept Attendance</p>
+                            <h3 class="text-2xl font-black text-teal-600 mt-1" id="hod-archive-att">--%</h3>
+                        </div>
+                        <div class="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                            <p class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Sessions Conducted</p>
+                            <h3 class="text-2xl font-black text-purple-600 mt-1" id="hod-archive-sessions">--</h3>
+                        </div>
+                        <div class="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                            <p class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Best Class</p>
+                            <h3 class="text-sm font-bold text-gray-800 mt-2 truncate" id="hod-archive-best-class">--</h3>
+                        </div>
+                        <div class="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                            <p class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Star Performer</p>
+                            <h3 class="text-sm font-bold text-gray-800 mt-2 truncate" id="hod-archive-top-fac">--</h3>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-gray-400 mt-4" id="hod-archive-range">--</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- MODALS -->
+
+    <!-- SYLLABUS MODAL (NEW) -->
+    <div id="syllabus-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div>
+                    <h2 class="text-xl font-bold text-indigo-700 serif">Syllabus Completion</h2>
+                    <p class="text-xs text-gray-500">Live Status per Class</p>
+                </div>
+                <button onclick="document.getElementById('syllabus-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            
+            <!-- Controls -->
+            <div class="p-4 border-b border-gray-100 flex gap-4 bg-indigo-50/50">
+                <select id="syllabus-class-select" onchange="loadSyllabusStats()" class="p-2 border rounded-lg text-sm bg-white min-w-[200px] outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="">-- Select Class --</option>
+                </select>
+            </div>
+
+            <!-- Content -->
+            <div class="flex-grow overflow-y-auto p-0 bg-white custom-scroll">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-indigo-50 text-indigo-900 font-bold text-xs uppercase sticky top-0 z-10 shadow-sm">
+                        <tr>
+                            <th class="p-4 w-64">Subject</th>
+                            <th class="p-4 w-48">Faculty</th>
+                            <th class="p-4 w-32 text-center">Status</th>
+                            <th class="p-4">Completion Bar</th>
+                            <th class="p-4 w-16 text-right">%</th>
+                        </tr>
+                    </thead>
+                    <tbody id="syllabus-list" class="divide-y divide-gray-100">
+                        <tr><td colspan="5" class="p-12 text-center text-slate-400">Select a class to view status.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- (Keep Existing Modals: Student, Faculty Roles, Feedback, Counseling) -->
+    <!-- Student Hierarchy -->
+    <div id="student-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm"><div class="bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"><div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50"><div><h2 class="text-xl font-bold mit-purple serif">Student Strength</h2><p class="text-xs text-gray-500">Class & Division Breakdown</p></div><button onclick="document.getElementById('student-modal').classList.add('hidden'); hideTooltip();" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button></div><div class="flex-grow flex overflow-hidden"><div class="w-1/4 border-r border-gray-200 overflow-y-auto p-4 space-y-2 bg-gray-50 custom-scroll" id="level-list"><p class="text-center text-gray-400 text-sm">Loading...</p></div><div class="w-3/4 bg-white flex flex-col relative"><div class="p-4 border-b border-gray-200 flex justify-between items-center"><h3 class="font-bold text-gray-800" id="list-title">Select Division</h3><span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded" id="list-count">--</span></div><div class="flex-grow overflow-y-auto p-0 relative custom-scroll"><table class="w-full text-left text-sm"><thead class="bg-gray-50 text-gray-500 font-bold text-xs uppercase sticky top-0 z-10"><tr><th class="p-4 w-16">#</th><th class="p-4 w-32">Roll No</th><th class="p-4">Name</th><th class="p-4 text-right">Att%</th></tr></thead><tbody id="student-table-body" class="divide-y divide-gray-100"><tr><td colspan="4" class="p-12 text-center text-gray-400">Click a division.</td></tr></tbody></table></div></div></div></div></div>
+    <!-- Faculty Roles -->
+    <div id="roles-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm"><div class="bg-white w-full max-w-3xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"><div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50"><div><h2 class="text-xl font-bold mit-purple serif">Faculty Roles</h2><p class="text-xs text-gray-500">Departmental Responsibilities</p></div><button onclick="document.getElementById('roles-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button></div><div class="flex-grow overflow-y-auto p-6 bg-gray-50 custom-scroll" id="roles-container"><p class="text-center text-gray-400">Loading roles...</p></div></div></div>
+    <!-- Feedback -->
+    <div id="feedback-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm"><div class="bg-white w-full max-w-5xl h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"><div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50"><div><h2 class="text-xl font-bold text-pink-700 serif">Feedback Scorecard</h2><p class="text-xs text-gray-500">Department Performance Analysis</p></div><button onclick="document.getElementById('feedback-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button></div><div class="flex-grow overflow-y-auto p-6 bg-white custom-scroll space-y-8"><div><h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i data-lucide="bar-chart" class="w-4 h-4 text-pink-600"></i> Faculty Ratings</h3><div class="h-64 border border-gray-100 rounded-xl p-4"><canvas id="feedbackChart"></canvas></div></div><div><h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i data-lucide="list" class="w-4 h-4 text-pink-600"></i> Subject Analysis</h3><div class="overflow-hidden border border-gray-200 rounded-xl"><table class="w-full text-left text-sm"><thead class="bg-gray-50 text-gray-500 font-bold text-xs uppercase border-b border-gray-200"><tr><th class="p-3 w-24">Class</th><th class="p-3">Subject</th><th class="p-3">Faculty</th><th class="p-3 text-right">Score / 5.0</th><th class="p-3 text-center">Status</th></tr></thead><tbody id="feedback-table-body" class="divide-y divide-gray-100"></tbody></table></div></div></div></div></div>
+    <!-- Counseling Log -->
+    <div id="counseling-modal" class="fixed inset-0 bg-black/50 hidden z-[60] flex items-center justify-center p-4 backdrop-blur-sm"><div class="bg-white w-full max-w-2xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"><div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50"><div><h2 class="text-xl font-bold mit-purple serif">Counseling History</h2><p class="text-xs text-gray-500" id="log-student-name">...</p></div><button onclick="document.getElementById('counseling-modal').classList.add('hidden')" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button></div><div class="flex-grow overflow-y-auto p-6 bg-white custom-scroll" id="log-history-timeline"><p class="text-center text-gray-400">Loading...</p></div></div></div>
+    <!-- Tooltip -->
+    <div id="tooltip-container" class="hidden absolute z-[9999] w-72 bg-white rounded-xl shadow-2xl border border-purple-200 p-4 tooltip-enter pointer-events-none"></div>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        const userId = sessionStorage.getItem('user_id');
+        let facultyDataMap = {}; let studentDataMap = {}; let feedbackChart = null;
+        const AUTO_REFRESH_MS = 30000;
+
+        function shouldSkipAutoRefresh() {
+            if (document.hidden) return true;
+            if (window.__amsActionModalOpen) return true;
+            return !!document.querySelector('.fixed.inset-0:not(.hidden)');
+        }
+
+        async function refreshHodDashboard() {
+            if (shouldSkipAutoRefresh()) return;
+            await loadDashboard();
+        }
+
+        async function loadCurrentTermBadge() {
+            const el = document.getElementById('current-term-badge');
+            if (!el) return;
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                const ay = data && data.academic_year ? data.academic_year : null;
+                const sem = data && data.semester ? data.semester : null;
+                el.textContent = (ay && sem) ? `AY ${ay} • ${sem}` : (data && data.current_term ? data.current_term : '-');
+            } catch (e) {
+                el.textContent = '-';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            if(!userId) window.location.href = '/';
+            loadCurrentTermBadge();
+            loadDashboard();
+            
+            // Pre-load Classes for Syllabus Modal
+            const res = await fetch('/api/core/classes');
+            const data = await res.json();
+            const select = document.getElementById('syllabus-class-select');
+            data.classes.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id; opt.text = c.name;
+                select.appendChild(opt);
+            });
+
+            await initHodArchiveYearOptions();
+            initHodArchiveSemesterOptions();
+            fetchHodArchiveHighlights();
+
+            // Auto-refresh is disabled globally.
+        });
+
+        async function initHodArchiveYearOptions() {
+            const select = document.getElementById('hod-archive-year');
+            if (!select) return;
+
+            function prevAcademicYear(ay) {
+                const m = String(ay || '').match(/^(\d{4})-(\d{2})$/);
+                if (!m) return null;
+                const start = parseInt(m[1], 10) - 1;
+                return `${start}-${((start + 1) % 100).toString().padStart(2, '0')}`;
+            }
+
+            let currentAy = null;
+            let currentSemNo = null;
+            try {
+                const res = await fetch('/api/current_term');
+                const data = await res.json();
+                if (res.ok && data && data.academic_year) currentAy = data.academic_year;
+                if (res.ok && data && data.semester) {
+                    const m = String(data.semester).match(/Sem\s*(\d+)/i);
+                    if (m) currentSemNo = parseInt(m[1], 10);
+                }
+            } catch (_) {}
+
+            const years = [];
+            if (currentAy) years.push(currentAy);
+            while (years.length < 4) {
+                const prev = prevAcademicYear(years[years.length - 1]);
+                if (!prev) break;
+                years.push(prev);
+            }
+
+            select.innerHTML = years.length
+                ? years.map((y, idx) => `<option value="${y}">${y}${idx === 0 ? ' (Current)' : ''}</option>`).join('')
+                : '<option value="">Select year</option>';
+
+            // Default semester based on current term (if available).
+            const semSel = document.getElementById('hod-archive-sem');
+            if (semSel && currentSemNo && (currentSemNo === 1 || currentSemNo === 2)) {
+                // Prefer current semester, but the fetch function will auto-fallback to "All" if needed.
+                semSel.value = String(currentSemNo);
+            } else if (semSel && !semSel.value) {
+                semSel.value = 'all';
+            }
+        }
+
+        function initHodArchiveSemesterOptions() {
+            const semSel = document.getElementById('hod-archive-sem');
+            if (!semSel) return;
+            if (!semSel.value) semSel.value = 'all';
+        }
+
+        async function fetchHodArchiveHighlights() {
+            const year = document.getElementById('hod-archive-year')?.value;
+            const semNo = document.getElementById('hod-archive-sem')?.value;
+            const loader = document.getElementById('hod-archive-loading');
+            const empty = document.getElementById('hod-archive-empty');
+            const emptyMsg = document.getElementById('hod-archive-empty-msg');
+            const content = document.getElementById('hod-archive-content');
+
+            if (!year) {
+                showToast('Select an academic year first', 'error');
+                return;
+            }
+
+            empty?.classList.add('hidden');
+            content?.classList.add('hidden');
+            loader?.classList.remove('hidden');
+
+            try {
+                async function callApi(semValue) {
+                    const semParam = (semValue && semValue !== 'all') ? `&semester_no=${encodeURIComponent(semValue)}` : '';
+                    const r = await fetch(`/api/hod/archive_stats?year=${encodeURIComponent(year)}${semParam}&user_id=${encodeURIComponent(userId)}`);
+                    const j = await r.json();
+                    return { res: r, data: j };
+                }
+
+                let { res, data } = await callApi(semNo);
+
+                loader?.classList.add('hidden');
+
+                if (!res.ok) {
+                    showToast(data && data.error ? data.error : 'Failed to load highlights', 'error');
+                    emptyMsg.textContent = 'Unable to load historical data.';
+                    empty?.classList.remove('hidden');
+                    return;
+                }
+
+                document.getElementById('hod-archive-dept').textContent = data.dept_name ? `• ${data.dept_name}` : '';
+
+                if (data.no_data) {
+                    // If semester filter returned nothing, fall back to AY-total to match the old admin behavior.
+                    if (semNo && semNo !== 'all') {
+                        ({ res, data } = await callApi('all'));
+                        if (res.ok && data && !data.no_data) {
+                            const semSel = document.getElementById('hod-archive-sem');
+                            if (semSel) semSel.value = 'all';
+                            showToast('No records for selected semester; showing full academic year', 'success');
+                        } else {
+                            emptyMsg.textContent = (data && data.message) ? data.message : 'No session logs exist for the selected academic year.';
+                            empty?.classList.remove('hidden');
+                            return;
+                        }
+                    } else {
+                        emptyMsg.textContent = data.message || 'No session logs exist for the selected academic year.';
+                        empty?.classList.remove('hidden');
+                        return;
+                    }
+                }
+
+                document.getElementById('hod-archive-att').textContent = `${data.student_summary.avg_attendance}%`;
+                document.getElementById('hod-archive-sessions').textContent = data.faculty_summary.total_sessions;
+                document.getElementById('hod-archive-best-class').textContent = data.student_summary.best_class || '--';
+                document.getElementById('hod-archive-top-fac').textContent = data.faculty_summary.top_performer || '--';
+                const effectiveSem = data.semester_no ? String(data.semester_no) : (semNo || 'all');
+                const semLabel = (effectiveSem && effectiveSem !== 'all') ? `Sem ${effectiveSem}` : 'AY Total';
+                document.getElementById('hod-archive-range').textContent = data.date_range
+                    ? `${semLabel ? semLabel + ' • ' : ''}Range: ${data.date_range}`
+                    : '--';
+                content?.classList.remove('hidden');
+                lucide.createIcons();
+            } catch (e) {
+                loader?.classList.add('hidden');
+                emptyMsg.textContent = 'Unable to load historical data.';
+                empty?.classList.remove('hidden');
+                showToast('Failed to load highlights', 'error');
+            }
+        }
+
+        // --- NEW: SYLLABUS LOGIC ---
+        function openSyllabusModal() { document.getElementById('syllabus-modal').classList.remove('hidden'); }
+        async function loadSyllabusStats() {
+            const secId = document.getElementById('syllabus-class-select').value;
+            const tbody = document.getElementById('syllabus-list');
+            if(!secId) { tbody.innerHTML = `<tr><td colspan="5" class="p-12 text-center text-slate-400">Select a class.</td></tr>`; return; }
+            
+            tbody.innerHTML = `<tr><td colspan="5" class="p-12 text-center text-slate-400">Loading...</td></tr>`;
+            try {
+                const res = await fetch(`/api/hod/syllabus_status?section_id=${secId}`);
+                const data = await res.json();
+                
+                if(data.subjects.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="p-12 text-center text-slate-400">No subjects allocated.</td></tr>`;
+                } else {
+                    tbody.innerHTML = data.subjects.map(s => {
+                        let colorClass = 'bg-gray-200';
+                        if(s.color === 'green') colorClass = 'bg-green-500';
+                        else if(s.color === 'yellow') colorClass = 'bg-yellow-400';
+                        else if(s.color === 'red') colorClass = 'bg-red-500';
+                        
+                        return `
+                        <tr class="hover:bg-indigo-50/50 transition-colors border-b border-slate-50 last:border-0">
+                            <td class="p-4 font-bold text-slate-700 text-sm">${s.subject}<span class="block text-[10px] text-slate-400 font-mono">${s.code}</span></td>
+                            <td class="p-4 text-xs text-slate-600">${s.teacher}</td>
+                            <td class="p-4 text-center"><span class="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-slate-100 text-slate-600">${s.status}</span></td>
+                            <td class="p-4 align-middle">
+                                <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                    <div class="h-full rounded-full ${colorClass}" style="width: ${s.percentage}%"></div>
+                                </div>
+                            </td>
+                            <td class="p-4 text-right text-xs font-bold text-slate-700">${s.percentage}%</td>
+                        </tr>`;
+                    }).join('');
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        // --- Existing HOD Functions (Keep all) ---
+        function escapeHtml(str) {
+            return String(str ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        function statusBadge(status) {
+            const s = String(status || '').toLowerCase();
+            if (s === 'approved') return 'bg-green-100 text-green-700 border-green-200';
+            if (s === 'rejected') return 'bg-red-100 text-red-700 border-red-200';
+            return 'bg-orange-100 text-orange-700 border-orange-200';
+        }
+
+        function groupByReqDate(items) {
+            const groups = new Map();
+            (items || []).forEach(it => {
+                const key = it?.requested?.date_iso || 'unknown';
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(it);
+            });
+            const keys = Array.from(groups.keys());
+            keys.sort((a, b) => (a === 'unknown' ? 1 : b === 'unknown' ? -1 : b.localeCompare(a)));
+            return keys.map(k => ({
+                key: k,
+                label: (groups.get(k)[0]?.requested?.date_display) || (k === 'unknown' ? 'Unknown Date' : k),
+                items: groups.get(k)
+            }));
+        }
+
+        function renderLoadAdjustments(items) {
+            const tbody = document.getElementById('load-adjustment-list');
+            const countEl = document.getElementById('load-adjustment-count');
+            const list = Array.isArray(items) ? items : [];
+            if (countEl) countEl.textContent = `${list.length} Records`;
+
+            if (!tbody) return;
+            if (list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="p-10 text-center text-gray-400">No load adjustments found.</td></tr>`;
+                return;
+            }
+
+            const groups = groupByReqDate(list);
+            tbody.innerHTML = groups.map(g => {
+                const header = `
+                    <tr class="bg-gray-50/60">
+                        <td colspan="7" class="p-3 text-xs font-bold text-gray-600">${escapeHtml(g.label)}</td>
+                    </tr>`;
+
+                const rows = g.items.map(it => {
+                    const classDiv = it?.class_division || it?.requested?.class_division || '-';
+                    const req = it?.requester || {};
+                    const adj = it?.adjuster || {};
+                    const reqSlot = it?.requested || {};
+                    const adjSlot = it?.swap || {};
+
+                    const reqLine1 = `${reqSlot.date_display || '-'} • ${reqSlot.time || '-'}`;
+                    const reqLine2 = `${reqSlot.subject || '-'}${reqSlot.subject_code ? ` (${reqSlot.subject_code})` : ''}`;
+
+                    const adjLine1 = `${adjSlot.date_display || '-'} • ${adjSlot.time || '-'}`;
+                    const adjLine2 = `${adjSlot.subject || '-'}${adjSlot.subject_code ? ` (${adjSlot.subject_code})` : ''}`;
+
+                    const reason = it?.reason || '-';
+                    const status = it?.status || 'Pending';
+
+                    return `
+                        <tr class="hover:bg-purple-50/30 transition-colors">
+                            <td class="p-4">
+                                <p class="font-bold text-gray-800">${escapeHtml(classDiv)}</p>
+                                <p class="text-[10px] text-gray-400 font-mono">#${escapeHtml(it?.id)}</p>
+                            </td>
+                            <td class="p-4">
+                                <p class="font-bold text-gray-800">${escapeHtml(req.name || '-')}</p>
+                                <p class="text-xs text-gray-500">${escapeHtml(req.code || '')}</p>
+                            </td>
+                            <td class="p-4">
+                                <p class="font-bold text-gray-800">${escapeHtml(adj.name || '-')}</p>
+                                <p class="text-xs text-gray-500">${escapeHtml(adj.code || '')}</p>
+                            </td>
+                            <td class="p-4">
+                                <p class="text-xs font-bold text-gray-700">${escapeHtml(reqLine1)}</p>
+                                <p class="text-[10px] text-gray-500">${escapeHtml(reqLine2)}</p>
+                            </td>
+                            <td class="p-4">
+                                <p class="text-xs font-bold text-gray-700">${escapeHtml(adjLine1)}</p>
+                                <p class="text-[10px] text-gray-500">${escapeHtml(adjLine2)}</p>
+                            </td>
+                            <td class="p-4">
+                                <p class="text-xs text-gray-700 whitespace-pre-wrap break-words">${escapeHtml(reason)}</p>
+                                ${it?.created_at_display ? `<p class="text-[10px] text-gray-400 mt-1">Created: ${escapeHtml(it.created_at_display)}</p>` : ''}
+                            </td>
+                            <td class="p-4 text-right">
+                                <span class="inline-flex items-center justify-end px-2 py-1 rounded border text-[10px] font-bold ${statusBadge(status)}">${escapeHtml(status)}</span>
+                            </td>
+                        </tr>`;
+                }).join('');
+
+                return header + rows;
+            }).join('');
+        }
+
+        async function loadDashboard() { try { const res = await fetch(`/api/hod/dashboard?user_id=${userId}`); const data = await res.json(); document.getElementById('dept-name').innerText = data.dept_name; document.getElementById('stat-students').innerText = data.stats.students; document.getElementById('stat-faculty').innerText = data.stats.faculty; document.getElementById('stat-att').innerText = data.stats.attendance + "%"; document.getElementById('stat-pending').innerText = data.stats.pending; fetchFeedbackScore(); const fList = document.getElementById('faculty-list'); data.faculty_list.forEach((f, index) => { facultyDataMap[`fac-${index}`] = f; }); fList.innerHTML = data.faculty_list.map((f, index) => `<tr class="hover:bg-purple-50 transition-colors cursor-pointer relative group" onmouseenter="showTooltip(event, 'fac-${index}', 'faculty')" onmouseleave="hideTooltip()"><td class="p-4"><p class="font-bold text-gray-800">${f.name}</p><p class="text-xs text-gray-500">${f.code}</p></td><td class="p-4 text-center"><span class="bg-gray-100 px-2 py-1 rounded text-xs font-bold">${f.load} hrs</span></td><td class="p-4 text-right font-bold ${f.is_critical ? 'text-red-600' : 'text-green-600'}">${f.avg_att}%</td></tr>`).join(''); const aList = document.getElementById('approval-list'); if (data.approvals.length > 0) { aList.innerHTML = data.approvals.map(a => `<div class="p-4 border border-gray-200 rounded-lg bg-white hover:shadow-md transition-all"><div class="flex justify-between items-start mb-1"><h4 class="font-bold text-gray-800 text-sm">${a.student}</h4><span class="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded border border-orange-200">${a.days} Days</span></div><p class="text-[10px] text-gray-500 mb-2 font-mono">${a.class} | ${a.roll}</p><p class="text-xs text-gray-600 mb-3 bg-gray-50 p-2 rounded border border-gray-100">${a.reason}</p><div class="flex gap-2"><button onclick="actionLeave(${a.leave_id}, 'Approved')" class="flex-1 py-1.5 bg-green-600 text-white text-xs font-bold rounded hover:bg-green-700">Approve</button><button onclick="actionLeave(${a.leave_id}, 'Rejected')" class="flex-1 py-1.5 bg-red-50 text-red-600 border border-red-200 text-xs font-bold rounded hover:bg-red-100">Reject</button></div></div>`).join(''); } else { aList.innerHTML = `<div class="h-full flex flex-col items-center justify-center text-gray-400"><i data-lucide="check-circle" class="w-8 h-8 mb-2 opacity-20"></i><p class="text-xs">No pending approvals.</p></div>`; }
+            renderLoadAdjustments(data.load_adjustments);
+            lucide.createIcons(); } catch (e) { console.error(e); } }
+        async function fetchFeedbackScore() { try { const res = await fetch(`/api/hod/feedback_analysis?user_id=${userId}`); const data = await res.json(); document.getElementById('stat-feedback').innerText = `${data.dept_avg}/5`; } catch(e) {} }
+        async function openFeedbackScorecard() { document.getElementById('feedback-modal').classList.remove('hidden'); const tbody = document.getElementById('feedback-table-body'); tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-400">Loading...</td></tr>`; try { const res = await fetch(`/api/hod/feedback_analysis?user_id=${userId}`); const data = await res.json(); const ctx = document.getElementById('feedbackChart').getContext('2d'); if (feedbackChart) feedbackChart.destroy(); const labels = data.faculty_scores.map(f => f.name.split(' ')[0]); const scores = data.faculty_scores.map(f => f.score); const colors = scores.map(s => s >= 4 ? '#22c55e' : (s >= 3 ? '#eab308' : '#ef4444')); feedbackChart = new Chart(ctx, { type: 'bar', data: { labels: labels, datasets: [{ label: 'Avg Rating', data: scores, backgroundColor: colors, borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 5 } }, plugins: { legend: { display: false } } } }); tbody.innerHTML = data.subject_analysis.map(s => `<tr class="hover:bg-pink-50/50 transition-colors border-b border-gray-50 last:border-0"><td class="p-4 text-xs font-bold text-purple-700 bg-purple-50/30">${s.class}</td><td class="p-4 font-bold text-gray-800 text-sm">${s.subject}<span class="block text-[10px] font-mono text-gray-400">${s.code}</span></td><td class="p-4 text-sm text-gray-600">${s.faculty}</td><td class="p-4 text-right font-bold ${s.score>=4?'text-green-600':(s.score>=3?'text-yellow-600':'text-red-600')}">${s.score}</td><td class="p-4 text-center"><span class="text-[10px] px-2 py-0.5 rounded font-bold ${s.score>=4?'bg-green-100 text-green-700':(s.score>=3?'bg-yellow-100 text-yellow-700':'bg-red-100 text-red-700')}">${s.score>=4?'Excellent':(s.score>=3?'Good':'Critical')}</span></td></tr>`).join(''); } catch(e) { console.error(e); } }
+        function showTooltip(event, id, type) { const tip = document.getElementById('tooltip-container'); let html = ''; if (type === 'faculty') { const d = facultyDataMap[id]; if (!d) return; const isCritical = d.missed_today > 0; html = `<h4 class="font-bold text-xs text-gray-500 uppercase tracking-wider mb-3 pb-2 border-b border-gray-100">Performance Snapshot</h4><div class="grid grid-cols-2 gap-3 mb-3"><div class="p-2 bg-gray-50 rounded-lg text-center"><p class="text-[10px] text-gray-400 font-bold uppercase">Wkly Load</p><p class="text-lg font-bold text-purple-700">${d.load} hrs</p></div><div class="p-2 ${isCritical ? 'bg-red-50' : 'bg-green-50'} rounded-lg text-center"><p class="text-[10px] text-gray-400 font-bold uppercase">Missed Today</p><p class="text-lg font-bold ${isCritical ? 'text-red-700' : 'text-green-700'}">${d.missed_today || 0}</p></div><div class="p-2 bg-gray-50 rounded-lg text-center"><p class="text-[10px] text-gray-400 font-bold uppercase">Detentions</p><p class="text-lg font-bold text-gray-700">${d.detentions || 0}</p></div><div class="p-2 bg-gray-50 rounded-lg text-center"><p class="text-[10px] text-gray-400 font-bold uppercase">Avg Att.</p><p class="text-lg font-bold text-teal-600">${d.avg_att}%</p></div></div><div class="text-[10px] text-gray-500 pt-2 border-t border-gray-100 flex justify-between"><span>Risk Subject:</span><span class="font-bold text-orange-600 truncate w-32 text-right">${d.risk_subject || 'None'}</span></div>`; } else if (type === 'student') { const s = studentDataMap[id]; if (!s) return; html = `<div class="flex justify-between items-center mb-3 pb-2 border-b border-gray-100"><div><h4 class="font-bold text-gray-800 text-sm truncate w-40">${s.name}</h4><span class="text-xs font-mono text-gray-400">${s.roll}</span></div><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${s.stats.status === 'Active' ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'}">${s.stats.status}</span></div><div class="grid grid-cols-2 gap-2 text-center mb-3"><div class="p-2 bg-gray-50 rounded-lg"><p class="text-[10px] text-gray-500 uppercase font-bold">Attendance</p><p class="text-lg font-bold ${s.stats.attendance < 75 ? 'text-red-600' : 'text-green-600'}">${s.stats.attendance}%</p></div><div class="p-2 bg-gray-50 rounded-lg"><p class="text-[10px] text-gray-500 uppercase font-bold">Leaves</p><p class="text-lg font-bold text-gray-700">${s.stats.leaves} <span class="text-[10px] font-normal text-gray-400">Days</span></p></div></div><div class="text-xs text-gray-500 flex justify-between items-center border-t border-gray-50 pt-2"><span>Mentor:</span><span class="font-bold text-purple-700">${s.stats.mentor}</span></div>${s.stats.has_detention ? '<div class="mt-2 p-1.5 bg-red-50 text-red-700 text-[10px] font-bold rounded text-center border border-red-100 flex items-center justify-center gap-1"><i data-lucide="shield-alert" class="w-3 h-3"></i> Active Detention</div>' : ''}`; } tip.innerHTML = html; const rect = event.currentTarget.getBoundingClientRect(); let top = rect.top + window.scrollY; let left = rect.right + 20; if (left + 300 > window.innerWidth) left = rect.left - 300; if (top + 200 > window.innerHeight + window.scrollY) top -= 150; tip.style.top = `${top}px`; tip.style.left = `${left}px`; tip.classList.remove('hidden'); lucide.createIcons(); }
+        function hideTooltip() { document.getElementById('tooltip-container').classList.add('hidden'); }
+        async function actionLeave(id, action) {
+            return showConfirm(
+                "Confirm Action",
+                `${action}?`,
+                async () => {
+                    const res = await fetch('/api/hod/approve_leave', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ leave_id: id, action: action, hod_id: userId }) });
+                    if (!res.ok) return showToast("Action Failed", "error");
+                    loadDashboard();
+                },
+                "Leave Approval"
+            );
+        }
+        async function openStudentHierarchy() { document.getElementById('student-modal').classList.remove('hidden'); const container = document.getElementById('level-list'); container.innerHTML = 'Loading...'; try { const res = await fetch('/api/hod/student_hierarchy'); const data = await res.json(); container.innerHTML = Object.keys(data).sort().map(lvl => { const sections = data[lvl]; const totalInLevel = sections.reduce((sum, s) => sum + s.count, 0); const sectionButtons = sections.map(s => `<button onclick="loadClassList(${s.id}, '${s.name}', '${lvl}')" class="w-full text-left px-4 py-2 text-xs text-gray-600 hover:bg-purple-50 hover:text-purple-700 rounded flex justify-between items-center group transition-colors"><span>Div ${s.name}</span><span class="bg-gray-200 text-gray-600 group-hover:bg-purple-200 group-hover:text-purple-800 text-[10px] px-1.5 rounded-full font-bold">${s.count}</span></button>`).join(''); return `<div class="border border-gray-200 rounded-lg overflow-hidden mb-2"><button onclick="toggleAccordion('${lvl}')" class="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex justify-between items-center border-b border-gray-100"><span class="font-bold text-sm text-gray-800">${lvl}</span><span class="text-xs text-gray-500">${totalInLevel}</span></button><div id="acc-${lvl}" class="accordion-content bg-white p-2 space-y-1">${sectionButtons}</div></div>`; }).join(''); } catch(e) {} }
+        function toggleAccordion(id) { const content = document.getElementById(`acc-${id}`); content.style.maxHeight = content.style.maxHeight ? null : content.scrollHeight + "px"; }
+        async function loadClassList(sid, name, lvl) { document.getElementById('list-title').innerText = `${lvl} - ${name}`; const tbody = document.getElementById('student-table-body'); tbody.innerHTML = 'Loading...'; try { const res = await fetch(`/api/core/students?section_id=${sid}`); const data = await res.json(); document.getElementById('list-count').innerText = `${data.students.length} Students`; studentDataMap = {}; tbody.innerHTML = data.students.map((s, i) => { studentDataMap[`stu-${i}`] = s; const attColor = s.stats.attendance < 75 ? 'text-red-600 bg-red-50 border-red-200' : 'text-green-600 bg-green-50 border-green-200'; const glowClass = s.stats.has_logs ? 'text-purple-600 font-bold' : 'text-gray-400'; return `<tr class="hover:bg-purple-50 transition-colors border-b border-gray-50 last:border-0 relative cursor-pointer" onmouseenter="showTooltip(event, 'stu-${i}', 'student')" onmouseleave="hideTooltip()"><td class="p-4 text-gray-400 text-xs font-mono w-16">${i+1}</td><td class="p-4 font-mono text-xs text-gray-600 w-32">${s.roll}</td><td class="p-4 font-bold text-gray-800 text-sm relative">${s.name}</td><td class="p-4 text-right flex justify-end items-center gap-2"><button onclick="openHodLog('${s.id}', '${s.name}')" class="${glowClass} p-1 rounded-full"><i data-lucide="book-open" class="w-4 h-4"></i></button><span class="text-[10px] font-bold px-2 py-1 rounded-full border ${attColor}">${s.stats.attendance}%</span></td></tr>`; }).join(''); lucide.createIcons(); } catch(e) {} }
+        async function openHodLog(sid, name) { document.getElementById('counseling-modal').classList.remove('hidden'); document.getElementById('log-student-name').innerText = name; const container = document.getElementById('log-history-timeline'); container.innerHTML = "Loading..."; try { const res = await fetch(`/api/mentor/get_logs?student_id=${sid}`); const data = await res.json(); container.innerHTML = data.logs.map(l => `<div class="relative pl-6 pb-8 last:pb-0"><div class="absolute w-3 h-3 rounded-full mt-1.5 -left-1.5 border-2 border-white ${l.status=='Resolved'?'bg-green-500':'bg-blue-500'}"></div><div class="absolute left-0 top-4 bottom-0 w-px bg-gray-200"></div><div class="bg-gray-50 rounded-lg p-4 border border-gray-100"><div class="flex justify-between items-start mb-2"><div><span class="text-[10px] font-bold uppercase tracking-wide text-gray-400">${l.date}</span><p class="text-sm font-bold text-gray-800">${l.category}</p></div><span class="text-[10px] px-2 py-0.5 rounded font-bold border ${l.status=='Resolved'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}">${l.status}</span></div><p class="text-xs text-gray-600 mb-3">${l.remarks}</p><div class="text-[10px] text-gray-500 flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> Mentor: <span class="font-medium text-gray-700">${l.mentor_name}</span></div></div></div>`).join('') || "No logs."; lucide.createIcons(); } catch(e) {} }
+        async function openFacultyRoles() { document.getElementById('roles-modal').classList.remove('hidden'); const container = document.getElementById('roles-container'); container.innerHTML = "Loading..."; try { const res = await fetch(`/api/hod/faculty_roles?user_id=${userId}`); const data = await res.json(); let html = ''; for (const [r, p] of Object.entries(data)) { if(p.length) html += `<div class="mb-6"><h3 class="font-bold text-gray-400 uppercase text-xs mb-2">${r}</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-3">${p.map(x => `<div class="bg-white border p-3 rounded-lg flex justify-between items-center"><span class="font-bold text-sm text-gray-700">${x.name}</span><span class="text-[10px] bg-gray-100 px-2 py-1 rounded text-gray-500">${x.detail}</span></div>`).join('')}</div></div>`; } container.innerHTML = html; } catch(e) {} }
+    </script>
+</body>
+</html>

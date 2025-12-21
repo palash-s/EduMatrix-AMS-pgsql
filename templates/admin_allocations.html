@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Subject Allocation - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <!-- SIDEBAR -->
+    <aside class="w-64 bg-mit-purple text-white flex flex-col fixed h-full z-20 shadow-xl">
+        <div class="p-6 border-b border-white/10 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-10 w-auto brightness-0 invert" onerror="this.style.display='none'">
+            <span class="font-bold tracking-wider text-sm">ADMIN</span>
+        </div>
+        <nav class="flex-grow p-4 space-y-1 overflow-y-auto custom-scroll">
+            <a href="/admin/dashboard" class="flex items-center gap-3 px-4 py-3 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="arrow-left" class="w-4 h-4"></i> Back</a>
+            <div class="mt-4 px-4 text-xs font-bold text-purple-300 uppercase tracking-wider">Subject Allocation</div>
+            <a href="#" class="flex items-center gap-3 px-4 py-3 bg-white/10 rounded-lg text-white font-medium"><i data-lucide="heart-handshake" class="w-4 h-4 text-teal-400"></i>Manage Subjects</a>
+        </nav>
+    </aside>
+
+    
+
+    <main class="max-w-5xl mx-auto p-8">
+        <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-sm">
+        <div class="flex items-center gap-4">
+            <!-- <button onclick="window.location.href='/admin/dashboard'" class="p-2 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-5 h-5"></i></button> -->
+            <h1 class="text-xl font-bold text-gray-900 mit-purple" style="font-family: 'Merriweather', serif;">Subject Allocation & Faculty Load</h1>
+        </div>
+        <div class="flex gap-3">
+            <select id="class-select" onchange="loadAllocations()" class="p-2 border border-gray-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-purple-500 outline-none bg-white shadow-sm min-w-[200px]">
+                <option value="">-- Select Class --</option>
+            </select>
+            <button onclick="openAddModal()" id="add-btn" disabled class="px-4 py-2 bg-mit-purple text-white text-sm font-bold rounded-lg hover:bg-[#350f50] flex items-center gap-2 disabled:opacity-50 transition-colors">
+                <i data-lucide="plus" class="w-4 h-4"></i> Add Subject
+            </button>
+        </div>
+    </header>
+
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-h-[400px]">
+            <table class="w-full text-left border-collapse">
+                <thead class="bg-gray-50 text-xs uppercase text-gray-500 font-semibold border-b border-gray-200">
+                    <tr>
+                        <th class="p-5 w-1/3">Subject Name</th>
+                        <th class="p-5 w-1/3">Assigned Faculty</th>
+                        <th class="p-5 text-right">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="alloc-list" class="divide-y divide-gray-100">
+                    <tr><td colspan="3" class="p-12 text-center text-gray-400 flex flex-col items-center gap-2"><i data-lucide="arrow-up" class="w-8 h-8 opacity-50"></i><span>Please select a class.</span></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- ASSIGN MODAL -->
+    <div id="assign-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg">
+            <h2 class="text-xl font-bold mb-1 mit-purple serif" id="modal-title">Assign Faculty</h2>
+            <p class="text-xs text-gray-500 mb-6">Select a faculty member. Current load (number of subjects) is shown in brackets.</p>
+            
+            <div class="space-y-4">
+                <div id="subject-select-container">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Subject (Unassigned Only)</label>
+                    <select id="modal-subject" class="w-full p-3 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-purple-500"><option value="">Loading...</option></select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Faculty</label>
+                    <select id="modal-faculty" class="w-full p-3 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm"><option value="">Loading...</option></select>
+                </div>
+            </div>
+
+            <div class="mt-8 flex justify-end gap-3">
+                <button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancel</button>
+                <button onclick="submitAllocation()" class="px-6 py-2 bg-mit-purple text-white rounded-lg font-bold hover:bg-[#350f50] shadow-md">Save Assignment</button>
+            </div>
+        </div>
+    </div>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        let facultyData = [];
+        let currentSectionId = "";
+
+        document.addEventListener('DOMContentLoaded', init);
+
+        async function init() {
+            // Load Classes
+            const res = await fetch('/api/core/classes');
+            const data = await res.json();
+            const select = document.getElementById('class-select');
+            select.innerHTML = '<option value="">-- Select Class --</option>' + 
+                data.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+            
+            // Load Faculty Data initially (Subjects will be empty/unfiltered)
+            refreshFacultyData();
+        }
+
+        async function refreshFacultyData(sectionId = null) {
+            let url = '/api/admin/faculty_load_list';
+            if(sectionId) url += `?section_id=${sectionId}`;
+            
+            const res = await fetch(url);
+            const data = await res.json();
+            facultyData = data.faculty;
+            return data.subjects; // Returns subjects NOT assigned to 'sectionId'
+        }
+
+        async function loadAllocations() {
+            currentSectionId = document.getElementById('class-select').value;
+            const btn = document.getElementById('add-btn');
+            const list = document.getElementById('alloc-list');
+            
+            if(!currentSectionId) {
+                btn.disabled = true;
+                list.innerHTML = `<tr><td colspan="3" class="p-12 text-center text-gray-400">Select a class above.</td></tr>`;
+                return;
+            }
+
+            btn.disabled = false;
+            list.innerHTML = `<tr><td colspan="3" class="p-8 text-center text-gray-400">Loading...</td></tr>`;
+
+            try {
+                const res = await fetch(`/api/admin/allocation_data?section_id=${currentSectionId}`);
+                const data = await res.json();
+                
+                if(data.allocations.length === 0) {
+                    list.innerHTML = `<tr><td colspan="3" class="p-12 text-center text-gray-400">No subjects allocated yet.<br>Click "Add Subject" to assign teachers.</td></tr>`;
+                    return;
+                }
+
+                list.innerHTML = data.allocations.map(a => `
+                    <tr class="hover:bg-purple-50/50 transition-colors border-b border-gray-50 last:border-0">
+                        <td class="p-5">
+                            <p class="font-bold text-gray-800 text-sm">${a.subject_name}</p>
+                            <p class="text-xs text-gray-400 font-mono mt-0.5">${a.subject_code} • ${a.type}</p>
+                        </td>
+                        <td class="p-5">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs">
+                                    ${a.teacher_name.charAt(0)}
+                                </div>
+                                <span class="text-sm font-medium text-gray-700">${a.teacher_name}</span>
+                            </div>
+                        </td>
+                        <td class="p-5 text-right">
+                            <button onclick="openEditModal('${a.subject_id}', '${a.subject_name}', '${a.teacher_id}')" 
+                                class="text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded border border-blue-200 transition-colors">
+                                Change Faculty
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        function populateFacultyDropdown(selectedId = null) {
+            const select = document.getElementById('modal-faculty');
+            const sortedFaculty = [...facultyData].sort((a, b) => a.load - b.load);
+            
+            select.innerHTML = '<option value="">-- Select Faculty --</option>' + 
+                sortedFaculty.map(f => {
+                    const loadColor = f.load === 0 ? '🟢' : (f.load > 4 ? '🔴' : '🟡');
+                    const isSelected = f.id === selectedId ? 'selected' : '';
+                    return `<option value="${f.id}" ${isSelected}>${loadColor} [Load: ${f.load}] ${f.name}</option>`;
+                }).join('');
+        }
+
+        async function openAddModal() {
+            document.getElementById('assign-modal').classList.remove('hidden');
+            document.getElementById('modal-title').innerText = "Assign New Subject";
+            document.getElementById('subject-select-container').classList.remove('hidden');
+            
+            const subSelect = document.getElementById('modal-subject');
+            subSelect.innerHTML = '<option>Loading available subjects...</option>';
+            subSelect.disabled = true;
+
+            // FETCH FRESH LIST using Current Section ID
+            const subjects = await refreshFacultyData(currentSectionId);
+            
+            if (subjects.length === 0) {
+                subSelect.innerHTML = '<option value="">All subjects assigned!</option>';
+            } else {
+                subSelect.innerHTML = '<option value="">-- Select Subject --</option>' + 
+                    subjects.map(s => `<option value="${s.id}">${s.name} (${s.code})</option>`).join('');
+                subSelect.disabled = false;
+            }
+
+            populateFacultyDropdown();
+        }
+
+        function openEditModal(subId, subName, teacherId) {
+            document.getElementById('assign-modal').classList.remove('hidden');
+            document.getElementById('modal-title').innerText = "Change Faculty";
+            
+            const subSelect = document.getElementById('modal-subject');
+            subSelect.innerHTML = `<option value="${subId}" selected>${subName}</option>`;
+            subSelect.disabled = true; 
+
+            populateFacultyDropdown(teacherId);
+        }
+
+        async function submitAllocation() {
+            const subId = document.getElementById('modal-subject').value;
+            const staffId = document.getElementById('modal-faculty').value;
+            if(!subId || !staffId) return showToast("Please select both", "error");
+
+            const res = await fetch('/api/admin/save_allocation', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ section_id: currentSectionId, subject_id: subId, staff_id: staffId })
+            });
+
+            if(res.ok) {
+                closeModal();
+                loadAllocations();
+                refreshFacultyData(); // Refresh load counts
+            } else showToast("Failed to save", "error");
+        }
+
+        function closeModal() { document.getElementById('assign-modal').classList.add('hidden'); }
+    </script>
+</body>
+</html>

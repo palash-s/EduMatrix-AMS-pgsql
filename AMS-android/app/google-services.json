@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "356694173012",
+    "project_id": "edumatrix-ams",
+    "storage_bucket": "edumatrix-ams.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:356694173012:android:063b3ce67fc7de1dac14c1",
+        "android_client_info": {
+          "package_name": "com.eduMatrix.ams"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC23gLX7AgmfluD1bSz71k3W6TbAbPGV4M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

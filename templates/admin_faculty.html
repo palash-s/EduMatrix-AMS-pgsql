@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Faculty Management - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@300;400;700&display=swap'); 
+        body { font-family: 'Inter', sans-serif; }
+        .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+        
+        /* Scrollbar Styling */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+        /* Responsive Sidebar */
+        @media (max-width: 768px) {
+            aside { display: none; }
+            .sidebar-open aside { display: flex; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 flex h-screen overflow-hidden relative">
+    <aside class="w-64 bg-mit-purple text-white flex-shrink-0 flex flex-col z-20 shadow-xl">
+        <div class="p-6 border-b border-white/10 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-10 w-auto brightness-0 invert" onerror="this.style.display='none'">
+            <span class="font-bold tracking-wider text-sm">ADMIN</span>
+        </div>
+        <nav class="flex-grow p-4 space-y-1 overflow-y-auto custom-scroll">
+            <p class="px-4 text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 mt-2">Main</p>
+            <a href="/admin/dashboard" class="flex items-center gap-3 px-4 py-3 bg-white/10 rounded-lg text-white font-medium border border-white/10"><i data-lucide="layout-dashboard" class="w-4 h-4 text-mit-gold"></i> Overview</a>
+            <p class="px-4 text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 mt-6">Academics</p>
+            <a href="/admin/manage_classes" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="users" class="w-4 h-4"></i> Classes</a>
+            <a href="/admin/student_directory" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="graduation-cap" class="w-4 h-4"></i> Students</a>
+            <a href="/admin/promotions" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="trending-up" class="w-4 h-4"></i> Promotions</a>
+            <a href="/admin/manage_timetable" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="calendar-clock" class="w-4 h-4"></i> Timetable</a>
+            
+            <p class="px-4 text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 mt-6">Staff</p>
+            <a href="/admin/manage_faculty" class="flex items-center gap-3 px-4 py-2.5 bg-white/10 rounded-lg text-white font-medium"><i data-lucide="briefcase" class="w-4 h-4"></i> Faculty Directory</a>
+            <a href="/admin/manage_coordinators" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="shield-check" class="w-4 h-4"></i> Roles & Permissions</a>
+            
+            <p class="px-4 text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 mt-6">System</p>
+            
+            <a href="/admin/historical_reports" class="flex items-center gap-3 px-4 py-2.5 text-purple-100 hover:bg-white/10 rounded-lg transition-colors text-sm"><i data-lucide="archive" class="w-4 h-4"></i> Archives</a>
+        </nav>
+        <div class="p-4 border-t border-white/10">
+            <button onclick="logout()" class="flex items-center gap-3 px-4 py-3 text-red-200 hover:bg-white/5 w-full rounded-lg transition-colors group text-sm font-medium"><i data-lucide="log-out" class="w-4 h-4 group-hover:text-red-400"></i> Sign Out</button>
+        </div>
+    </aside>
+
+
+
+    <main class="flex-grow flex flex-col h-screen overflow-hidden relative">
+        
+        <!-- Header -->
+        <header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8 z-10">
+            <div class="flex items-center gap-4 w-1/3">
+                <button onclick="toggleSidebar()" class="p-2 -ml-2 text-gray-400 hover:text-purple-600 md:hidden"><i data-lucide="menu" class="w-5 h-5"></i></button>
+                <div class="relative w-full">
+                    <i data-lucide="search" class="absolute left-3 top-2.5 w-4 h-4 text-gray-400"></i>
+                    <input type="text" placeholder="Search..." class="w-full pl-10 pr-4 py-2 bg-gray-100 border-transparent focus:bg-white focus:border-gray-300 rounded-lg text-sm transition-all outline-none">
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="h-8 w-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold text-xs">AD</div>
+            </div>
+        </header>
+
+        <!-- Dashboard Content -->
+        <div class="flex-grow overflow-y-auto p-8 custom-scroll">
+            
+            <div class="mb-8 flex justify-between items-end">
+                <div><h1 class="text-2xl font-bold text-gray-900 serif">Faculty Directory</h1><p class="text-gray-500 text-sm mt-1">Manage faculty members and their information.</p></div>
+                <button onclick="openAddModal()" class="px-4 py-2 bg-mit-purple text-white text-sm font-bold rounded-lg hover:bg-[#350f50] flex items-center gap-2">
+                    <i data-lucide="user-plus" class="w-4 h-4"></i> Add New Faculty
+                </button>
+            </div>
+        
+        <!-- Search & Filter -->
+        <div class="flex gap-4 mb-6">
+            <div class="relative flex-1">
+                <i data-lucide="search" class="absolute left-3 top-2.5 w-4 h-4 text-gray-400"></i>
+                <input type="text" id="search-box" onkeyup="filterTable()" placeholder="Search by name, email or ID..." class="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-[#48166d] outline-none">
+            </div>
+            <select id="filter-status" onchange="filterTable()" class="p-2 border rounded-lg text-sm outline-none bg-white">
+                <option value="all">All Status</option>
+                <option value="active" selected>Active Only</option>
+                <option value="archived">Archived</option>
+            </select>
+        </div>
+
+        <!-- Table -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <table class="w-full text-left border-collapse">
+                <thead class="bg-gray-50 text-xs uppercase text-gray-500 font-semibold border-b border-gray-200">
+                    <tr>
+                        <th class="p-4">Faculty Name & Designation</th>
+                        <th class="p-4">Department</th>
+                        <th class="p-4">Email / ID</th>
+                        <th class="p-4 text-center">Status</th>
+                        <th class="p-4 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="faculty-list" class="divide-y divide-gray-100">
+                    <tr><td colspan="5" class="p-8 text-center text-gray-400">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- ADD MODAL -->
+    <div id="add-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+            <h2 class="text-lg font-bold mb-4 mit-purple serif">Onboard New Faculty</h2>
+            <div class="space-y-3">
+                <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Full Name</label><input type="text" id="new-name" class="w-full p-2 border rounded outline-none"></div>
+                
+                <!-- NEW: Designation Dropdown -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Designation</label>
+                    <select id="new-designation" class="w-full p-2 border rounded outline-none bg-white">
+                        <option value="Assistant Professor">Assistant Professor</option>
+                        <option value="Associate Professor">Associate Professor</option>
+                        <option value="Professor">Professor</option>
+                        <option value="Lab Assistant">Lab Assistant</option>
+                        <option value="Visiting Faculty">Visiting Faculty</option>
+                    </select>
+                </div>
+
+                <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Email (Login ID)</label><input type="email" id="new-email" class="w-full p-2 border rounded outline-none"></div>
+                <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Employee Code</label><input type="text" id="new-code" class="w-full p-2 border rounded outline-none"></div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Department</label>
+                    <select id="new-dept" class="w-full p-2 border rounded outline-none bg-white">
+                        <option value="Department of Information Technology">Information Technology</option>
+                        <option value="School of Computing">School of Computing</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-2 pt-4 border-t border-gray-100">
+                <button onclick="document.getElementById('add-modal').classList.add('hidden')" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium text-sm">Cancel</button>
+                <button onclick="submitNewFaculty()" class="px-6 py-2 bg-mit-purple text-white rounded-lg font-bold text-sm hover:bg-[#350f50]">Create Profile</button>
+            </div>
+        </div>
+    </div>
+
+    {% include '_toast_modal.html' %}
+
+    <script>
+        lucide.createIcons();
+        let facultyData = [];
+        let sidebarVisible = false; // For mobile
+
+        document.addEventListener('DOMContentLoaded', loadFaculty);
+
+        async function loadFaculty() {
+            try {
+                const res = await fetch('/api/admin/faculty_list');
+                if (!res.ok) throw new Error("Failed to load");
+                const data = await res.json();
+                facultyData = data.faculty;
+                filterTable();
+            } catch(e) { 
+                console.error(e); 
+                document.getElementById('faculty-list').innerHTML = `<tr><td colspan="5" class="p-8 text-center text-red-500">Error loading data. Check console.</td></tr>`;
+            }
+        }
+
+        function renderTable(list) {
+            const tbody = document.getElementById('faculty-list');
+            if(list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-400">No records found.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = list.map(f => {
+                let hodButton = '';
+                if (f.is_active) {
+                    if (f.is_hod) {
+                        hodButton = `<button onclick="revokeHOD('${f.id}')" class="text-orange-600 hover:bg-orange-50 px-2 py-1 rounded text-xs font-bold border border-orange-200 mr-2">Unassign HOD</button>`;
+                    } else if (f.dept_hod_locked) {
+                        hodButton = `<button disabled class="text-gray-400 bg-gray-50 px-2 py-1 rounded text-xs font-bold border border-gray-200 cursor-not-allowed mr-2">Locked</button>`;
+                    } else {
+                        hodButton = `<button onclick="makeHOD('${f.id}')" class="text-purple-600 hover:bg-purple-50 px-2 py-1 rounded text-xs font-bold border border-purple-200 mr-2">Make HOD</button>`;
+                    }
+                }
+
+                const statusBtn = f.is_active 
+                    ? `<button onclick="toggleArchive('${f.id}', 'archive')" class="text-red-600 hover:bg-red-50 px-2 py-1 rounded text-xs font-bold border border-red-200 transition-colors">Archive</button>`
+                    : `<button onclick="toggleArchive('${f.id}', 'activate')" class="text-green-600 hover:bg-green-50 px-2 py-1 rounded text-xs font-bold border border-green-200 transition-colors">Activate</button>`;
+
+                // DESIGNATION BADGE
+                const desigBadge = `<span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100 ml-2">${f.designation || 'Faculty'}</span>`;
+
+                return `
+                <tr class="hover:bg-gray-50 transition-colors ${f.is_active ? '' : 'bg-gray-50/50'}">
+                    <td class="p-4">
+                        <p class="font-bold text-gray-800 ${f.is_active ? '' : 'opacity-50'}">
+                            ${f.name}
+                            ${f.is_hod ? '<span class="ml-2 px-2 py-0.5 bg-yellow-100 text-yellow-700 text-[10px] rounded-full border border-yellow-200">HOD</span>' : ''}
+                        </p>
+                        <div class="mt-1">${desigBadge}</div>
+                    </td>
+                    <td class="p-4 text-sm text-gray-600 ${f.is_active ? '' : 'opacity-50'}">${f.dept}</td>
+                    <td class="p-4 text-sm text-gray-500 ${f.is_active ? '' : 'opacity-50'}">
+                        ${f.email}<br><span class="text-[10px] uppercase">${f.code}</span>
+                    </td>
+                    <td class="p-4 text-center">
+                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase border ${f.is_active ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}">
+                            ${f.is_active ? 'Active' : 'Archived'}
+                        </span>
+                    </td>
+                    <td class="p-4 text-right flex justify-end items-center">
+                        ${hodButton}
+                        ${statusBtn}
+                    </td>
+                </tr>
+            `;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        function filterTable() {
+            const term = document.getElementById('search-box').value.toLowerCase();
+            const status = document.getElementById('filter-status').value;
+            const filtered = facultyData.filter(f => {
+                const matchesTerm = f.name.toLowerCase().includes(term) || f.email.toLowerCase().includes(term);
+                const matchesStatus = status === 'all' ? true : (status === 'active' ? f.is_active : !f.is_active);
+                return matchesTerm && matchesStatus;
+            });
+            renderTable(filtered);
+        }
+
+        async function toggleArchive(id, action) {
+            const doRequest = async () => {
+                const res = await fetch('/api/admin/archive_faculty', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: id, action: action }) });
+                if(res.ok) loadFaculty(); else showToast("Failed", "error");
+            };
+
+            if(action === 'archive') {
+                return showConfirm("Confirm Action", "Revoke access for this faculty?", doRequest, "Faculty Directory");
+            }
+
+            return doRequest();
+        }
+
+        async function submitNewFaculty() {
+            const payload = { 
+                name: document.getElementById('new-name').value, 
+                email: document.getElementById('new-email').value, 
+                code: document.getElementById('new-code').value, 
+                dept: document.getElementById('new-dept').value,
+                designation: document.getElementById('new-designation').value // NEW FIELD
+            };
+            if(!payload.name || !payload.email) return showToast("Fill fields", "error");
+            const res = await fetch('/api/admin/add_faculty', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if(res.ok) { showToast("Added!"); document.getElementById('add-modal').classList.add('hidden'); loadFaculty(); } 
+            else { const d = await res.json(); showToast(d.error || "Failed", "error"); }
+        }
+        
+           async function makeHOD(id) {
+               return showConfirm("Confirm Action", "Promote to HOD?", async () => {
+                 const res = await fetch('/api/admin/assign_hod', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ staff_id: id }) });
+                 if(res.ok) loadFaculty(); else showToast("Failed", "error");
+               }, "Faculty Directory");
+           }
+        
+           async function revokeHOD(id) {
+               return showConfirm("Confirm Action", "Remove HOD role?", async () => {
+                 const res = await fetch('/api/admin/revoke_hod', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ staff_id: id }) });
+                 if(res.ok) loadFaculty(); else showToast("Failed", "error");
+               }, "Faculty Directory");
+           }
+
+        function openAddModal() { document.getElementById('add-modal').classList.remove('hidden'); }
+
+        // --- SIDEBAR TOGGLE ---
+        function toggleSidebar() {
+            const body = document.body;
+            sidebarVisible = !sidebarVisible;
+            if (sidebarVisible) {
+                body.classList.add('sidebar-open');
+            } else {
+                body.classList.remove('sidebar-open');
+            }
+        }
+
+        function logout() { sessionStorage.removeItem('user_id'); window.location.href = '/'; }
+    </script>
+</body>
+</html>
