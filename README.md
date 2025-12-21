@@ -4,7 +4,7 @@ A production-grade, containerized Academic ERP for universities.
 
 EduMatrix AMS digitizes the academic lifecycle—from student onboarding and timetabling to attendance, disciplinary workflows, assessment, and reporting. It runs on Flask + PostgreSQL with Docker Compose.
 
-
+- added collaborator for PR
 
 ## 🚀 Key Features
 
