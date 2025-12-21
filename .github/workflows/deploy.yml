@@ -132,6 +132,33 @@ jobs:
           script: |
             set -e
 
+            # --- Preflight: Docker must exist on the target server ---
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "Docker is not installed on the server (docker: command not found)."
+              if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+                echo "Attempting Docker install using passwordless sudo..."
+                sudo apt-get update -y
+                sudo apt-get install -y ca-certificates curl gnupg
+                sudo install -m 0755 -d /etc/apt/keyrings
+                curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                sudo chmod a+r /etc/apt/keyrings/docker.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                sudo apt-get update -y
+                sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+              else
+                echo "::error::Docker is not installed and this SSH user cannot run passwordless sudo."
+                echo "Install Docker on the server, then rerun this workflow. For Ubuntu:"
+                echo "  sudo apt-get update"
+                echo "  sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+                exit 1
+              fi
+            fi
+
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "::error::Docker is installed but 'docker compose' plugin is missing. Install docker-compose-plugin on the server."
+              exit 1
+            fi
+
             cat > "${{ env.DEPLOY_PATH }}/.env" <<EOF
             GHCR_IMAGE_REPO=${{ steps.meta.outputs.image_repo }}
             IMAGE_TAG=${{ steps.meta.outputs.tag }}
