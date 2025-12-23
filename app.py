@@ -4169,7 +4169,10 @@ def assign_class_teacher():
         user, err = _require_role('Admin')
         if err: return err
         data = request.json
-        section = db.session.get(ClassSection, data.get('section_id'))
+        section_id = data.get('section_id') if data else None
+        if section_id is None:
+            return jsonify({"error": "section_id is required"}), 400
+        section = db.session.get(ClassSection, section_id)
         if not section: return jsonify({"error": "Class not found"}), 404
         section.class_teacher_id = data.get('staff_id')
         db.session.commit()
