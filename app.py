@@ -4673,8 +4673,11 @@ def archive_faculty():
         admin, err = _require_role('Admin')
         if err: return err
         data = request.json
-        user = db.session.get(UserMaster, data.get('user_id'))
-        staff = db.session.get(StaffProfile, data.get('user_id'))
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+        user = db.session.get(UserMaster, user_id)
+        staff = db.session.get(StaffProfile, user_id)
         if not user: return jsonify({"error": "User not found"}), 404
         user.is_active = (data.get('action') == 'activate')
         if data.get('action') == 'archive':
