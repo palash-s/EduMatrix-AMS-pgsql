@@ -4,7 +4,25 @@ A production-grade, containerized Academic ERP for universities.
 
 EduMatrix AMS digitizes the academic lifecycle—from student onboarding and timetabling to attendance, disciplinary workflows, assessment, and reporting. It runs on Flask + PostgreSQL with Docker Compose.
 
-- added collaborator for PR
+## ✅ Current Status (What’s been implemented)
+
+### UX stability
+- Removed auto-refresh / forced reload behavior across dashboards and shared UI so modals and actions don’t unexpectedly refresh pages.
+- Hardened login client/server behavior so API errors return JSON (avoids frontend crashes like `Unexpected token '<'`).
+
+### Repo workflow
+- PR template added for review consistency.
+- CI workflow added (Python syntax compile, Docker build, Compose config validation).
+
+### Deployment
+- Manual “click-to-deploy” GitHub Actions workflow:
+  - builds/pushes Docker images to GHCR
+  - optionally joins Tailnet (Tailscale) so it can SSH to a private server
+  - uploads production compose + nginx config
+  - writes a server `.env` and runs `docker compose pull` + `up -d`
+
+### Firebase
+- Firebase is optional. If you don’t configure it, the app runs normally and push notifications are skipped.
 
 ## 🚀 Key Features
 
@@ -148,12 +166,64 @@ git clone https://github.com/yourusername/edumatrix-ams.git
 cd edumatrix-ams
 ```
 
-### 2. Launch with Docker (Production Mode)
-This spins up the Web App, PostgreSQL Database, and Nginx Proxy.
+### 2. Launch locally (Dev)
+This spins up the Web App, PostgreSQL Database, and Nginx Proxy using the dev compose file.
+
 ```bash
-docker compose up --build
+docker compose -f docker-compose.yml up --build
 ```
+
 Access the app at http://localhost
+
+### 3. Apply DB migrations (Dev)
+```bash
+docker compose -f docker-compose.yml exec web python -m flask db upgrade
+```
+
+### 4. Create/reset an Admin user (Dev)
+```bash
+export NEW_ADMIN_PASSWORD='Admin@123'
+export ADMIN_EMAIL='admin@mituniversity.edu.in'
+
+docker compose -f docker-compose.yml exec -T \
+  -e NEW_ADMIN_PASSWORD -e ADMIN_EMAIL \
+  web python - <<'PY'
+import os, uuid
+from app import app, db, UserMaster, StaffProfile, generate_password_hash
+
+email = (os.environ.get("ADMIN_EMAIL") or "").strip()
+pwd = os.environ.get("NEW_ADMIN_PASSWORD")
+
+if not email or not pwd:
+  raise SystemExit("Missing ADMIN_EMAIL or NEW_ADMIN_PASSWORD")
+
+with app.app_context():
+  u = UserMaster.query.filter_by(username=email).first()
+  if u is None:
+    admin_id = str(uuid.uuid4())
+    u = UserMaster(
+      user_id=admin_id,
+      username=email,
+      password_hash=generate_password_hash(pwd),
+      user_type="Admin",
+      is_active=True,
+    )
+    db.session.add(u)
+    db.session.add(StaffProfile(
+      staff_id=admin_id,
+      full_name="System Administrator",
+      employee_code="ADMIN001",
+      email_contact=email,
+      designation="Admin",
+    ))
+    print("Created admin:", email)
+  else:
+    u.password_hash = generate_password_hash(pwd)
+    print("Updated admin password:", email)
+
+  db.session.commit()
+PY
+```
 
 ## 🚢 Click-to-Deploy (GitHub Actions + GHCR + Ubuntu)
 
@@ -235,22 +305,88 @@ The server runs using [docker-compose.prod.yml](docker-compose.prod.yml).
 - The dev compose file `docker-compose.yml` uses bind mounts + `--reload` for development.
 - Production uses `docker-compose.prod.yml` (no source bind-mounts, no `--reload`).
 
-### 3. Initialize Database (First Run Only)
-Use migrations to create/update schema in Postgres.
+## 🧠 Database configuration (important)
 
-Open a new terminal:
+### Why we don’t build `DATABASE_URL` in Compose
+Passwords containing special characters like `@`, `:` or `/` can break raw URLs (example symptom: Postgres host becomes something like `123@db`).
+
+This repo now passes discrete env vars into the app container:
+- `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+
+and the app constructs the SQLAlchemy connection URL safely.
+
+## 🧯 Production runbook (common tasks)
+
+### Apply migrations (Prod)
+Run on the server:
+
 ```bash
-docker compose exec web python -m flask db upgrade
+cd /opt/ams  # or your DEPLOY_PATH
+docker compose -f docker-compose.prod.yml exec -T web python -m flask db upgrade
 ```
 
-If you run `flask` locally (outside Docker), make sure `DATABASE_URL` points to Postgres.
+### Create/reset the Admin user (Prod)
+Run on the server:
 
-### 4. Create Admin User (One-Time)
-Since a fresh DB has no users, create an Admin account once.
-
-Open a new terminal:
 ```bash
-docker compose exec web python -c "import uuid; from app import app, db, UserMaster, generate_password_hash, StaffProfile; app.app_context().push(); admin_id=str(uuid.uuid4()); email='admin@mituniversity.edu.in'; db.session.add(UserMaster(user_id=admin_id, username=email, password_hash=generate_password_hash('Admin@123'), user_type='Admin', is_active=True)); db.session.add(StaffProfile(staff_id=admin_id, full_name='System Administrator', employee_code='ADMIN001', email_contact=email, designation='Admin')); db.session.commit(); print('Admin Created:', email)"
+cd /opt/ams  # or your DEPLOY_PATH
+export NEW_ADMIN_PASSWORD='Admin@123'
+export ADMIN_EMAIL='admin@mituniversity.edu.in'
+
+docker compose -f docker-compose.prod.yml exec -T \
+  -e NEW_ADMIN_PASSWORD -e ADMIN_EMAIL \
+  web python - <<'PY'
+import os, uuid
+from app import app, db, UserMaster, StaffProfile, generate_password_hash
+
+email = (os.environ.get("ADMIN_EMAIL") or "").strip()
+pwd = os.environ.get("NEW_ADMIN_PASSWORD")
+
+if not email or not pwd:
+  raise SystemExit("Missing ADMIN_EMAIL or NEW_ADMIN_PASSWORD")
+
+with app.app_context():
+  u = UserMaster.query.filter_by(username=email).first()
+  if u is None:
+    admin_id = str(uuid.uuid4())
+    u = UserMaster(
+      user_id=admin_id,
+      username=email,
+      password_hash=generate_password_hash(pwd),
+      user_type="Admin",
+      is_active=True,
+    )
+    db.session.add(u)
+    db.session.add(StaffProfile(
+      staff_id=admin_id,
+      full_name="System Administrator",
+      employee_code="ADMIN001",
+      email_contact=email,
+      designation="Admin",
+    ))
+    print("Created admin:", email)
+  else:
+    u.password_hash = generate_password_hash(pwd)
+    print("Updated admin password:", email)
+
+  db.session.commit()
+PY
+```
+
+### If Postgres says “password authentication failed”
+Changing `POSTGRES_PASSWORD` in GitHub Secrets or in the server `.env` does NOT automatically change the password inside an existing Postgres data volume.
+
+Reset the DB user password (run on server):
+
+```bash
+cd /opt/ams  # or your DEPLOY_PATH
+
+# IMPORTANT: On this stack, the DB role is usually 'admin' (not 'postgres').
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U admin -d postgres \
+  -c "ALTER USER admin WITH PASSWORD 'Admin@123';"
+
+docker compose -f docker-compose.prod.yml restart web
 ```
 
 ## 📥 CSV Imports (Bulk Uploads)
@@ -279,6 +415,8 @@ AMS-flask/
 ├── requirements.txt        # Python Dependencies
 ├── Dockerfile              # Container Definition
 ├── docker-compose.yml      # Service Orchestration
+├── docker-compose.prod.yml # Production Orchestration (GHCR image)
+├── .github/workflows/      # CI + Deploy workflows
 ├── migrations/             # Database Migration Scripts (Alembic)
 ├── nginx/
 │   └── default.conf        # Nginx Proxy Config

@@ -1,2 +1,100 @@
 Course Code,Course,Course Type,Section,SEM,Class Level,L,T,P,Credits
-CS401,Artificial Intelligence,Elective-III,A,IV,SY,3,0,2,4
+23ASH1109,Mathematical Foundation for Computing-III,BSC,DA,III,SY,2,1,0,3
+23IT1104,Data Science,BSC,DA,III,SY,3,0,0,3
+23IT2007,Computer Organization & Architecture,PCC,DA,III,SY,2,1,0,3
+23IT2003,Database Programming,ESC,DA,III,SY,2,0,4,4
+23IT2001,Data Structures and Algorithms,PCC,DA,III,SY,3,0,2,4
+23CSE1011,Economics for Engineers,PCC,DA,III,SY,2,0,0,2
+23CSE2007,Java Programming,HSSM-ECO,DA,III,SY,0,0,4,2
+23IT1010,Project Based Learning - I,ESC,DA,III,SY,0,0,4,2
+23CIV1302,Environmental Studies,HSSM-AEC,DA,III,SY,2,0,0,2
+23SHD1007,"Societal immersion, spirituality and morality",MDHC-VEC,DA,III,SY,2,0,0,0
+23ASH1109,Mathematical Foundation for Computing-III,MDHC-VEC,SMAD,III,SY,2,1,0,3
+23IT1103,Mobile Application Development with iOS,BSC,SMAD,III,SY,0,0,4,2
+23IT2003,Database Programming,PCC,SMAD,III,SY,2,0,4,4
+23IT2001,Data Structures and Algorithms,PCC,SMAD,III,SY,3,0,2,4
+23CSE1011,Economics for Engineers,PCC,SMAD,III,SY,2,0,0,2
+23CSE2007,Java Programming,HSSM-ECO,SMAD,III,SY,0,0,4,2
+23IT1010,Project Based Learning - I,ESC,SMAD,III,SY,0,0,4,2
+23CIV1302,Environmental Studies,HSSM-AEC,SMAD,III,SY,2,0,0,2
+23SHD1007,"Societal immersion, spirituality and morality",MDHC-VEC,SMAD,III,SY,2,0,0,0
+23IT2012,Analysis of Algorithms,MDHC-VEC,CORE,V,TY,3,0,0,3
+23IT2100,Fundamentals of Machine Learning,PCC,CORE,V,TY,3,0,0,3
+23IT2101,Fundamentals of Machine Learning Laboratory,PCC,CORE,V,TY,0,0,2,1
+23IT3010,Project Based Learning - III,PCC,CORE,V,TY,0,0,4,2
+25MBFT302,Block chain for Banking & Finance,VSEC,CORE,V,TY,4,0,0,4
+25MBDM101,Fundamentals of Digital Marketing,MDM-Minor,CORE,V,TY,4,0,0,4
+24MBHR101,Talent Acquisition & Retention,MDM-Minor,CORE,V,TY,4,0,0,4
+25ASH3001,Survey of Quantum Technology,MDM-Minor,CORE,V,TY,4,0,0,4
+25MIE5002,Problem Identification & Opportunity Mapping,MDM-Minor,CORE,V,TY,4,0,0,4
+25MUX3001,Usability Fundamentals,MDM-Minor,CORE,V,TY,4,0,0,4
+25PSY1011,Developmental Psychology,MDM-Minor,CORE,V,TY,4,0,0,4
+23CSE3081,Industry Practices & essional Skills,MDM-Minor,CORE,V,TY,2,0,0,2
+23CSE3082,Financial Literacy & Securities Market Primer,MDM-OE,CORE,V,TY,2,0,0,2
+23SCL2002,Aptitude and essional Skills Core,MDM-OE,CORE,V,TY,1,0,2,2
+23IT3011,Summer Internship,HSSM-VEC,CORE,V,TY,0,0,0,2
+23IT3101,Full Stack Web Development,CEP-FP,CORE,V,TY,2,0,4,4
+23IT2201,Network Security,Elective-II,CORE,V,TY,2,0,4,4
+23IT2006,Theory of Computation,PCC,DA,V,TY,3,1,0,4
+23IT2100,Fundamentals of Machine Learning,PCC,DA,V,TY,3,0,0,3
+23IT2101,Fundamentals of Machine Learning Laboratory,PCC,DA,V,TY,0,0,2,1
+23IT3010,Project Based Learning - III,VSEC,DA,V,TY,0,0,4,2
+25MBFT302,Block chain for Banking & Finance,MDM-Minor,DA,V,TY,4,0,0,4
+25MBDM101,Fundamentals of Digital Marketing,MDM-Minor,DA,V,TY,4,0,0,4
+25ASH3001,Survey of Quantum Technology,MDM-Minor,DA,V,TY,4,0,0,4
+25MIE5002,Problem Identification & Opportunity Mapping,MDM-Minor,DA,V,TY,4,0,0,4
+25MUX3001,Usability Fundamentals,MDM-Minor,DA,V,TY,4,0,0,4
+23BFA3536,Foundation of Photography,MDM-Minor,DA,V,TY,4,0,0,4
+25PSY1011,Developmental Psychology,MDM-Minor,DA,V,TY,4,0,0,4
+23CSE3081,Industry Practices & essional Skills,MDM-OE,DA,V,TY,2,0,0,2
+23CSE3082,Financial Literacy & Securities Market Primer,MDM-OE,DA,V,TY,2,0,0,2
+23SCL2002,Aptitude and essional Skills Core,HSSM-VEC,DA,V,TY,1,0,2,2
+23IT3011,Summer Internship,CEP-FP,DA,V,TY,0,0,0,2
+23IT2106,Health and Healthcare Visualization,Elective-II,DA,V,TY,2,0,4,4
+23IT3301,Computer Vision,Elective-II,DA,V,TY,2,0,4,4
+23IT3001,Full Stack Front-End Development ,PCC,SMAD,V,TY,2,0,4,4
+23IT2100,Fundamentals of Machine Learning,PCC,SMAD,V,TY,3,0,0,3
+23IT2101,Fundamentals of Machine Learning Laboratory,PEC,SMAD,V,TY,0,0,2,1
+23IT3010,Project Based Learning - III,VSEC,SMAD,V,TY,0,0,4,2
+25PSY1011,Developmental Psychology,MDM-Minor,SMAD,V,TY,4,0,0,4
+23BFA3536,Foundation of Photography,MDM-Minor,SMAD,V,TY,4,0,0,4
+25MIE5002,Problem Identification & Opportunity Mapping,MDM-Minor,SMAD,V,TY,4,0,0,4
+25MUX3001,Usability Fundamentals,MDM-Minor,SMAD,V,TY,4,0,0,4
+25MBFT302,Block chain for Banking & Finance,MDM-Minor,SMAD,V,TY,4,0,0,4
+25ASH3001,Survey of Quantum Technology,MDM-Minor,SMAD,V,TY,4,0,0,4
+23CSE3081,Industry Practices & essional Skills,MDM-OE,SMAD,V,TY,2,0,0,2
+23CSE3082,Financial Literacy & Securities Market Primer,MDM-OE,SMAD,V,TY,2,0,0,2
+23SCL2002,Aptitude and essional Skills Core,HSSM-VEC,SMAD,V,TY,1,0,2,2
+23IT3011,Summer Internship,CEP-FP,SMAD,V,TY,0,0,0,2
+23IT1201,Kotlin Programming,Elective-II,SMAD,V,TY,3,0,0,3
+21BTIT701,Information Security,PCC,CORE,VII,LY,3,0,0,3
+21BTIT702,Deep Learning,PCC,CORE,VII,LY,3,0,0,3
+21BTIT711,Information Security Laboratory,PCC,CORE,VII,LY,0,0,4,2
+21BTIT712,Advanced Programming Laboratory III - NLP,PCC,CORE,VII,LY,0,0,4,2
+21BTIT712,Advanced Programming Laboratory III - BI,PCC,CORE,VII,LY,0,0,4,2
+21BTIT712,Advanced Programming Laboratory III - DL,PCC,CORE,VII,LY,0,0,4,2
+21BTIT721,Project Phase I,PCC,CORE,VII,LY,0,0,2,1
+21BTIT732,Natural Language Processing,Elective-III,CORE,VII,LY,3,0,0,3
+21BTIT737,Business Intelligence ,Elective-IV,CORE,VII,LY,3,0,0,3
+21BTIT740,Entrepreneurship and Innovation,Open Elective,CORE,VII,LY,3,0,0,3
+21BTDA701,Big Data Engineering,PCC,DA,VII,LY,3,0,0,3
+21BTDA702,Deep Learning,PCC,DA,VII,LY,3,0,0,3
+21BTDA711,Deep Learning Laboratory,PCC,DA,VII,LY,0,0,4,2
+21BTDA712,Advanced Programming Laboratory III - BI,PCC,DA,VII,LY,0,0,4,2
+21BTDA712,Advanced Programming Laboratory III - NLP,PCC,DA,VII,LY,0,0,2,2
+21BTDA712,Advanced Programming Laboratory III - DM,PCC,DA,VII,LY,3,0,0,2
+21BTDA721,Project Phase I,PCC,DA,VII,LY,0,0,2,1
+21BTDA733,Natural Language Processing,Elective-III,DA,VII,LY,3,0,0,3
+21BTDA731,Data Modernization,Elective-III,DA,VII,LY,3,0,0,3
+21BTDA737,Business Intelligence,Elective-IV,DA,VII,LY,3,0,0,3
+21BTDA741,Digital Marketing,Open Elective,DA,VII,LY,3,0,0,3
+21BTSM701,Deep Learning,PCC,SMAD,VII,LY,3,0,0,3
+21BTSM702,Full Stack Development,PCC,SMAD,VII,LY,2,0,4,4
+21BTSM711,Immersive Application Development Laboratory,PCC,SMAD,VII,LY,0,0,4,2
+21BTSM712,Advanced Programming Laboratory III - BI,PCC,SMAD,VII,LY,0,0,4,2
+21BTSM712,Advanced Programming Laboratory III - DL,PCC,SMAD,VII,LY,0,0,4,2
+21BTSM712,Advanced Programming Laboratory III - NLP,PCC,SMAD,VII,LY,0,0,4,2
+21BTSM721,Project Phase-I,PCC,SMAD,VII,LY,0,0,2,1
+21BTSM731,Natural Language Processing,Elective-III,SMAD,VII,LY,3,0,0,3
+21BTSM735,Business Intelligence,Elective-IV,SMAD,VII,LY,3,0,0,3
+21BTSM742,Product Engineering and Management,Open Elective,SMAD,VII,LY,3,0,0,3
