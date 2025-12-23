@@ -4670,7 +4670,7 @@ def add_single_faculty():
 @app.route('/api/admin/archive_faculty', methods=['POST'])
 def archive_faculty():
     try:
-        admin, err = _require_role('Admin')
+        admin, err = _require_role('Admin', None)
         if err: return err
         data = request.json
         user_id = data.get('user_id')
