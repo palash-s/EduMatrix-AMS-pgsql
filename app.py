@@ -304,8 +304,25 @@ def send_notification(user_id, title, message, type='info', link=None):
 
 
 # ==========================================
-# MOBILE: AUTH HELPERS (NEW)
+# AUTH HELPERS (Session + Mobile)
 # ==========================================
+def _require_role(*allowed_roles):
+    """Check if request comes from an authenticated user with one of allowed_roles.
+    
+    For web (session-based): expects 'user_id' in query params + validates user_type.
+    Returns (user, error_response). If error_response is not None, return it immediately.
+    """
+    user_id = request.args.get('user_id') or (request.json or {}).get('user_id')
+    if not user_id:
+        return None, (jsonify({"error": "Unauthorized"}), 401)
+    user = db.session.get(UserMaster, user_id)
+    if not user or not user.is_active:
+        return None, (jsonify({"error": "Unauthorized"}), 401)
+    if allowed_roles and user.user_type not in allowed_roles:
+        return None, (jsonify({"error": "Forbidden"}), 403)
+    return user, None
+
+
 def _mobile_access_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='ams-mobile-access-v1')
 
@@ -4128,14 +4145,18 @@ def get_admin_classes():
 @app.route('/api/admin/assign_teacher', methods=['POST'])
 def assign_class_teacher():
     try:
+        user, err = _require_role('Admin')
+        if err: return err
         data = request.json
-        section = ClassSection.query.get(data.get('section_id'))
+        section = db.session.get(ClassSection, data.get('section_id'))
         if not section: return jsonify({"error": "Class not found"}), 404
         section.class_teacher_id = data.get('staff_id')
         db.session.commit()
         log_activity("Role Update", f"Assigned Class Teacher for {section.class_level}-{section.name}")
         return jsonify({"message": "Updated"}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        app.logger.exception("assign_class_teacher failed")
+        return jsonify({"error": "Server error"}), 500
 
 @app.route('/api/admin/coordinators', methods=['GET'])
 def get_all_staff_coordinators():
@@ -4150,8 +4171,10 @@ def get_all_staff_coordinators():
 @app.route('/api/admin/toggle_role', methods=['POST'])
 def toggle_staff_role():
     try:
+        user, err = _require_role('Admin')
+        if err: return err
         data = request.json
-        staff = StaffProfile.query.get(data.get('staff_id'))
+        staff = db.session.get(StaffProfile, data.get('staff_id'))
         role = data.get('role_type')
         if not staff: return jsonify({"error": "Staff not found"}), 404
         
@@ -4165,7 +4188,9 @@ def toggle_staff_role():
         db.session.commit()
         log_activity("Role Update", f"Toggled {role} for {staff.full_name}")
         return jsonify({"message": "Updated"}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        app.logger.exception("toggle_staff_role failed")
+        return jsonify({"error": "Server error"}), 500
 
 @app.route('/api/admin/faculty_list', methods=['GET'])
 def get_admin_faculty_list():
@@ -4633,14 +4658,18 @@ def add_single_faculty():
         db.session.commit()
         log_activity("Faculty Added", f"Created profile for {data.get('name')}")
         return jsonify({"message": "Added"}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        app.logger.exception("add_faculty failed")
+        return jsonify({"error": "Server error"}), 500
 
 @app.route('/api/admin/archive_faculty', methods=['POST'])
 def archive_faculty():
     try:
+        admin, err = _require_role('Admin')
+        if err: return err
         data = request.json
-        user = UserMaster.query.get(data.get('user_id'))
-        staff = StaffProfile.query.get(data.get('user_id'))
+        user = db.session.get(UserMaster, data.get('user_id'))
+        staff = db.session.get(StaffProfile, data.get('user_id'))
         if not user: return jsonify({"error": "User not found"}), 404
         user.is_active = (data.get('action') == 'activate')
         if data.get('action') == 'archive':
@@ -4649,7 +4678,9 @@ def archive_faculty():
         db.session.commit()
         log_activity("Faculty Status", f"{data.get('action').title()}d {staff.full_name}")
         return jsonify({"message": "Updated"}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        app.logger.exception("archive_faculty failed")
+        return jsonify({"error": "Server error"}), 500
 
 
 # In app.py
@@ -9177,17 +9208,20 @@ if __name__ == '__main__':
             if not Department.query.filter_by(name="Department of Information Technology").first():
                 db.session.add(Department(name="Department of Information Technology"))
             
-            admin_user = UserMaster(user_id=new_uuid, username=admin_email, password_hash=generate_password_hash("Admin@123"), user_type='Admin', is_active=True)
+            seed_password = os.environ.get('ADMIN_SEED_PASSWORD', 'Admin@123')  # Use env var in prod!
+            admin_user = UserMaster(user_id=new_uuid, username=admin_email, password_hash=generate_password_hash(seed_password), user_type='Admin', is_active=True)
             db.session.add(admin_user)
             
             admin_profile = StaffProfile(staff_id=new_uuid, full_name="System Administrator", employee_code="ADMIN001", email_contact=admin_email)
             db.session.add(admin_profile)
             
             db.session.commit()
-            print(f"Super Admin Created! Login: {admin_email} / Admin@123")
+            print(f"Super Admin Created! Login: {admin_email} (password from ADMIN_SEED_PASSWORD or default)")
         else:
             print("Database initialized.")
 
-    app.run(debug=True, port=5000)
+    # NOTE: In production, use gunicorn. Only use app.run() for local dev.
+    # Set FLASK_DEBUG=1 to enable debug mode locally.
+    app.run(debug=os.environ.get('FLASK_DEBUG', '0') == '1', port=5000)
 
 
