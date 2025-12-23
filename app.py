@@ -4676,7 +4676,8 @@ def archive_faculty():
             classes = ClassSection.query.filter_by(class_teacher_id=user.user_id).all()
             for cls in classes: cls.class_teacher_id = None
         db.session.commit()
-        log_activity("Faculty Status", f"{data.get('action').title()}d {staff.full_name}")
+        staff_name = staff.full_name if staff else data.get('user_id')
+        log_activity("Faculty Status", f"{data.get('action').title()}d {staff_name}")
         return jsonify({"message": "Updated"}), 200
     except Exception as e:
         app.logger.exception("archive_faculty failed")
