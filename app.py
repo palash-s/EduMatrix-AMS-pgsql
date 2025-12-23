@@ -8,7 +8,7 @@ import hashlib
 import json
 from datetime import timedelta
 from datetime import datetime, date
-from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_migrate import Migrate
 from sqlalchemy.exc import OperationalError
@@ -48,6 +48,9 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Mobile token lifetimes (seconds)
 app.config['MOBILE_ACCESS_TOKEN_TTL_SECONDS'] = int(os.environ.get('MOBILE_ACCESS_TOKEN_TTL_SECONDS', '1800'))  # 30 min
 app.config['MOBILE_REFRESH_TOKEN_TTL_DAYS'] = int(os.environ.get('MOBILE_REFRESH_TOKEN_TTL_DAYS', '30'))
+
+# Session configuration for web authentication
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Session expires after 8 hours
 
 
 db.init_app(app)
@@ -307,21 +310,25 @@ def send_notification(user_id, title, message, type='info', link=None):
 # AUTH HELPERS (Session + Mobile)
 # ==========================================
 def _require_role(*allowed_roles):
-    """Check if request comes from a user with one of the allowed_roles.
+    """Check if request comes from an authenticated user with one of allowed_roles.
     
-    Expects a 'user_id' in query params or JSON body, then validates the user's type.
-    This helper does NOT validate any session or token; callers must ensure that
-    providing 'user_id' is safe in their context or combine this with stronger auth.
+    Uses Flask session for web authentication. Validates that the user is logged in
+    via session and has one of the allowed roles.
     Returns (user, error_response). If error_response is not None, return it immediately.
     """
-    user_id = request.args.get('user_id') or (request.json or {}).get('user_id')
+    user_id = session.get('user_id')
     if not user_id:
         return None, (jsonify({"error": "Unauthorized"}), 401)
+    
     user = db.session.get(UserMaster, user_id)
     if not user or not user.is_active:
+        # Clear invalid session
+        session.clear()
         return None, (jsonify({"error": "Unauthorized"}), 401)
+    
     if allowed_roles and user.user_type not in allowed_roles:
         return None, (jsonify({"error": "Forbidden"}), 403)
+    
     return user, None
 
 
@@ -1109,6 +1116,11 @@ def login():
             'Admin': '/admin/dashboard' 
         }
         
+        # Store user info in session for secure authentication
+        session['user_id'] = user.user_id
+        session['user_type'] = role
+        session.permanent = True
+        
         return jsonify({
             "message": "Success", 
             "user_id": user.user_id, 
@@ -1118,6 +1130,13 @@ def login():
     except Exception:
         app.logger.exception("/api/login failed")
         return jsonify({"error": "Server error"}), 500
+
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    """Clear the user session."""
+    session.clear()
+    return jsonify({"message": "Logged out successfully"}), 200
 
 
 # ==========================================
