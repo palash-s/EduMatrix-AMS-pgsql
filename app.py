@@ -307,9 +307,11 @@ def send_notification(user_id, title, message, type='info', link=None):
 # AUTH HELPERS (Session + Mobile)
 # ==========================================
 def _require_role(*allowed_roles):
-    """Check if request comes from an authenticated user with one of allowed_roles.
+    """Check if request comes from a user with one of the allowed_roles.
     
-    For web (session-based): expects 'user_id' in query params + validates user_type.
+    Expects a 'user_id' in query params or JSON body, then validates the user's type.
+    This helper does NOT validate any session or token; callers must ensure that
+    providing 'user_id' is safe in their context or combine this with stronger auth.
     Returns (user, error_response). If error_response is not None, return it immediately.
     """
     user_id = request.args.get('user_id') or (request.json or {}).get('user_id')
