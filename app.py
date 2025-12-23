@@ -4176,8 +4176,11 @@ def toggle_staff_role():
         user, err = _require_role('Admin')
         if err: return err
         data = request.json
-        staff = db.session.get(StaffProfile, data.get('staff_id'))
-        role = data.get('role_type')
+        staff_id = data.get('staff_id') if data else None
+        if staff_id is None:
+            return jsonify({"error": "staff_id is required"}), 400
+        staff = db.session.get(StaffProfile, staff_id)
+        role = data.get('role_type') if data else None
         if not staff: return jsonify({"error": "Staff not found"}), 404
         
         if role == 'event': staff.is_event_coordinator = not staff.is_event_coordinator
