@@ -1,0 +1,59 @@
+# --- Python / Flask ---
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+# This repo currently contains a local venv folder
+amsflask/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Flask runtime
+instance/
+
+# Environment files
+.env
+.env.*
+
+# --- Secrets (do not commit) ---
+secrets/
+**/*firebase*adminsdk*.json
+**/*service-account*.json
+
+# --- Node / React Native ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Metro / React Native
+.expo/
+.expo-shared/
+*.keystore
+
+# --- Android / Gradle ---
+**/.gradle/
+**/build/
+**/local.properties
+**/*.iml
+.idea/
+
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
