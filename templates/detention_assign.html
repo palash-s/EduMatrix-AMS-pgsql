@@ -133,10 +133,19 @@
 
     <script>
         lucide.createIcons();
-        const staffId = sessionStorage.getItem('user_id');
-        document.getElementById('staff-id').value = staffId;
+        let staffId = null;
         
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async function() {
+            // SECURITY: Validate session with server before loading
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                staffId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+
+            document.getElementById('staff-id').value = staffId;
             loadWatchlist();
             loadReviewInbox();
             switchList('watchlist'); 

@@ -44,13 +44,22 @@
 
     <script>
         lucide.createIcons();
-        const userId = sessionStorage.getItem('user_id');
+        let userId = null;
 
-        document.addEventListener('DOMContentLoaded', loadRequests);
+        document.addEventListener('DOMContentLoaded', async function() {
+            // SECURITY: Validate session with server before loading
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                userId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+
+            loadRequests();
+        });
 
         async function loadRequests() {
-            if (!userId) { window.location.href = '/'; return; }
-            
             try {
                 const response = await fetch(`/api/staff/leave_requests?user_id=${userId}`);
                 const data = await response.json();

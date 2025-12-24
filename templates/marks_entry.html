@@ -123,7 +123,7 @@
 
     <script>
         lucide.createIcons();
-        const userId = sessionStorage.getItem('user_id');
+        let userId = null;
         let currentSheetData = []; 
         let activeTab = 'ta1'; 
         let currentSectionId = null;
@@ -185,6 +185,15 @@
         };
 
         document.addEventListener('DOMContentLoaded', async () => {
+            // SECURITY: Validate session with server before loading
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                userId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+
             const res = await fetch(`/api/staff/dashboard?user_id=${userId}`);
             const data = await res.json();
             const select = document.getElementById('subject-select');

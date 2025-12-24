@@ -101,7 +101,7 @@
 
     <script>
         lucide.createIcons();
-        const userId = sessionStorage.getItem('user_id');
+        let userId = null;
         let currentReportData = null;
         let currentSyllabusData = null;
         let currentGrantData = [];
@@ -221,7 +221,15 @@
         document.getElementById('global-date').max = new Date().toISOString().split('T')[0];
 
         document.addEventListener('DOMContentLoaded', async () => {
-            if(!userId) window.location.href = '/';
+            // SECURITY: Validate session with server before loading
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                userId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+
             loadCurrentTermBadge();
             const res = await fetch('/api/core/classes');
             const data = await res.json();

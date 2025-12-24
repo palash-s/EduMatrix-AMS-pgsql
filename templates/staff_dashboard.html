@@ -310,7 +310,8 @@
 
     <script>
         lucide.createIcons();
-        const userId = sessionStorage.getItem('user_id');
+        // SECURITY: userId is fetched from server session, not sessionStorage
+        let userId = null;
         let reportMeta = {}; let summaryMeta = {}; let menteeDataMap = {};
         let currentBatchId = null;
         let __amsCurrentTermInfo = null;
@@ -557,7 +558,16 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
-            if (!userId) { window.location.href = '/'; return; }
+            // SECURITY: Validate session with server before loading dashboard
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                if (meData.role !== 'Staff') { window.location.replace('/'); return; }
+                userId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+            
             loadCurrentTermNav();
             document.getElementById('global-loader').classList.remove('hidden');
             try {
@@ -566,7 +576,7 @@
                 const data = await response.json();
                 renderDashboard(data);
                 animateDashboard();
-            } catch (e) { console.error(e); showToast("Session Error", "error"); window.location.href = '/'; }
+            } catch (e) { console.error(e); showToast("Session Error", "error"); window.location.replace('/'); }
             finally { document.getElementById('global-loader').classList.add('hidden'); }
         });
 
@@ -898,7 +908,11 @@
             });
         }
         
-        function logout() { sessionStorage.removeItem('user_id'); window.location.href = '/'; }
+        async function logout() { 
+            try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } 
+            catch (e) { /* ignore */ } 
+            window.location.replace('/'); 
+        }
         function closeModal() { document.getElementById('report-modal').classList.add('hidden'); document.getElementById('summary-modal').classList.add('hidden'); document.getElementById('mentee-modal').classList.add('hidden'); document.getElementById('counseling-modal').classList.add('hidden'); document.getElementById('meeting-modal').classList.add('hidden'); document.getElementById('adjust-modal').classList.add('hidden'); amsMarkModalClosed(); closeActionModal(); }
         function toggleUpcoming() { const w = document.getElementById('upcoming-wrapper'); w.classList.toggle('hidden'); document.getElementById('upcoming-icon').style.transform = w.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)'; }
         

@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import os
+import logging
 import pandas as pd
 import uuid
 import secrets
 import hashlib
 import json
+from functools import wraps
 from datetime import timedelta
 from datetime import datetime, date
-from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, g
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_migrate import Migrate
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_wtf.csrf import CSRFProtect, CSRFError
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import OperationalError
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -38,10 +44,24 @@ from sql_connection import (
 )
 
 app = Flask(__name__)
-# NOTE: Mobile token auth needs a stable secret key.
-# In production set env var SECRET_KEY to a strong random value.
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-me')
-# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///school_system.db'
+
+# ==========================================
+# SECURITY CONFIGURATION
+# ==========================================
+# CRITICAL: In production, set SECRET_KEY env var to a strong random value (min 32 chars)
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    logging.warning("⚠️  SECRET_KEY not set! Using insecure default. Set SECRET_KEY env var in production.")
+    _secret_key = 'dev-secret-key-change-me'
+app.config['SECRET_KEY'] = _secret_key
+
+# Session security settings
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # HTTPS only in prod
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JS access to session cookie
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Session timeout
+
+# Database
 app.config['SQLALCHEMY_DATABASE_URI'] = get_db_uri(app) 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -49,9 +69,140 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MOBILE_ACCESS_TOKEN_TTL_SECONDS'] = int(os.environ.get('MOBILE_ACCESS_TOKEN_TTL_SECONDS', '1800'))  # 30 min
 app.config['MOBILE_REFRESH_TOKEN_TTL_DAYS'] = int(os.environ.get('MOBILE_REFRESH_TOKEN_TTL_DAYS', '30'))
 
+# Session configuration for web authentication
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Session expires after 8 hours
+
+# WTF CSRF settings
+app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour token validity
+app.config['WTF_CSRF_CHECK_DEFAULT'] = False  # We'll selectively protect routes
 
 db.init_app(app)
 migrate = Migrate(app, db)
+
+# ==========================================
+# FLASK-LOGIN SETUP
+# ==========================================
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'home'  # Redirect to login page (the '/' route)
+login_manager.login_message = 'Please log in to access this page.'
+login_manager.session_protection = 'strong'  # Regenerate session on IP/UA change
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    """Flask-Login user loader callback."""
+    return db.session.get(UserMaster, user_id)
+
+
+@login_manager.unauthorized_handler
+def unauthorized_api():
+    """Return JSON 401 for API requests, redirect for page requests."""
+    if request.path.startswith('/api/'):
+        return jsonify({"error": "Authentication required"}), 401
+    return redirect(url_for('home'))
+
+
+# Make UserMaster compatible with Flask-Login
+UserMaster.is_authenticated = property(lambda self: True)
+UserMaster.is_anonymous = property(lambda self: False)
+UserMaster.get_id = lambda self: str(self.user_id)
+
+
+# ==========================================
+# CSRF PROTECTION
+# ==========================================
+csrf = CSRFProtect(app)
+
+# Exempt API endpoints that use token auth (mobile) or handle CSRF differently
+CSRF_EXEMPT_ENDPOINTS = [
+    'login',  # Web login endpoint
+    'api_v1_auth_login',
+    'api_v1_auth_refresh',
+    'api_v1_me',
+    'api_v1_student_dashboard',
+    'api_v1_parent_dashboard',
+    'api_v1_notifications',
+    'api_v1_notification_read',
+    'api_v1_test_push',
+    'api_v1_devices_register',
+]
+
+@app.before_request
+def csrf_protect_selectively():
+    """Apply CSRF protection to non-exempt POST/PUT/DELETE requests."""
+    if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
+        if request.endpoint in CSRF_EXEMPT_ENDPOINTS:
+            return  # Skip CSRF for mobile API
+        # For API routes using Bearer token, skip CSRF
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.lower().startswith('bearer '):
+            return
+        # Skip CSRF for authenticated API requests (session-protected)
+        # This is safe because session cookies have SameSite=Lax protection
+        if request.path.startswith('/api/') and current_user.is_authenticated:
+            return
+        if auth_header.lower().startswith('bearer '):
+            return
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    """Handle CSRF validation failures."""
+    app.logger.warning(f"CSRF validation failed: {e.description}")
+    return jsonify({"error": "Session expired. Please refresh and try again."}), 403
+
+
+# ==========================================
+# RATE LIMITING
+# ==========================================
+# Use Redis in production for distributed rate limiting across workers
+_rate_limit_storage = os.environ.get('RATE_LIMIT_STORAGE_URI', 'memory://')
+if os.environ.get('FLASK_ENV') == 'production' and _rate_limit_storage == 'memory://':
+    logging.warning("⚠️  RATE_LIMIT_STORAGE_URI not set in production. Using in-memory storage (not shared across workers).")
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["200 per minute"],  # Global default
+    storage_uri=_rate_limit_storage,  # Set RATE_LIMIT_STORAGE_URI=redis://redis:6379 in prod
+)
+
+
+# ==========================================
+# AUTH DECORATORS
+# ==========================================
+def require_roles(*allowed_roles):
+    """Decorator to require specific user roles for an endpoint.
+    
+    Usage:
+        @app.route('/admin/...')
+        @require_roles('Admin')
+        def admin_only_route():
+            ...
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not current_user.is_authenticated:
+                return jsonify({"error": "Authentication required"}), 401
+            user_role = (current_user.user_type or '').capitalize()
+            if user_role not in allowed_roles:
+                app.logger.warning(f"Access denied: {current_user.user_id} ({user_role}) tried to access {request.endpoint}")
+                return jsonify({"error": "Access denied"}), 403
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
+def require_auth(f):
+    """Decorator requiring any authenticated user (web session)."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({"error": "Authentication required"}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 PRESENT_STATUSES = ['Present', 'OnDuty', 'OD', 'ML', 'CL']
 FIXED_DEPT_NAME = os.environ.get('APP_DEPARTMENT_NAME', 'Department of Information Technology')
@@ -306,6 +457,29 @@ def send_notification(user_id, title, message, type='info', link=None):
 # ==========================================
 # MOBILE: AUTH HELPERS (NEW)
 # ==========================================
+def _require_role(*allowed_roles):
+    """Check if request comes from an authenticated user with one of allowed_roles.
+    
+    Uses Flask session for web authentication. Validates that the user is logged in
+    via session and has one of the allowed roles.
+    Returns (user, error_response). If error_response is not None, return it immediately.
+    """
+    user_id = session.get('user_id')
+    if not user_id:
+        return None, (jsonify({"error": "Unauthorized"}), 401)
+    
+    user = db.session.get(UserMaster, user_id)
+    if not user or not user.is_active:
+        # Clear invalid session
+        session.clear()
+        return None, (jsonify({"error": "Unauthorized"}), 401)
+    
+    if allowed_roles and user.user_type not in allowed_roles:
+        return None, (jsonify({"error": "Forbidden"}), 403)
+    
+    return user, None
+
+
 def _mobile_access_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='ams-mobile-access-v1')
 
@@ -1044,22 +1218,29 @@ def get_students_by_section():
 # API: AUTHENTICATION
 # ==========================================
 @app.route('/api/login', methods=['POST'])
+@limiter.limit("10 per minute")  # Prevent brute force
+@csrf.exempt  # Login form handles this differently
 def login():
     data = request.get_json(silent=True) or {}
     username = (data.get('username') or '').strip()  # This could be Email OR Employee Code
     password = data.get('password')
+    
+    app.logger.info(f"Login attempt for username: {username}")
 
     if not username or not password:
+        app.logger.warning(f"Login failed: missing credentials for {username}")
         return jsonify({"error": "username and password are required"}), 400
 
     try:
         # 1. Try finding by Username (Email/Phone) - Case Insensitive
         user = UserMaster.query.filter(UserMaster.username.ilike(username)).first()
+        app.logger.info(f"User lookup by username: {'found' if user else 'not found'}")
         
         # 2. If not found, try finding by Employee Code (Staff)
         if not user:
             staff = StaffProfile.query.filter(StaffProfile.employee_code.ilike(username)).first()
             if staff:
+                app.logger.info(f"Staff found by employee_code: {staff.staff_id}")
                 # If Staff found, get their User account (staff_id maps to user_id)
                 user = db.session.get(UserMaster, staff.staff_id)
         
@@ -1067,10 +1248,16 @@ def login():
         if not user:
             student = StudentProfile.query.filter(StudentProfile.admission_number.ilike(username)).first()
             if student:
+                app.logger.info(f"Student found by admission_number: {student.student_id}")
                 user = db.session.get(UserMaster, student.student_id)
 
         # 4. Verify Password
-        if not user or not check_password_hash(user.password_hash, password):
+        if not user:
+            app.logger.warning(f"Login failed: user not found for {username}")
+            return jsonify({"error": "Invalid credentials"}), 401
+            
+        if not check_password_hash(user.password_hash, password):
+            app.logger.warning(f"Login failed: invalid password for {username}")
             return jsonify({"error": "Invalid credentials"}), 401
             
         if not user.is_active:
@@ -1082,6 +1269,13 @@ def login():
         if role == 'Staff' and not StaffProfile.query.filter_by(staff_id=user.user_id).first():
              db.session.delete(user); db.session.commit()
              return jsonify({"error": "Corrupted Account. Please contact Admin."}), 403
+        
+        # *** SECURITY: Check if password change is required ***
+        must_change = getattr(user, 'must_change_password', False)
+        
+        # *** SECURITY FIX: Use Flask-Login session-based auth ***
+        login_user(user, remember=False)
+        session.permanent = True  # Use PERMANENT_SESSION_LIFETIME
              
         redirect_map = { 
             'Student': '/student/dashboard', 
@@ -1090,11 +1284,20 @@ def login():
             'Admin': '/admin/dashboard' 
         }
         
+        # Store user info in session for secure authentication
+        session['user_id'] = user.user_id
+        session['user_type'] = role
+        session.permanent = True
+        
+        # If user must change password, redirect to password change page
+        redirect_url = '/change-password' if must_change else redirect_map.get(role, '/')
+        
         return jsonify({
             "message": "Success", 
             "user_id": user.user_id, 
             "role": role, 
-            "redirect_url": redirect_map.get(role, '/')
+            "redirect_url": redirect_url,
+            "must_change_password": must_change
         }), 200
     except Exception:
         app.logger.exception("/api/login failed")
@@ -1102,9 +1305,102 @@ def login():
 
 
 # ==========================================
+# API: LOGOUT
+# ==========================================
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    """Log out the current user and clear session."""
+    logout_user()
+    session.clear()
+    return jsonify({"message": "Logged out successfully"}), 200
+
+
+# ==========================================
+# API: PASSWORD CHANGE
+# ==========================================
+@app.route('/change-password')
+@login_required
+def render_change_password():
+    """Render password change page."""
+    return render_template('change_password.html')
+
+
+@app.route('/api/change-password', methods=['POST'])
+@login_required
+@limiter.limit("5 per minute")
+def api_change_password():
+    """Change current user's password."""
+    data = request.get_json(silent=True) or {}
+    current_password = data.get('current_password', '')
+    new_password = data.get('new_password', '')
+    confirm_password = data.get('confirm_password', '')
+    
+    if not current_password or not new_password:
+        return jsonify({"error": "Current and new password are required"}), 400
+    
+    if new_password != confirm_password:
+        return jsonify({"error": "New passwords do not match"}), 400
+    
+    if len(new_password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    
+    # Verify current password
+    if not check_password_hash(current_user.password_hash, current_password):
+        return jsonify({"error": "Current password is incorrect"}), 401
+    
+    # Update password
+    current_user.password_hash = generate_password_hash(new_password)
+    current_user.must_change_password = False
+    db.session.commit()
+    
+    # Determine redirect based on role
+    role = (current_user.user_type or '').capitalize()
+    redirect_map = { 
+        'Student': '/student/dashboard', 
+        'Staff': '/staff/dashboard', 
+        'Parent': '/parent/dashboard', 
+        'Admin': '/admin/dashboard' 
+    }
+    
+    return jsonify({
+        "message": "Password changed successfully",
+        "redirect_url": redirect_map.get(role, '/')
+    }), 200
+
+
+@app.route('/api/me', methods=['GET'])
+@login_required
+def api_me():
+    """Return the current user's basic info for frontend session validation."""
+    role = (current_user.user_type or '').capitalize()
+    
+    # Get display name
+    name = ''
+    if role == 'Student':
+        student = StudentProfile.query.filter_by(student_id=current_user.user_id).first()
+        name = student.full_name if student else current_user.user_id
+    elif role == 'Staff':
+        staff = StaffProfile.query.filter_by(staff_id=current_user.user_id).first()
+        name = staff.full_name if staff else current_user.user_id
+    elif role == 'Parent':
+        name = current_user.user_id  # Parent doesn't have a separate name table
+    else:
+        name = current_user.user_id
+    
+    return jsonify({
+        "user_id": current_user.user_id,
+        "role": role,
+        "name": name,
+        "must_change_password": current_user.must_change_password or False
+    }), 200
+
+
+# ==========================================
 # MOBILE API v1: AUTH + PROFILE (NEW)
 # ==========================================
 @app.route('/api/v1/auth/login', methods=['POST'])
+@limiter.limit("10 per minute")  # Prevent brute force on mobile too
+@csrf.exempt
 def api_v1_auth_login():
     data = request.json or {}
     username = (data.get('username') or '').strip()
@@ -1119,6 +1415,9 @@ def api_v1_auth_login():
         return jsonify({"error": "Invalid credentials"}), 401
     if not user.is_active:
         return jsonify({"error": "Account Deactivated."}), 403
+    
+    # Check for forced password change (mobile can handle this differently)
+    must_change = getattr(user, 'must_change_password', False)
 
     role = (user.user_type or '').lower()
     access_token = _issue_access_token(user)
@@ -1129,6 +1428,7 @@ def api_v1_auth_login():
         "expires_in": app.config['MOBILE_ACCESS_TOKEN_TTL_SECONDS'],
         "refresh_token": refresh_token,
         "token_type": "Bearer",
+        "must_change_password": must_change,
         "user": {
             "user_id": user.user_id,
             "role": role,
@@ -1644,6 +1944,7 @@ def api_v1_parent_child_results(child_id: str):
 # In app.py
 
 @app.route('/api/staff/dashboard', methods=['GET'])
+@login_required
 def staff_dashboard():
     try:
         user_id = request.args.get('user_id')
@@ -2112,6 +2413,7 @@ def staff_dashboard():
 
 
 @app.route('/api/staff/find_adjustment_faculty', methods=['GET'])
+@login_required
 def api_staff_find_adjustment_faculty():
     """Discovery phase for mutual swap system.
 
@@ -2245,6 +2547,7 @@ def api_staff_find_adjustment_faculty():
 
 
 @app.route('/api/staff/submit_adjustment', methods=['POST'])
+@login_required
 def api_staff_submit_adjustment():
     try:
         data = request.get_json(force=True) or {}
@@ -2325,6 +2628,7 @@ def api_staff_submit_adjustment():
 
 
 @app.route('/api/staff/respond_adjustment', methods=['POST'])
+@login_required
 def api_staff_respond_adjustment():
     try:
         data = request.get_json(force=True) or {}
@@ -2355,6 +2659,7 @@ def api_staff_respond_adjustment():
 # ==========================================
 
 @app.route('/api/student/leaves', methods=['GET'])
+@login_required
 def get_student_leaves():
     try:
         user_id = request.args.get('user_id')
@@ -2412,6 +2717,7 @@ def get_student_leaves():
 
 
 @app.route('/api/leave/apply', methods=['POST'])
+@login_required
 def apply_leave():
     try:
         data = request.json
@@ -2483,6 +2789,7 @@ def render_hod_dashboard():
     return render_template('hod_dashboard.html')
 
 @app.route('/api/hod/dashboard', methods=['GET'])
+@login_required
 def get_hod_stats():
     try:
         user_id = request.args.get('user_id')
@@ -2700,6 +3007,7 @@ def get_hod_stats():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/hod/faculty_roles', methods=['GET'])
+@login_required
 def get_hod_faculty_roles():
     try:
         user_id = request.args.get('user_id')
@@ -2748,6 +3056,7 @@ def get_hod_faculty_roles():
 
 
 @app.route('/api/hod/student_hierarchy', methods=['GET'])
+@login_required
 def get_hod_student_hierarchy():
     try:
         # Fetch all sections
@@ -2772,6 +3081,7 @@ def get_hod_student_hierarchy():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/hod/approve_leave', methods=['POST'])
+@login_required
 def hod_approve_leave():
     try:
         data = request.json
@@ -2801,6 +3111,8 @@ def hod_approve_leave():
 
 
 @app.route('/api/admin/assign_hod', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def assign_hod():
     try:
         data = request.json
@@ -2823,6 +3135,7 @@ def assign_hod():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/class_teacher/analytics', methods=['GET'])
+@login_required
 def get_class_analytics():
     try:
         user_id = request.args.get('user_id')
@@ -2901,6 +3214,7 @@ def is_student_in_batch(student, batch_name):
 
 
 @app.route('/api/class_teacher/subject_report', methods=['GET'])
+@login_required
 def get_subject_report():
     try:
         user_id = request.args.get('user_id')
@@ -3016,6 +3330,7 @@ def get_subject_report():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/class_teacher/overall_summary', methods=['GET'])
+@login_required
 def get_class_overall_summary():
     try:
         user_id = request.args.get('user_id')
@@ -3062,6 +3377,7 @@ def get_class_overall_summary():
 # API: ATTENDANCE SHEET & SUBMIT (SMART)
 # ==========================================
 @app.route('/api/attendance/sheet', methods=['GET'])
+@login_required
 def get_attendance_sheet():
     try:
         schedule_id = request.args.get('schedule_id')
@@ -3177,6 +3493,7 @@ def get_attendance_sheet():
 
 
 @app.route('/api/attendance/submit', methods=['POST'])
+@login_required
 def submit_attendance():
     try:
         data = request.json
@@ -3238,6 +3555,7 @@ def submit_attendance():
 
 
 @app.route('/api/staff/session_history', methods=['GET'])
+@login_required
 def get_full_session_history():
     try:
         user_id = request.args.get('user_id')
@@ -3279,6 +3597,7 @@ def get_full_session_history():
 # API: LEAVE & STUDENT
 # ==========================================
 @app.route('/api/staff/leave_requests', methods=['GET'])
+@login_required
 def get_staff_leave_requests():
     user_id = request.args.get('user_id')
     class_managed = ClassSection.query.filter_by(class_teacher_id=user_id).first()
@@ -3293,6 +3612,7 @@ def get_staff_leave_requests():
     return jsonify({"requests": pending_leaves})
 
 @app.route('/api/staff/leave_action', methods=['POST'])
+@login_required
 def staff_leave_action():
     try:
         data = request.json
@@ -3309,6 +3629,7 @@ def staff_leave_action():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/student/dashboard', methods=['GET'])
+@login_required
 def student_dashboard():
     try:
         user_id = request.args.get('user_id')
@@ -3556,6 +3877,7 @@ def render_detention_assign():
 
 
 @app.route('/api/detention/assign', methods=['POST'])
+@login_required
 def assign_detention():
     try:
         data = request.json
@@ -3670,6 +3992,7 @@ def assign_detention():
 from datetime import timedelta # Ensure this is imported
 
 @app.route('/api/detention/watchlist', methods=['GET'])
+@login_required
 def get_defaulter_watchlist():
     try:
         user_id = request.args.get('user_id')
@@ -3793,6 +4116,7 @@ def render_parent_dashboard():
 # In app.py
 
 @app.route('/api/parent/dashboard', methods=['GET'])
+@login_required
 def parent_dashboard():
     try:
         user_id = request.args.get('user_id')
@@ -3963,6 +4287,7 @@ def update_mentor_log_status():
 # ==========================================
 
 @app.route('/api/detention/my_detentions', methods=['GET'])
+@login_required
 def get_my_detentions():
     try:
         user_id = request.args.get('user_id')
@@ -3990,6 +4315,7 @@ def get_my_detentions():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/detention/submit_task', methods=['POST'])
+@login_required
 def submit_detention_task():
     try:
         data = request.json
@@ -4016,6 +4342,7 @@ def render_detention_review():
 # In app.py
 
 @app.route('/api/detention/review_list', methods=['GET'])
+@login_required
 def get_detention_review_list():
     try:
         staff_id = request.args.get('user_id')
@@ -4051,6 +4378,7 @@ def get_detention_review_list():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/detention/release', methods=['POST'])
+@login_required
 def release_detention():
     try:
         data = request.json
@@ -4067,9 +4395,11 @@ def release_detention():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# API: ADMIN APIs
+# API: ADMIN APIs (Protected)
 # ==========================================
 @app.route('/api/admin/dashboard', methods=['GET'])
+@login_required
+@require_roles('Admin')
 def get_admin_stats():
     try:
         today = date.today()
@@ -4117,6 +4447,8 @@ def get_admin_stats():
         })
     except Exception as e: return jsonify({"error": str(e)}), 500
 @app.route('/api/admin/classes', methods=['GET'])
+@login_required
+@require_roles('Admin')
 def get_admin_classes():
     try:
         classes = db.session.query(ClassSection, StaffProfile).outerjoin(StaffProfile, ClassSection.class_teacher_id == StaffProfile.staff_id).all()
@@ -4126,10 +4458,15 @@ def get_admin_classes():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/assign_teacher', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def assign_class_teacher():
     try:
         data = request.json
-        section = ClassSection.query.get(data.get('section_id'))
+        section_id = data.get('section_id') if data else None
+        if section_id is None:
+            return jsonify({"error": "section_id is required"}), 400
+        section = db.session.get(ClassSection, section_id)
         if not section: return jsonify({"error": "Class not found"}), 404
         section.class_teacher_id = data.get('staff_id')
         db.session.commit()
@@ -4138,6 +4475,8 @@ def assign_class_teacher():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/coordinators', methods=['GET'])
+@login_required
+@require_roles('Admin')
 def get_all_staff_coordinators():
     try:
         staff_list = (db.session.query(StaffProfile, Department).outerjoin(Department, StaffProfile.primary_department_id == Department.dept_id).all())
@@ -4148,11 +4487,16 @@ def get_all_staff_coordinators():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/toggle_role', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def toggle_staff_role():
     try:
         data = request.json
-        staff = StaffProfile.query.get(data.get('staff_id'))
-        role = data.get('role_type')
+        staff_id = data.get('staff_id') if data else None
+        if staff_id is None:
+            return jsonify({"error": "staff_id is required"}), 400
+        staff = db.session.get(StaffProfile, staff_id)
+        role = data.get('role_type') if data else None
         if not staff: return jsonify({"error": "Staff not found"}), 404
         
         if role == 'event': staff.is_event_coordinator = not staff.is_event_coordinator
@@ -4168,6 +4512,8 @@ def toggle_staff_role():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/faculty_list', methods=['GET'])
+@login_required
+@require_roles('Admin')
 def get_admin_faculty_list():
     try:
         data = (db.session.query(StaffProfile, UserMaster, Department)
@@ -4207,6 +4553,8 @@ def get_admin_faculty_list():
 
 
 @app.route('/api/admin/archive_stats', methods=['GET'])
+@login_required
+@require_roles('Admin')
 def get_archive_stats():
     try:
         year_str = request.args.get('year') 
@@ -4436,6 +4784,8 @@ def get_hod_archive_stats():
 
 
 @app.route('/api/admin/archived_terms', methods=['GET'])
+@login_required
+@require_roles('Admin')
 def api_admin_archived_terms():
     """List available archived academic years and semesters.
 
@@ -4491,6 +4841,8 @@ def api_admin_archived_terms():
 
 
 @app.route('/api/admin/archived_data', methods=['GET'])
+@login_required
+@require_roles('Admin')
 def api_admin_archived_data():
     """Fetch archived allocations and schedule filtered by academic year and semester.
 
@@ -4587,6 +4939,8 @@ def api_admin_archived_data():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/revoke_hod', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def revoke_hod():
     try:
         data = request.json
@@ -4609,6 +4963,8 @@ def revoke_hod():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/add_faculty', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def add_single_faculty():
     try:
         data = request.json
@@ -4636,18 +4992,24 @@ def add_single_faculty():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/archive_faculty', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def archive_faculty():
     try:
         data = request.json
-        user = UserMaster.query.get(data.get('user_id'))
-        staff = StaffProfile.query.get(data.get('user_id'))
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+        user = db.session.get(UserMaster, user_id)
+        staff = db.session.get(StaffProfile, user_id)
         if not user: return jsonify({"error": "User not found"}), 404
         user.is_active = (data.get('action') == 'activate')
         if data.get('action') == 'archive':
             classes = ClassSection.query.filter_by(class_teacher_id=user.user_id).all()
             for cls in classes: cls.class_teacher_id = None
         db.session.commit()
-        log_activity("Faculty Status", f"{data.get('action').title()}d {staff.full_name}")
+        staff_name = staff.full_name if staff else data.get('user_id')
+        log_activity("Faculty Status", f"{data.get('action').title()}d {staff_name}")
         return jsonify({"message": "Updated"}), 200
     except Exception as e: return jsonify({"error": str(e)}), 500
 
@@ -4781,6 +5143,8 @@ def is_resource_free(day, start_str, end_str, teacher_id, section_id, batch=None
 
 # --- 3. MAIN GENERATOR ---
 @app.route('/api/admin/generate_timetable', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def generate_timetable():
     try:
         # 1. Clear Old Schedule
@@ -6932,9 +7296,11 @@ def mark_notification_read():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# UPLOAD APIs
+# UPLOAD APIs (Admin Only - Protected)
 # ==========================================
 @app.route('/api/upload/master_dept_subject', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def upload_dept_subject():
     try:
         file = get_db_file_handle(request); df = pd.read_csv(file, dtype=str)
@@ -6949,9 +7315,13 @@ def upload_dept_subject():
         db.session.commit()
         log_activity("Bulk Import", "Uploaded Departments & Subjects")
         return jsonify({"message": "Uploaded"}), 201
-    except Exception as e: return jsonify({"error": str(e)}), 400
+    except Exception:
+        app.logger.exception("upload_dept_subject failed")
+        return jsonify({"error": "Upload failed. Check file format."}), 400
 
 @app.route('/api/upload/master_class', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def upload_classes():
     try:
         file = get_db_file_handle(request); df = pd.read_csv(file, dtype=str)
@@ -6962,10 +7332,14 @@ def upload_classes():
         db.session.commit()
         log_activity("Bulk Import", f"Created {count} Class Sections")
         return jsonify({"message": f"{count} created"}), 201
-    except Exception as e: return jsonify({"error": str(e)}), 400
+    except Exception:
+        app.logger.exception("upload_classes failed")
+        return jsonify({"error": "Upload failed. Check file format."}), 400
 
 
 @app.route('/api/upload/semester_course_structure', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def upload_semester_course_structure():
     """Upload semester course structure independent of faculty allocation.
 
@@ -7116,6 +7490,8 @@ def upload_semester_course_structure():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/upload/rooms', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def upload_rooms():
     try:
         file = get_db_file_handle(request)
@@ -7150,25 +7526,34 @@ def upload_rooms():
         log_activity("Bulk Import", f"Added {success} rooms to Infrastructure")
         return jsonify({"message": f"Infrastructure updated: {success} rooms added."}), 201
 
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception:
+        app.logger.exception("upload_rooms failed")
+        return jsonify({"error": "Upload failed. Check file format."}), 500
 
 
 @app.route('/api/upload/staff', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def upload_staff():
     try:
         file = get_db_file_handle(request); df = pd.read_csv(file)
         count = 0
+        created_accounts = []  # Track for admin to see temp passwords
         for _, row in df.iterrows():
             if UserMaster.query.filter_by(username=row['Email']).first(): continue
             
             new_uuid = str(uuid.uuid4())
+            # Default password - users must change on first login
+            default_password = 'Staff@123'
+            
             # Create Login
             db.session.add(UserMaster(
                 user_id=new_uuid, 
                 username=row['Email'], 
-                password_hash=generate_password_hash("Staff@123"), 
+                password_hash=generate_password_hash(default_password), 
                 user_type=row.get('Role', 'Staff'), 
-                is_active=True
+                is_active=True,
+                must_change_password=True  # Force password change on first login
             ))
             
             # Handle Dept
@@ -7190,20 +7575,31 @@ def upload_staff():
                 primary_department_id=dept.dept_id,
                 designation=desig # <--- SAVING HERE
             ))
+            created_accounts.append({"email": row['Email'], "temp_password": default_password})
             count += 1
             
         db.session.commit()
         log_activity("Bulk Import", f"Onboarded {count} Staff Members")
-        return jsonify({"message": "Staff uploaded"}), 201
-    except Exception as e: return jsonify({"error": str(e)}), 400
+        # Return info about default password
+        return jsonify({
+            "message": f"Staff uploaded: {count} accounts created",
+            "default_password": "Staff@123",
+            "note": "All staff accounts use default password 'Staff@123'. Users must change password on first login."
+        }), 201
+    except Exception:
+        app.logger.exception("upload_staff failed")
+        return jsonify({"error": "Upload failed. Check file format."}), 400
 
 @app.route('/api/upload/students', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def upload_students():
     try:
         file = get_db_file_handle(request)
         df = pd.read_csv(file, dtype=str).fillna('')
         
         count = 0
+        created_accounts = []  # Track for admin
         # Local cache to handle siblings in the same CSV efficiently
         # Format: { 'phone_number': 'user_id_uuid' }
         processed_parents = {} 
@@ -7224,14 +7620,16 @@ def upload_students():
                     parent_uuid = existing_parent.user_id
                     processed_parents[parent_phone] = parent_uuid
                 else:
-                    # Create New Parent User
+                    # Create New Parent User with default password
                     parent_uuid = str(uuid.uuid4())
+                    parent_default_pwd = 'Parent@123'
                     db.session.add(UserMaster(
                         user_id=parent_uuid, 
                         username=parent_phone, 
-                        password_hash=generate_password_hash("Parent@123"), 
+                        password_hash=generate_password_hash(parent_default_pwd), 
                         user_type='Parent', 
-                        is_active=True
+                        is_active=True,
+                        must_change_password=True  # Force password change on first login
                     ))
                     db.session.flush() # CRITICAL: Create Parent User immediately
 
@@ -7245,6 +7643,7 @@ def upload_students():
                     db.session.flush() # Ensure Profile is ready
                     
                     processed_parents[parent_phone] = parent_uuid
+                    created_accounts.append({"type": "parent", "username": parent_phone, "password": "Parent@123"})
 
             # 2. Create Student
             if not StudentProfile.query.filter_by(admission_number=str(row['Admission Number'])).first():
@@ -7254,13 +7653,18 @@ def upload_students():
                 
                 section = ClassSection.query.filter_by(class_level=c_level, name=c_sec).first()
                 
+                # Default password - students must change on first login
+                student_default_pwd = 'Student@123'
+                student_email = row['Student Email'] or f"{row['Admission Number']}@school.mituniversity.edu.in"
+                
                 # A. Create Student Login
                 db.session.add(UserMaster(
                     user_id=student_uuid, 
-                    username=row['Student Email'] or f"{row['Admission Number']}@school.mituniversity.edu.in", 
-                    password_hash=generate_password_hash("Student@123"), 
+                    username=student_email, 
+                    password_hash=generate_password_hash(student_default_pwd), 
                     user_type='Student', 
-                    is_active=True
+                    is_active=True,
+                    must_change_password=True  # Force password change on first login
                 ))
                 
                 # --- FIX: Force DB to recognize UserMaster BEFORE creating Profile ---
@@ -7276,17 +7680,26 @@ def upload_students():
                     current_section_id=section.section_id if section else None,
                     batch=str(row['Batch']).strip() if 'Batch' in row else None
                 ))
+                created_accounts.append({"type": "student", "username": student_email, "password": "Student@123"})
                 count += 1
         
         db.session.commit()
         log_activity("Bulk Import", f"Enrolled {count} Students")
-        return jsonify({"message": f"Successfully enrolled {count} students."}), 201
+        return jsonify({
+            "message": f"Successfully enrolled {count} students.",
+            "default_passwords": {"student": "Student@123", "parent": "Parent@123"},
+            "note": "All accounts use default passwords. Users must change password on first login.",
+            "note": "Distribute these temporary passwords securely. Users should change passwords on first login."
+        }), 201
 
-    except Exception as e:
+    except Exception:
         db.session.rollback() # Important: Rollback if anything fails
-        return jsonify({"error": str(e)}), 500
+        app.logger.exception("upload_students failed")
+        return jsonify({"error": "Upload failed. Check file format."}), 500
 
 @app.route('/api/upload/schedule', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def upload_schedule():
     try:
         file = get_db_file_handle(request)
@@ -7348,11 +7761,14 @@ def upload_schedule():
         db.session.commit()
         log_activity("Bulk Import", f"Uploaded Weekly Schedule ({success} slots).")
         return jsonify({"message": f"{success} slots created", "errors": errors}), 201
-    except Exception as e: 
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        app.logger.exception("upload_schedule failed")
+        return jsonify({"error": "Upload failed. Check file format."}), 500
     
 
 @app.route('/api/upload/assign_class_teachers', methods=['POST'])
+@login_required
+@require_roles('Admin')
 def upload_class_teachers():
     try:
         file = get_db_file_handle(request); df = pd.read_csv(file, dtype=str)
@@ -7366,7 +7782,9 @@ def upload_class_teachers():
         db.session.commit()
         log_activity("Role Update", f"Bulk Assigned {success} Class Teachers")
         return jsonify({"message": f"{success} assigned"}), 201
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception:
+        app.logger.exception("upload_class_teachers failed")
+        return jsonify({"error": "Upload failed. Check file format."}), 500
 
 
 
@@ -7383,6 +7801,8 @@ def upload_class_teachers():
 # ==========================================
 
 @app.route('/api/mentor/schedule_meeting', methods=['POST'])
+@login_required
+@require_roles('Staff', 'Admin')
 def schedule_mentor_meeting():
     try:
         data = request.json
@@ -7414,9 +7834,13 @@ def schedule_mentor_meeting():
         db.session.commit()
         
         return jsonify({"message": "Meeting scheduled successfully."}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception:
+        app.logger.exception("schedule_mentor_meeting failed")
+        return jsonify({"error": "Failed to schedule meeting."}), 500
 
 @app.route('/api/mentor/get_meetings', methods=['GET'])
+@login_required
+@require_roles('Staff', 'Admin')
 def get_mentor_meetings():
     try:
         batch_id = request.args.get('batch_id')
@@ -7434,7 +7858,9 @@ def get_mentor_meetings():
             })
             
         return jsonify({"meetings": meeting_list, "count": len(meetings)})
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception:
+        app.logger.exception("get_mentor_meetings failed")
+        return jsonify({"error": "Failed to fetch meetings."}), 500
 
 
 @app.route('/api/mentor/get_logs', methods=['GET'])

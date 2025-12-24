@@ -221,7 +221,8 @@
 
     <script>
         lucide.createIcons();
-        const userId = sessionStorage.getItem('user_id');
+        // SECURITY: userId is fetched from server session, not sessionStorage
+        let userId = null;
         let logData = [];
         let subjectData = [];
         let attChart = null;
@@ -262,7 +263,16 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
-            if (!userId) { window.location.replace('/'); return; }
+            // SECURITY: Validate session with server before loading dashboard
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                if (meData.role !== 'Parent') { window.location.replace('/'); return; }
+                userId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+            
             try {
                 loadCurrentTermPill();
                 const response = await fetch(`/api/parent/dashboard?user_id=${userId}`);
@@ -397,7 +407,11 @@
         }
         function openLogModal() { document.getElementById('log-nudge').classList.add('hidden'); localStorage.setItem(`counseling_seen_${userId}`, logData.length); document.getElementById('log-modal').classList.remove('hidden'); const container = document.getElementById('log-content'); if (!logData.length) { container.innerHTML = `<p class="text-center text-slate-400 mt-10 text-sm">No counseling records.</p>`; return; } container.innerHTML = logData.map(l => `<div class="relative pl-6 pb-6 border-l border-slate-200 last:border-0"><div class="absolute -left-1.5 top-0 w-3 h-3 rounded-full border-2 border-white ${l.status==='Resolved'?'bg-green-500':'bg-blue-500'}"></div><div class="bg-slate-50 p-3 rounded-lg border border-slate-100"><div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-slate-400 uppercase">${l.date}</span><span class="text-[9px] px-1.5 py-0.5 rounded font-bold bg-white border border-slate-200">${l.status}</span></div><p class="text-xs text-slate-700 mb-1">${l.remarks}</p><p class="text-[10px] text-slate-400">Category: ${l.category}</p></div></div>`).join(''); }
         
-        function logout() { sessionStorage.removeItem('user_id'); window.location.replace('/'); }
+        async function logout() { 
+            try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } 
+            catch (e) { /* ignore */ } 
+            window.location.replace('/'); 
+        }
     </script>
 </body>
 </html>

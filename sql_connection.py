@@ -19,7 +19,34 @@ def get_db_uri(app):
     db_url = os.environ.get('DATABASE_URL')
     if db_url:
         return db_url
-    return 'sqlite:///school_system.db'
+
+    pg_user = os.environ.get('POSTGRES_USER', 'admin')
+    pg_password = os.environ.get('POSTGRES_PASSWORD')
+    pg_db = os.environ.get('POSTGRES_DB', 'school_system')
+    pg_host = os.environ.get('POSTGRES_HOST', 'db')
+    pg_port_raw = os.environ.get('POSTGRES_PORT', '5432')
+
+    if pg_password is not None:
+        try:
+            pg_port = int(pg_port_raw)
+        except Exception:
+            pg_port = 5432
+
+        url = URL.create(
+            drivername='postgresql+psycopg2',
+            username=pg_user,
+            password=pg_password,
+            host=pg_host,
+            port=pg_port,
+            database=pg_db,
+        )
+        return url.render_as_string(hide_password=False)
+
+    # PostgreSQL is required - raise error if not configured
+    raise RuntimeError(
+        "PostgreSQL environment variables not configured. "
+        "Please set POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB."
+    )
 
 
 # ==========================================
@@ -33,6 +60,8 @@ class UserMaster(db.Model):
     user_type = db.Column(db.String(20), nullable=False) # 'Staff', 'Student', 'Parent', 'Admin'
     two_factor_secret = db.Column(db.String(100), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    # Security: Force password change on first login for bulk-uploaded accounts
+    must_change_password = db.Column(db.Boolean, default=False)
 
 # ==========================================
 # 2. PROFILES
