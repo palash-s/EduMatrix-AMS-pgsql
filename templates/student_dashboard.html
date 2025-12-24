@@ -163,7 +163,8 @@
 
     <script>
         lucide.createIcons();
-        const userId = sessionStorage.getItem('user_id');
+        // SECURITY: userId is fetched from server session, not sessionStorage
+        let userId = null;
         let detentionData = null;
         const AUTO_REFRESH_MS = 30000;
 
@@ -206,7 +207,16 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
-            if (!userId) { window.location.href = '/'; return; }
+            // SECURITY: Validate session with server before loading dashboard
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                if (meData.role !== 'Student') { window.location.replace('/'); return; }
+                userId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+            
             try {
                 loadCurrentTermHeader();
                 const response = await fetch(`/api/student/dashboard?user_id=${userId}`);
@@ -524,7 +534,11 @@
                 showToast("Error", "error");
             }
         }
-        function logout() { sessionStorage.removeItem('user_id'); window.location.replace('/'); }
+        async function logout() { 
+            try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } 
+            catch (e) { /* ignore */ } 
+            window.location.replace('/'); 
+        }
     </script>
 </body>
 </html>

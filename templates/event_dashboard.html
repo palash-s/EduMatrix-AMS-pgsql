@@ -164,7 +164,7 @@
 
     <script>
         lucide.createIcons();
-        const userId = sessionStorage.getItem('user_id');
+        let userId = null;
         let currentEventId = null;
         let currentClassList = [];
         const AUTO_REFRESH_MS = 30000;
@@ -185,8 +185,16 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            if (!userId) { window.location.href = '/'; return; }
+        document.addEventListener('DOMContentLoaded', async () => {
+            // SECURITY: Validate session with server before loading
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                userId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+
             loadEvents();
             loadClasses(); // Pre-load class list for modal
             // Auto-refresh is disabled globally.

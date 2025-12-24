@@ -43,7 +43,11 @@ def get_db_uri(app):
         )
         return url.render_as_string(hide_password=False)
 
-    return 'sqlite:///school_system.db'
+    # PostgreSQL is required - raise error if not configured
+    raise RuntimeError(
+        "PostgreSQL environment variables not configured. "
+        "Please set POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB."
+    )
 
 
 # ==========================================
@@ -57,6 +61,8 @@ class UserMaster(db.Model):
     user_type = db.Column(db.String(20), nullable=False) # 'Staff', 'Student', 'Parent', 'Admin'
     two_factor_secret = db.Column(db.String(100), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    # Security: Force password change on first login for bulk-uploaded accounts
+    must_change_password = db.Column(db.Boolean, default=False)
 
 # ==========================================
 # 2. PROFILES
