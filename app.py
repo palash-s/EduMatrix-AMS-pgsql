@@ -56,7 +56,8 @@ if not _secret_key:
 app.config['SECRET_KEY'] = _secret_key
 
 # Session security settings
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # HTTPS only in prod
+# Set SESSION_COOKIE_SECURE via env var - only enable when HTTPS is configured
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JS access to session cookie
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Session timeout
