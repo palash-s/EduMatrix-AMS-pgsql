@@ -4452,37 +4452,28 @@ def get_admin_stats():
 @login_required
 @require_roles('Admin')
 def get_student_distribution():
-    """Get student distribution by year/program for dashboard chart."""
+    """Get student distribution by class level for dashboard chart."""
     try:
-        # Get student counts grouped by current_year
         distribution = {}
         
-        # Query active students grouped by current_year
+        # Query active students grouped by class_level (via their section)
         results = (db.session.query(
-            StudentProfile.current_year,
+            ClassSection.class_level,
             db.func.count(StudentProfile.student_id)
         )
+        .join(StudentProfile, StudentProfile.current_section_id == ClassSection.section_id)
         .join(UserMaster, StudentProfile.student_id == UserMaster.user_id)
         .filter(UserMaster.is_active == True)
-        .group_by(StudentProfile.current_year)
+        .group_by(ClassSection.class_level)
         .all())
         
-        # Map year numbers to readable labels
-        year_labels = {
-            1: "First Year",
-            2: "Second Year", 
-            3: "Third Year",
-            4: "Fourth Year"
-        }
-        
-        for year, count in results:
-            if year:
-                label = year_labels.get(year, f"Year {year}")
-                distribution[label] = count
+        for class_level, count in results:
+            if class_level:
+                distribution[class_level] = count
         
         # If no data, return empty dict
         if not distribution:
-            distribution = {"No Data": 0}
+            distribution = {"No Students": 0}
         
         return jsonify(distribution)
     except Exception as e:
