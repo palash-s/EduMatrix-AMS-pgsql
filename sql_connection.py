@@ -3,7 +3,6 @@ import uuid
 from flask_sqlalchemy import SQLAlchemy
 
 from sqlalchemy import MetaData
-from sqlalchemy.engine.url import URL
 
 convention = {
     "ix": 'ix_%(column_0_label)s',
