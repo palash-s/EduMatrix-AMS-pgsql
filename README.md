@@ -1,461 +1,666 @@
 # EduMatrix AMS (Academic Management System)
 
-A production-grade, containerized Academic ERP for universities.
+<p align="center">
+  <img src="static/images/mit_logo.png" alt="EduMatrix AMS Logo" width="120"/>
+</p>
 
-EduMatrix AMS digitizes the academic lifecycle—from student onboarding and timetabling to attendance, disciplinary workflows, assessment, and reporting. It runs on Flask + PostgreSQL with Docker Compose.
+<p align="center">
+  <strong>A Production-Grade, Containerized Academic ERP for Universities</strong>
+</p>
 
-## ✅ Current Status (What’s been implemented)
+<p align="center">
+  <a href="#-features">Features</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-mobile-apps">Mobile Apps</a> •
+  <a href="#-deployment">Deployment</a>
+</p>
 
-### UX stability
-- Removed auto-refresh / forced reload behavior across dashboards and shared UI so modals and actions don’t unexpectedly refresh pages.
-- Hardened login client/server behavior so API errors return JSON (avoids frontend crashes like `Unexpected token '<'`).
+---
 
-### Repo workflow
-- PR template added for review consistency.
-- CI workflow added (Python syntax compile, Docker build, Compose config validation).
+## 📋 Overview
 
-### Deployment
-- Manual “click-to-deploy” GitHub Actions workflow:
-  - builds/pushes Docker images to GHCR
-  - optionally joins Tailnet (Tailscale) so it can SSH to a private server
-  - uploads production compose + nginx config
-  - writes a server `.env` and runs `docker compose pull` + `up -d`
+EduMatrix AMS is a comprehensive Academic Management System that digitizes the entire academic lifecycle—from student onboarding and timetabling to attendance, disciplinary workflows, assessment, and reporting. Built with Flask + PostgreSQL and fully containerized with Docker.
 
-### Firebase
-- Firebase is optional. If you don’t configure it, the app runs normally and push notifications are skipped.
+### Target Scale
+- **6,500+ Students**
+- **2,000+ Parents**
+- **250+ Faculty Members**
+- **Multi-department Support**
 
-## 🚀 Key Features
+---
 
-### 1. 🏛️ Administrative Command Center
-- **Bulk Data Ingestion**: Rapid onboarding via CSV uploads for Departments, Staff, Students, and Curriculum.
-- **Academic Term Control (Rollover)**:
-  - Admin-set **Current Term** (Academic Year + Sem) used across dashboards and exports.
-  - Public API: `GET /api/current_term` returns `current_term`, `academic_year`, `semester_number`, `semester`.
-- **Intelligent Auto-Scheduler**: A constraint-based algorithm that generates conflict-free weekly timetables considering:
-  - Faculty Workload (Max 4 hrs/day)
-  - Room Capacity & Type (Lab vs. Classroom)
-  - Batch Divisions (Batch A/B for Practicals)
-  - Lunch Breaks & Continuous Slot Constraints.
-- **Infrastructure Management**: Room allocation and capacity tracking.
-- **Role Management**: Granular permission toggles (HOD, AMC Head, Event Coordinator).
+## 🏗️ Architecture
 
-### 2. 🧩 Semester-Based Elective Pre-Registration (Window System)
-Designed for 8-sem B.Tech workflows where students select electives for an upcoming semester before faculty allocation.
-
-- **Semester Course Structure upload (Odd/Even)**:
-  - Upload structure from `SEM + Section + Course Type` (e.g., Elective-III, Open Elective).
-  - Endpoint: `POST /api/upload/semester_course_structure?parity=odd|even`.
-  - This is the source-of-truth for which buckets exist per section and semester.
-- **Open elective windows from structure** (Admin → Electives):
-  - Choose class + target semester; select subjects grouped by bucket; open one window per bucket.
-  - Students choose **one subject per bucket** (editable while window is Open).
-- **Min batch size + extension + auto-balance**:
-  - Default min batch size is 12.
-  - If under-filled buckets exist at close: window moves to Extension for affected students.
-  - Final close auto-assigns remaining students to balance counts.
-- **Faculty allocation is decoupled**:
-  - Faculty subject allocation upload is enforced as **allocation-only** (requires structure first).
-
-### 2. 📚 Academic Operations (Staff Portal)
-- **Smart Attendance**:
-  - Batch-aware attendance marking (Theory vs. Practical).
-  - Retroactive OD Update: Event participation automatically overwrites "Absent" status to "On Duty" for conflicting lectures.
-  - Session History: Full audit trail of every class conducted with date/time stamps.
-- **Leave Management**:
-  - Two-Tier Approval Workflow: Leaves > 15 Days auto-escalate to HOD.
-  - Real-time balance tracking and history.
-
-### 3. 🛡️ Corrective & Support Systems
-- **Detention Module**:
-  - Auto-Detection: Identifies students with <75% attendance.
-  - Assignment Workflow: Faculty assigns remedial tasks -> Student submits -> Faculty Reviews -> Release.
-- **Mentor-Mentee System**:
-  - Digital Counseling Log: Records academic, personal, or disciplinary interventions.
-  - Issue Lifecycle: Track issues from "Open" to "Resolved" or "Escalated".
-  - Meeting Scheduler: Tracks mandatory mentor meetings (min 2, max 4 per semester) with progress bars.
-
-### 4. 📊 Internal Assessment (Outcomes)
-- **Continuous Assessment (CA)**:
-  - Granular entry for TA1, TA2, TA3, and Assignments.
-  - Auto-Scaling: Automatically calculates final score out of 50 based on weighted averages.
-  - Learner Classification: Auto-tags students as "Slow Learners" (<40%) or "Advanced Learners" (>80%).
-  - Analysis Reports: Generates Bell Curve graphs and distribution matrices (0-9, 10-19, etc.) for NAAC compliance.
-
-### 5. 👁️ Governance (HOD & AMC Console)
-- **HOD Dashboard**:
-  - Faculty Performance: Real-time view of sessions missed vs. conducted and average student attendance per teacher.
-  - Approval Inbox: Central hub for long leaves and escalated counseling cases.
-- **AMC (Academic Monitoring Committee)**:
-  - Daily Compliance Report: Live tracking of scheduled vs. actual classes.
-  - Result Analysis: Department-wide performance matrix.
-
-### 6. 👨‍👩‍👧 Student & Parent Portals
-- **Transparency**: Real-time view of Attendance, Marks, and Detention status.
-- **Communication**: Centralized Notification Center (Bell Icon) for alerts on Leaves, Results, and Disciplinary actions.
-- **Parent View**: Dedicated access for parents to view their ward's academic health and mentor contact details.
-
-## 🛠️ Tech Stack
-- **Backend**: Python (Flask)
-- **Database**: PostgreSQL 13
-- **ORM**: SQLAlchemy with Flask-Migrate
-- **Frontend**: HTML5, Tailwind CSS, Vanilla JS (ES6+)
-- **Visualization**: Chart.js
-- **Reporting**: jsPDF (client-side PDF generation)
-- **Infrastructure**: Docker, Docker Compose, Nginx (Reverse Proxy), Gunicorn (WSGI)
-
-## 📱 Native Mobile Apps (Android v1, iOS later)
-
-This backend supports **native** mobile apps via a JSON API layer.
-
-### v1 scope (Student + Parent)
-
-- Subject-wise attendance
-- Timetable
-- Leave management
-- Result view (published by faculty)
-- Notifications (event participation/involvement, detention notice, general notices)
-
-Parent supports **multiple children** and a combined notifications feed with a child filter.
-
-### Mobile API foundation (new)
-
-- `POST /api/v1/auth/login` → Bearer `access_token` + `refresh_token`
-- `POST /api/v1/auth/refresh` → new `access_token`
-- `GET /api/v1/me` → authenticated profile (+ children for parent)
-- `GET /api/v1/parent/children` → list linked children
-- `GET /api/v1/notifications?limit=50&child_id=<optional>` → in-app feed
-- `POST /api/v1/notifications/<id>/read` → mark read
-- `POST /api/v1/push/register` → register FCM token
-- `POST /api/v1/push/unregister` → unregister token
-
-### Mobile v1 feature endpoints
-
-Student:
-
-- `GET /api/v1/student/attendance/subjects`
-- `GET /api/v1/student/timetable`
-- `GET /api/v1/student/leaves`
-- `POST /api/v1/student/leaves`
-- `GET /api/v1/student/results`
-
-Parent (child-scoped):
-
-- `GET /api/v1/parent/<child_id>/attendance/subjects`
-- `GET /api/v1/parent/<child_id>/timetable`
-- `GET /api/v1/parent/<child_id>/leaves`
-- `POST /api/v1/parent/<child_id>/leaves`
-- `GET /api/v1/parent/<child_id>/results`
-
-All `/api/v1/*` endpoints use `Authorization: Bearer <access_token>`.
-
-### Configuration
-
-- `SECRET_KEY` (required in production)
-- Optional:
-  - `MOBILE_ACCESS_TOKEN_TTL_SECONDS` (default 1800)
-  - `MOBILE_REFRESH_TOKEN_TTL_DAYS` (default 30)
-
-## ⚙️ Installation & Setup
-
-### Prerequisites
-- Docker Desktop installed and running.
-
-### 1. Clone & Configure
-```bash
-git clone https://github.com/yourusername/edumatrix-ams.git
-cd edumatrix-ams
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Client Layer                              │
+├─────────────┬─────────────┬─────────────┬──────────────────────┤
+│  Web Portal │ Android App │   iOS App   │  React Native App    │
+│  (Browser)  │  (Kotlin)   │  (Planned)  │    (Hybrid)          │
+└──────┬──────┴──────┬──────┴──────┬──────┴──────────┬───────────┘
+       │             │             │                  │
+       └─────────────┴─────────────┴──────────────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │   Nginx Reverse   │
+                    │      Proxy        │
+                    │   (Port 80/443)   │
+                    └─────────┬─────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │   Flask App       │
+                    │   (Gunicorn)      │
+                    │   Port 5000       │
+                    └─────────┬─────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │   PostgreSQL 13   │
+                    │   (Database)      │
+                    └───────────────────┘
 ```
 
-### 2. Launch locally (Dev)
-This spins up the Web App, PostgreSQL Database, and Nginx Proxy using the dev compose file.
+### Tech Stack
 
+| Layer | Technology |
+|-------|------------|
+| **Backend** | Python 3.9+, Flask 3.0, SQLAlchemy ORM |
+| **Database** | PostgreSQL 13 with Flask-Migrate (Alembic) |
+| **Frontend** | HTML5, Tailwind CSS, Vanilla JS (ES6+) |
+| **Charts** | Chart.js |
+| **PDF Export** | jsPDF (client-side) |
+| **Mobile** | Android (Kotlin), React Native |
+| **Infrastructure** | Docker, Docker Compose, Nginx, Gunicorn |
+| **Push Notifications** | Firebase Cloud Messaging (FCM) |
+| **CI/CD** | GitHub Actions, GHCR |
+
+---
+
+## ✨ Features
+
+### 1. 🔐 Authentication & Security
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-Role Authentication** | Admin, Staff, Student, Parent with role-based access |
+| **Server-Side Sessions** | Flask-Login with secure session management |
+| **Password Security** | PBKDF2-SHA256 hashing via Werkzeug |
+| **Force Password Change** | Bulk-uploaded users must change password on first login |
+| **Rate Limiting** | Flask-Limiter prevents brute force attacks |
+| **CSRF Protection** | Flask-WTF CSRF tokens on all forms |
+| **Security Headers** | X-Frame-Options, CSP, X-XSS-Protection via Nginx |
+
+**Default Passwords (for bulk uploads):**
+- Staff: `Staff@123`
+- Students: `Student@123`  
+- Parents: `Parent@123`
+
+---
+
+### 2. 🏛️ Admin Console
+
+#### Dashboard Analytics
+- Real-time student/staff counts
+- Attendance rate monitoring
+- Student distribution charts (by year/department)
+- System activity log
+
+#### User Management
+| Feature | Endpoint | Description |
+|---------|----------|-------------|
+| Faculty Directory | `/admin/manage_faculty` | Add, archive, view faculty with department assignments |
+| Student Directory | `/admin/student_directory` | View, filter, update student status |
+| Class Management | `/admin/manage_classes` | Create sections, assign class teachers |
+| Role Assignment | `/api/admin/toggle_role` | HOD, AMC Member, Event Coordinator toggles |
+| HOD Assignment | `/api/admin/assign_hod` | Assign department heads |
+
+#### Bulk Data Uploads
+| Upload Type | Template Available | Description |
+|-------------|-------------------|-------------|
+| Departments & Subjects | ✅ | Master data with L-T-P credits |
+| Class Sections | ✅ | Year-wise sections (FY-A, SY-B, etc.) |
+| Staff Master | ✅ | Faculty with departments |
+| Student Master | ✅ | Students with admission numbers, sections |
+| Semester Course Structure | ✅ | Subject mapping per semester (Odd/Even) |
+| Subject Allocation | ✅ | Teacher-subject-section mapping |
+| Weekly Schedule | ✅ | Timetable slots |
+| Room Master | ✅ | Classrooms, labs with capacity |
+| Syllabus/Teaching Plan | ✅ | Unit-wise topic breakdown |
+
+#### Intelligent Auto-Scheduler
+Generates conflict-free weekly timetables using a **Greedy First-Fit Algorithm**:
+
+- **Queue Priority**: Labs (2-hour) → Tutorials → Lectures
+- **Constraints Checked**:
+  - Teacher availability
+  - Room type matching (Lab vs Classroom)
+  - Batch divisions (A/B for practicals)
+  - Lunch break avoidance
+  - Maximum 4 hours/day per faculty
+
+---
+
+### 3. 📚 Academic Operations (Staff Portal)
+
+#### Attendance Management
+| Feature | Description |
+|---------|-------------|
+| **Batch-Aware Marking** | Theory vs Practical sessions |
+| **Quick Mark All** | One-click present/absent for entire class |
+| **Session History** | Full audit trail with date/time |
+| **On-Duty Auto-Update** | Event participation → Absent becomes OnDuty |
+
+#### Class Teacher Dashboard
+- Section-wise analytics
+- Subject performance reports
+- Overall attendance summary
+- Student issue tracking
+
+#### Leave Management
+| Flow | Description |
+|------|-------------|
+| **Student Applies** | Through portal or mobile app |
+| **Class Teacher Review** | First-level approval |
+| **HOD Escalation** | Leaves >15 days auto-escalate |
+| **Balance Tracking** | Real-time leave balance |
+
+#### Lesson Planning
+- Unit/Sub-unit wise syllabus upload
+- Topic completion tracking
+- Session-to-topic linking
+- Syllabus progress reports
+
+---
+
+### 4. 📝 Internal Assessment (CA Marks)
+
+| Component | Max Marks | Description |
+|-----------|-----------|-------------|
+| TA1 | 20 | Term Assessment 1 |
+| TA2 | 20 | Term Assessment 2 |
+| TA3 | 20 | Term Assessment 3 |
+| A1-A5 | 10 each | Assignments (5 total) |
+| Attendance | 10 | Auto-calculated from percentage |
+
+**Auto-Scaling Formula:**
+```
+Total CA = (TA1 × 0.5) + (TA2 × 0.5) + TA3 + (Avg_Assignments × 1.5) + Attendance_Score
+```
+
+**Learner Classification:**
+- 🔴 **Slow Learner**: <40%
+- 🟡 **Average**: 40-80%
+- 🟢 **Advanced Learner**: >80%
+
+**Analysis Reports:**
+- Bell curve distribution
+- Score brackets (0-9, 10-19, 20-29...)
+- NAAC compliance matrices
+
+---
+
+### 5. 🧩 Elective Pre-Registration System
+
+Semester-based window system for B.Tech 8-semester workflows:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  1. Upload Semester Course Structure (Odd/Even)             │
+│     - Maps: Section + Semester → Elective Buckets          │
+├─────────────────────────────────────────────────────────────┤
+│  2. Admin Opens Window per Bucket                           │
+│     - Status: Open → Extension → Closed                     │
+│     - Min batch size: 12 (configurable)                     │
+├─────────────────────────────────────────────────────────────┤
+│  3. Students Select (One per Bucket)                        │
+│     - Editable while Open/Extension                         │
+├─────────────────────────────────────────────────────────────┤
+│  4. Close Window                                            │
+│     - Under-filled → Extension for affected students        │
+│     - Final close → Auto-balance enrollment                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key APIs:**
+- `GET /api/admin/semester_structure/electives`
+- `POST /api/admin/elective_windows/open`
+- `POST /api/admin/elective_windows/close`
+- `GET /api/admin/elective_windows/live_dashboard`
+- `GET /api/student/elective_windows`
+
+---
+
+### 6. 🛡️ Detention & Remedial System
+
+| Stage | Actor | Action |
+|-------|-------|--------|
+| **Detection** | System | Auto-flags students with <75% attendance |
+| **Assignment** | Faculty | Assigns remedial task with details |
+| **Submission** | Student | Uploads completed work |
+| **Review** | Faculty | Approves/rejects submission |
+| **Release** | Faculty | Clears detention status |
+
+**Endpoints:**
+- `GET /api/detention/watchlist` - Low attendance list
+- `POST /api/detention/assign` - Assign detention
+- `GET /api/detention/my_detentions` - Student view
+- `POST /api/detention/submit_task` - Submit work
+- `POST /api/detention/release` - Clear detention
+
+---
+
+### 7. 👥 Mentor-Mentee System
+
+| Feature | Description |
+|---------|-------------|
+| **Batch Assignment** | Auto-split students into mentor batches |
+| **Counseling Log** | Digital records of meetings |
+| **Issue Categories** | Academic, Personal, Disciplinary, Financial |
+| **Issue Lifecycle** | Open → Resolved / Escalated |
+| **Meeting Scheduler** | Min 2, Max 4 meetings per semester |
+| **Progress Tracking** | Visual progress bars |
+
+**Mentor APIs:**
+- `POST /api/mentor/schedule_meeting`
+- `GET /api/mentor/get_meetings`
+- `GET /api/mentor/get_logs`
+- `POST /api/mentor/add_log`
+- `POST /api/mentor/update_log_status`
+
+---
+
+### 8. 🎪 Event Management
+
+| Feature | Description |
+|---------|-------------|
+| **Event Creation** | Name, dates, times, coordinator |
+| **Student Nomination** | Add participants with roles |
+| **Attendance Marking** | Track actual participation |
+| **Auto OD Update** | Conflict resolution with class attendance |
+
+**Coordinator Dashboard** (`/staff/events`):
+- My events view
+- Participant management
+- Attendance tracking
+
+---
+
+### 9. 📊 Governance Dashboards
+
+#### HOD Dashboard (`/staff/hod_dashboard`)
+- Faculty performance metrics (sessions conducted vs missed)
+- Average student attendance per teacher
+- Long leave approval inbox
+- Escalated counseling cases
+- Feedback analysis reports
+- Syllabus progress by subject
+
+#### AMC Dashboard (`/staff/amc_dashboard`)
+- Daily compliance report (scheduled vs actual)
+- Department-wide CA summary
+- Term grant generation
+- Result analysis matrices
+
+---
+
+### 10. 📱 Student Feedback System
+
+| Stage | Description |
+|-------|-------------|
+| **Cycle Creation** | Admin defines feedback period |
+| **Questions** | Configurable question bank with categories |
+| **Anonymous Submission** | Students rate teachers 1-5 |
+| **Analysis** | HOD views aggregated feedback scores |
+
+**Tables:**
+- `FeedbackCycle` - Active feedback periods
+- `FeedbackQuestion` - Question bank
+- `FeedbackResponse` - Individual ratings
+- `StudentFeedbackStatus` - Tracks completion (anonymized)
+
+---
+
+### 11. 📅 Term Grant & Promotions
+
+**Criteria Evaluated:**
+- Attendance percentage
+- Average CA score
+- Failed subjects count (<20 marks)
+- Active detentions
+
+**Status Outcomes:**
+- ✅ **Granted** - Meets all criteria
+- ⚠️ **Provisional** - Conditional promotion
+- ❌ **Detained** - Must repeat
+
+---
+
+### 12. 🔔 Notification System
+
+| Type | Description |
+|------|-------------|
+| **In-App Bell** | Real-time notification center |
+| **Push (FCM)** | Mobile push notifications |
+| **Categories** | Info, Warning, Success, Danger |
+| **Deep Links** | Navigate to relevant pages |
+
+**Tables:**
+- `Notification` - In-app notifications
+- `PushDevice` - FCM token registry
+- `RefreshToken` - Mobile auth tokens
+
+---
+
+### 13. 👨‍👩‍👧 Parent Portal
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-Child Support** | View all linked children |
+| **Attendance View** | Subject-wise attendance percentage |
+| **Results** | Published CA marks |
+| **Leave Application** | Apply on behalf of child |
+| **Mentor Contact** | View assigned mentor details |
+| **Notifications** | Combined feed with child filter |
+
+---
+
+### 14. 🔄 Load Adjustment (Faculty Swap)
+
+Mutual exchange system for faculty schedule conflicts:
+
+1. **Requester** selects slot they cannot take
+2. **Requester** picks colleague and their slot to swap
+3. **Adjuster** approves/rejects
+4. **System** updates effective timetable for the date
+
+---
+
+### 15. 📦 Archive & Historical Data
+
+| Feature | Description |
+|---------|-------------|
+| **Term Rollover** | Snapshot current allocations/schedules |
+| **Archived Terms** | View historical data |
+| **Report Generation** | Historical attendance/marks reports |
+
+---
+
+## 📱 Mobile Apps
+
+### Native Android (Kotlin)
+Location: `AMS-android/`
+
+**Features:**
+- Student/Parent login with JWT
+- Subject-wise attendance view
+- Weekly timetable
+- Leave application
+- Result viewing
+- Push notifications
+
+### React Native (Cross-platform)
+Location: `AMS-mobile-rn/`
+
+**Screens:**
+- `LoginScreen` - Authentication
+- `DashboardScreen` - Home with summary
+- `AttendanceScreen` - Subject-wise attendance
+- `TimetableScreen` - Weekly schedule
+- `LeavesScreen` - Apply/view leaves
+- `ResultsScreen` - CA marks
+- `NotificationsScreen` - Alerts feed
+
+### Mobile API v1 Endpoints
+
+**Authentication:**
+```
+POST /api/v1/auth/login     → {access_token, refresh_token}
+POST /api/v1/auth/refresh   → {access_token}
+GET  /api/v1/me             → User profile
+```
+
+**Student:**
+```
+GET  /api/v1/student/attendance/subjects
+GET  /api/v1/student/timetable
+GET  /api/v1/student/leaves
+POST /api/v1/student/leaves
+GET  /api/v1/student/results
+GET  /api/v1/student/events
+```
+
+**Parent:**
+```
+GET  /api/v1/parent/children
+GET  /api/v1/parent/<child_id>/attendance/subjects
+GET  /api/v1/parent/<child_id>/timetable
+GET  /api/v1/parent/<child_id>/leaves
+POST /api/v1/parent/<child_id>/leaves
+GET  /api/v1/parent/<child_id>/results
+```
+
+**Push Notifications:**
+```
+POST /api/v1/push/register
+POST /api/v1/push/unregister
+GET  /api/v1/notifications
+POST /api/v1/notifications/<id>/read
+```
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Docker Desktop installed and running
+- Git
+
+### 1. Clone Repository
+```bash
+git clone https://github.com/palash-s/EduMatrix-AMS-pgsql.git
+cd EduMatrix-AMS-pgsql
+```
+
+### 2. Launch Development Environment
 ```bash
 docker compose -f docker-compose.yml up --build
 ```
+Access at: http://localhost
 
-Access the app at http://localhost
-
-### 3. Apply DB migrations (Dev)
+### 3. Apply Database Migrations
 ```bash
-docker compose -f docker-compose.yml exec web python -m flask db upgrade
+docker compose exec web flask db upgrade
 ```
 
-### 4. Create/reset an Admin user (Dev)
+### 4. Create Admin User
 ```bash
-export NEW_ADMIN_PASSWORD='Admin@123'
-export ADMIN_EMAIL='admin@mituniversity.edu.in'
-
-docker compose -f docker-compose.yml exec -T \
-  -e NEW_ADMIN_PASSWORD -e ADMIN_EMAIL \
-  web python - <<'PY'
-import os, uuid
-from app import app, db, UserMaster, StaffProfile, generate_password_hash
-
-email = (os.environ.get("ADMIN_EMAIL") or "").strip()
-pwd = os.environ.get("NEW_ADMIN_PASSWORD")
-
-if not email or not pwd:
-  raise SystemExit("Missing ADMIN_EMAIL or NEW_ADMIN_PASSWORD")
-
-with app.app_context():
-  u = UserMaster.query.filter_by(username=email).first()
-  if u is None:
-    admin_id = str(uuid.uuid4())
-    u = UserMaster(
-      user_id=admin_id,
-      username=email,
-      password_hash=generate_password_hash(pwd),
-      user_type="Admin",
-      is_active=True,
-    )
-    db.session.add(u)
-    db.session.add(StaffProfile(
-      staff_id=admin_id,
-      full_name="System Administrator",
-      employee_code="ADMIN001",
-      email_contact=email,
-      designation="Admin",
-    ))
-    print("Created admin:", email)
-  else:
-    u.password_hash = generate_password_hash(pwd)
-    print("Updated admin password:", email)
-
-  db.session.commit()
-PY
+docker compose exec web python seed_admin.py
 ```
 
-## 🚢 Click-to-Deploy (GitHub Actions + GHCR + Ubuntu)
+**Default Admin Login:**
+- Email: `admin@mituniversity.edu.in`
+- Password: `Admin@123`
 
-This repo includes a manual (“click to deploy”) pipeline that:
-- builds the Docker image on GitHub Actions
-- pushes it to GitHub Container Registry (GHCR)
-- SSHes into your Ubuntu server and runs Docker Compose
+---
 
-### 1) Server prerequisites (one-time)
-On your Ubuntu server:
+## 🚢 Production Deployment
 
+### GitHub Actions CI/CD
+
+The repository includes automated workflows:
+
+| Workflow | File | Description |
+|----------|------|-------------|
+| **CI** | `.github/workflows/ci.yml` | Syntax check, Docker build, Compose validation |
+| **Deploy** | `.github/workflows/deploy.yml` | Manual deploy to server via SSH |
+
+### Required GitHub Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `SSH_HOST` | Server IP (Tailscale IP if private) |
+| `SSH_PORT` | SSH port (default: 22) |
+| `SSH_USER` | Deploy user |
+| `SSH_PRIVATE_KEY` | SSH private key |
+| `DEPLOY_PATH` | e.g., `/opt/edumatrix-ams` |
+| `TAILSCALE_AUTHKEY` | Optional: For private servers |
+| `GHCR_USERNAME` | GitHub username |
+| `GHCR_TOKEN` | GitHub PAT with `read:packages` |
+| `POSTGRES_USER` | Database user |
+| `POSTGRES_PASSWORD` | Database password |
+| `POSTGRES_DB` | Database name |
+| `SECRET_KEY` | Flask secret key |
+
+### Production Commands
+
+**Apply migrations:**
 ```bash
-# Docker
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# Allow your deploy user to run docker without sudo (optional)
-sudo usermod -aG docker $USER
+docker compose -f docker-compose.prod.yml exec web flask db upgrade
 ```
 
-Pick a deploy folder, for example:
+**Create admin:**
 ```bash
-sudo mkdir -p /opt/ams
-sudo chown -R $USER:$USER /opt/ams
-mkdir -p /opt/ams/secrets
+docker compose -f docker-compose.prod.yml exec web python seed_admin.py
 ```
 
-### 2) GitHub Container Registry (GHCR)
-The workflow builds and pushes these tags:
-- `ghcr.io/<owner>/<repo>:<sha>`
-- `ghcr.io/<owner>/<repo>:latest`
-
-### 3) GitHub Secrets you must add
-In your GitHub repo: Settings → Secrets and variables → Actions → New repository secret:
-
-- `SSH_HOST` → server IP / hostname
-- `SSH_PORT` → usually `22`
-- `SSH_USER` → ubuntu user (e.g. `ubuntu`)
-- `SSH_PRIVATE_KEY` → private key for SSH (multi-line)
-- `DEPLOY_PATH` → e.g. `/opt/ams`
-
-If your server is not publicly reachable (example: you access it only via Tailscale), add:
-- `TAILSCALE_AUTHKEY` → Tailscale auth key for GitHub Actions runner
-  - Create it in Tailscale Admin Console → Settings/Keys → Generate auth key
-  - Prefer an **ephemeral** key, and rotate it if leaked
-  - Set `SSH_HOST` to your server’s **Tailscale IP** (example: `100.100.x.x`)
-
-- `GHCR_USERNAME` → usually your GitHub username or org name
-- `GHCR_TOKEN` → a GitHub PAT used by the server to pull images from GHCR
-  - For private images: needs at least `read:packages` and access to the repo/package (commonly `repo` for classic PATs)
-
-- `POSTGRES_USER` → e.g. `admin`
-- `POSTGRES_PASSWORD` → strong password
-- `POSTGRES_DB` → e.g. `school_system`
-- `SECRET_KEY` → strong random string
-
-Firebase (push notifications) is optional. If you don't configure Firebase, the app will run normally but push notifications will be skipped.
-
-### 4) How to deploy (manual)
-Go to GitHub → Actions → **Deploy (Manual)** → Run workflow.
-
-- Leave `image_tag` empty to deploy the current commit SHA.
-- Or set `image_tag=latest` to force deploy latest.
-
-The server runs using [docker-compose.prod.yml](docker-compose.prod.yml).
-
-### Notes
-- The dev compose file `docker-compose.yml` uses bind mounts + `--reload` for development.
-- Production uses `docker-compose.prod.yml` (no source bind-mounts, no `--reload`).
-
-## 🧠 Database configuration (important)
-
-### Why we don’t build `DATABASE_URL` in Compose
-Passwords containing special characters like `@`, `:` or `/` can break raw URLs (example symptom: Postgres host becomes something like `123@db`).
-
-This repo now passes discrete env vars into the app container:
-- `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
-
-and the app constructs the SQLAlchemy connection URL safely.
-
-## 🧯 Production runbook (common tasks)
-
-### Apply migrations (Prod)
-Run on the server:
-
+**View logs:**
 ```bash
-cd /opt/ams  # or your DEPLOY_PATH
-docker compose -f docker-compose.prod.yml exec -T web python -m flask db upgrade
+docker compose -f docker-compose.prod.yml logs -f web
 ```
 
-### Create/reset the Admin user (Prod)
-Run on the server:
-
-```bash
-cd /opt/ams  # or your DEPLOY_PATH
-export NEW_ADMIN_PASSWORD='Admin@123'
-export ADMIN_EMAIL='admin@mituniversity.edu.in'
-
-docker compose -f docker-compose.prod.yml exec -T \
-  -e NEW_ADMIN_PASSWORD -e ADMIN_EMAIL \
-  web python - <<'PY'
-import os, uuid
-from app import app, db, UserMaster, StaffProfile, generate_password_hash
-
-email = (os.environ.get("ADMIN_EMAIL") or "").strip()
-pwd = os.environ.get("NEW_ADMIN_PASSWORD")
-
-if not email or not pwd:
-  raise SystemExit("Missing ADMIN_EMAIL or NEW_ADMIN_PASSWORD")
-
-with app.app_context():
-  u = UserMaster.query.filter_by(username=email).first()
-  if u is None:
-    admin_id = str(uuid.uuid4())
-    u = UserMaster(
-      user_id=admin_id,
-      username=email,
-      password_hash=generate_password_hash(pwd),
-      user_type="Admin",
-      is_active=True,
-    )
-    db.session.add(u)
-    db.session.add(StaffProfile(
-      staff_id=admin_id,
-      full_name="System Administrator",
-      employee_code="ADMIN001",
-      email_contact=email,
-      designation="Admin",
-    ))
-    print("Created admin:", email)
-  else:
-    u.password_hash = generate_password_hash(pwd)
-    print("Updated admin password:", email)
-
-  db.session.commit()
-PY
-```
-
-### If Postgres says “password authentication failed”
-Changing `POSTGRES_PASSWORD` in GitHub Secrets or in the server `.env` does NOT automatically change the password inside an existing Postgres data volume.
-
-Reset the DB user password (run on server):
-
-```bash
-cd /opt/ams  # or your DEPLOY_PATH
-
-# IMPORTANT: On this stack, the DB role is usually 'admin' (not 'postgres').
-docker compose -f docker-compose.prod.yml exec -T db \
-  psql -U admin -d postgres \
-  -c "ALTER USER admin WITH PASSWORD 'Admin@123';"
-
-docker compose -f docker-compose.prod.yml restart web
-```
-
-## 📥 CSV Imports (Bulk Uploads)
-Admin → Bulk Uploads provides upload cards and matching downloadable CSV templates.
-
-- **Download templates**:
-  - `GET /api/admin/import_templates/master_class`
-  - `GET /api/admin/import_templates/staff`
-  - `GET /api/admin/import_templates/students`
-  - `GET /api/admin/import_templates/weekly_schedule`
-  - `GET /api/admin/import_templates/semester_course_structure`
-  - `GET /api/admin/import_templates/subject_allocation`
-  - `GET /api/admin/import_templates/rooms`
-
-### Elective pre-registration flow (recommended)
-1) Upload **Semester Course Structure** (Odd/Even)
-2) Open elective windows in Admin → Electives for a target semester
-3) Students submit one choice per bucket while Open/Extension
-4) Close window(s): enforce min batch, extension, and final auto-balance
+---
 
 ## 📂 Project Structure
+
 ```
-AMS-flask/
-├── app.py                  # Main Application Logic (API Routes)
-├── sql_connection.py       # Database Models & Schema
-├── requirements.txt        # Python Dependencies
-├── Dockerfile              # Container Definition
-├── docker-compose.yml      # Service Orchestration
-├── docker-compose.prod.yml # Production Orchestration (GHCR image)
-├── .github/workflows/      # CI + Deploy workflows
-├── migrations/             # Database Migration Scripts (Alembic)
-├── nginx/
-│   └── default.conf        # Nginx Proxy Config
-├── static/
-│   ├── images/             # Logos and Assets
-│   └── uploads/            # (Optional) Storage for docs
-└── templates/              # HTML Frontend Views
-    ├── login.html
-    ├── staff_dashboard.html
-    ├── student_dashboard.html
-    ├── admin_dashboard.html
-    ├── hod_dashboard.html
-    ├── marks_entry.html
-    └── ... (other modules)
+EduMatrix-AMS-pgsql/
+├── app.py                      # Main Flask application (9600+ lines)
+├── sql_connection.py           # SQLAlchemy models (40+ tables)
+├── seed_admin.py               # Admin user seeding script
+├── requirements.txt            # Python dependencies
+├── Dockerfile                  # Container definition
+├── docker-compose.yml          # Development orchestration
+├── docker-compose.prod.yml     # Production orchestration
+│
+├── migrations/                 # Alembic database migrations
+│   └── versions/              # Migration scripts
+│
+├── templates/                  # Jinja2 HTML templates
+│   ├── login.html
+│   ├── admin_dashboard.html
+│   ├── staff_dashboard.html
+│   ├── student_dashboard.html
+│   ├── parent_dashboard.html
+│   ├── hod_dashboard.html
+│   ├── amc_dashboard.html
+│   └── ... (30+ templates)
+│
+├── static/                     # Static assets
+│   ├── style.css
+│   ├── script.js
+│   └── images/
+│
+├── nginx/                      # Nginx configuration
+│   ├── default.conf           # Development config
+│   └── default-ssl.conf       # SSL config template
+│
+├── data/                       # Sample CSV templates
+│
+├── tests/                      # Pytest test suite
+│   ├── conftest.py
+│   └── test_security.py
+│
+├── tools/                      # Utility scripts
+│   └── seed_mobile_test_users.py
+│
+├── docs/                       # Documentation
+│   └── AZURE_INFRASTRUCTURE_REQUIREMENTS.md
+│
+├── AMS-android/               # Native Android app (Kotlin)
+│   └── app/src/main/
+│
+├── AMS-mobile-rn/             # React Native app
+│   └── src/screens/
+│
+├── secrets/                    # Firebase credentials (gitignored)
+│
+└── .github/
+    ├── workflows/
+    │   ├── ci.yml             # CI pipeline
+    │   └── deploy.yml         # Deployment pipeline
+    └── pull_request_template.md
 ```
 
-## 🧠 Logic & Algorithms
+---
 
-### The Intelligent Scheduler
-The scheduler uses a Greedy First-Fit Algorithm with backtracking retry logic.
+## 📊 Database Schema
 
-- **Queue Prioritization**: Labs (2-hour blocks) are scheduled first, followed by Tutorials, then Lectures.
-- **Constraint Checking**:
-  - Is the Teacher free?
-  - Is the Student Batch free?
-  - Is a Room of the correct type (Lab/Classroom) available?
-  - Does the slot cross a lunch break? (Prevent 2-hour labs starting at 11:45).
-- **Conflict Resolution**: If a slot fails, it logs the specific reason (Room Unavailable vs Teacher Busy) for admin review.
+### Core Tables (40+)
 
-### Auto-Scaling Assessment
-Marks are normalized to a standard 50-Mark Scale regardless of input type:
+| Category | Tables |
+|----------|--------|
+| **Identity** | `user_master` |
+| **Profiles** | `staff_profile`, `student_profile`, `parent_profile`, `department` |
+| **Academic** | `subject`, `class_section`, `subject_allocation`, `semester_course_structure` |
+| **Schedule** | `weekly_schedule`, `room_master`, `session_log` |
+| **Operations** | `attendance_transaction`, `leave_application`, `leave_workflow_log` |
+| **Assessment** | `ca_marks`, `term_grant_record` |
+| **Mentoring** | `mentor_batch`, `mentor_log`, `mentor_meeting` |
+| **Detention** | `detention_record` |
+| **Electives** | `elective_window`, `elective_offering`, `student_elective` |
+| **Events** | `event_master`, `event_participation` |
+| **Feedback** | `feedback_cycle`, `feedback_question`, `feedback_response`, `student_feedback_status` |
+| **Syllabus** | `teaching_plan`, `lesson_log` |
+| **Mobile** | `refresh_token`, `push_device` |
+| **System** | `notification`, `system_log`, `system_config`, `load_adjustment` |
+| **Archive** | `archived_allocation`, `archived_schedule` |
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SECRET_KEY` | Flask session encryption | Required in prod |
+| `POSTGRES_HOST` | Database host | `db` |
+| `POSTGRES_PORT` | Database port | `5432` |
+| `POSTGRES_USER` | Database user | `admin` |
+| `POSTGRES_PASSWORD` | Database password | Required |
+| `POSTGRES_DB` | Database name | `school_system` |
+| `FLASK_ENV` | Environment mode | `production` |
+| `SESSION_COOKIE_SECURE` | HTTPS-only cookies | `false` |
+| `MOBILE_ACCESS_TOKEN_TTL_SECONDS` | JWT access token TTL | `1800` |
+| `MOBILE_REFRESH_TOKEN_TTL_DAYS` | JWT refresh token TTL | `30` |
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run tests
+docker compose exec web pytest
+
+# With coverage
+docker compose exec web pytest --cov=app --cov-report=html
 ```
-Total = (TA1 * 0.5) + (TA2 * 0.5) + TA3 + (Avg_Assignments * 1.5) + Attendance_Score
-```
 
-## 🔒 Security
-- **Password Hashing**: Uses werkzeug.security (PBKDF2-SHA256).
-- **Role-Based Access Control (RBAC)**: Middleware checks user_id and Role before serving sensitive JSON data.
-- **Container Isolation**: Database is not exposed to the public internet (internal Docker network only).
+---
 
 ## 📜 License
-This project is licensed under __.
+
+This project is licensed under the MIT License.
+
+---
+
+## 👥 Contributors
+
+- Development Team
+- MIT ADT University
+
+---
+
+<p align="center">
+  <strong>Built with ❤️ for Academic Excellence</strong>
+</p>
