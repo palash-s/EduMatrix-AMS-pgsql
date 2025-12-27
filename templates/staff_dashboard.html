@@ -240,7 +240,14 @@
                             <button onclick="markAllAttendance(false)" class="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">Mark All Absent</button>
                         </div>
                     </div>
-                    <div id="conduct-attendance-list" class="grid gap-2 max-h-48 overflow-y-auto border rounded-lg p-3 bg-gray-50"></div>
+                    <div class="max-h-48 overflow-y-auto border rounded-lg bg-gray-50">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-gray-100 text-xs text-gray-600 uppercase sticky top-0">
+                                <tr><th class="p-2 w-10">#</th><th class="p-2">Student</th><th class="p-2 w-16 text-center">Present</th><th class="p-2">Remarks</th></tr>
+                            </thead>
+                            <tbody id="attendance-list-body"></tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <!-- Issues Section -->
@@ -251,8 +258,13 @@
                             <i data-lucide="plus" class="w-3 h-3"></i> Add Issue
                         </button>
                     </div>
-                    <div id="conduct-issues-list" class="space-y-2 max-h-40 overflow-y-auto">
-                        <p class="text-sm text-gray-400 text-center py-4">No issues recorded yet</p>
+                    <div class="max-h-40 overflow-y-auto border rounded-lg bg-gray-50">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-gray-100 text-xs text-gray-600 uppercase sticky top-0">
+                                <tr><th class="p-2 w-10">#</th><th class="p-2">Raised By</th><th class="p-2">Issue</th><th class="p-2 w-20">Status</th><th class="p-2 w-20 text-right">Action</th></tr>
+                            </thead>
+                            <tbody id="issues-list-body"></tbody>
+                        </table>
                     </div>
                 </div>
 
@@ -286,7 +298,7 @@
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Raised By (Optional)</label>
-                    <select id="issue-raised-by" class="w-full p-2 border border-gray-300 rounded-lg text-sm">
+                    <select id="issue-student-select" class="w-full p-2 border border-gray-300 rounded-lg text-sm">
                         <option value="">Anonymous / Group</option>
                     </select>
                 </div>
