@@ -180,31 +180,149 @@
         </div>
     </div>
 
-    <!-- Meeting Scheduler Modal (NEW) -->
+    <!-- Meeting Scheduler Modal -->
     <div id="meeting-modal" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm transform scale-100 transition-all">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md transform scale-100 transition-all max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-5">
                 <h3 class="font-bold text-lg text-gray-900 serif">Schedule Meeting</h3>
                 <button onclick="amsMarkModalClosed(); document.getElementById('meeting-modal').classList.add('hidden')" class="p-1 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="x" class="w-5 h-5"></i></button>
             </div>
-            
+
             <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Date</label>
-                    <input type="date" id="meet-date" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Date</label>
+                        <input type="date" id="meet-date" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Time</label>
+                        <input type="time" id="meet-time" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+                    </div>
                 </div>
                 <div>
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Time</label>
-                    <input type="time" id="meet-time" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Venue</label>
+                    <input type="text" id="meet-venue" placeholder="e.g. Room C-101, HOD Chamber" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Agenda</label>
                     <input type="text" id="meet-agenda" placeholder="e.g. Mid-term Review" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
                 </div>
-                
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Discussion Points</label>
+                    <textarea id="meet-points" rows="3" placeholder="Enter topics to discuss (one per line)" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none resize-none"></textarea>
+                </div>
+
                 <button onclick="confirmSchedule()" class="w-full py-2.5 bg-teal-600 text-white font-bold rounded-lg hover:bg-teal-700 shadow-md transition-colors mt-2">
                     Confirm Schedule
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Conduct Meeting Modal -->
+    <div id="conduct-meeting-modal" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center p-5 border-b">
+                <div>
+                    <h3 class="font-bold text-lg text-gray-900 serif">Conduct Meeting</h3>
+                    <p class="text-xs text-gray-500" id="conduct-meeting-info">Loading...</p>
+                </div>
+                <button onclick="closeConductMeeting()" class="p-1 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5 space-y-5">
+                <!-- Attendance Section -->
+                <div>
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="font-bold text-sm text-gray-700 uppercase">Attendance</h4>
+                        <div class="flex gap-2">
+                            <button onclick="markAllAttendance(true)" class="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200">Mark All Present</button>
+                            <button onclick="markAllAttendance(false)" class="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">Mark All Absent</button>
+                        </div>
+                    </div>
+                    <div id="conduct-attendance-list" class="grid gap-2 max-h-48 overflow-y-auto border rounded-lg p-3 bg-gray-50"></div>
+                </div>
+
+                <!-- Issues Section -->
+                <div>
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="font-bold text-sm text-gray-700 uppercase">Issues Raised</h4>
+                        <button onclick="openAddIssueDialog()" class="text-xs px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-1">
+                            <i data-lucide="plus" class="w-3 h-3"></i> Add Issue
+                        </button>
+                    </div>
+                    <div id="conduct-issues-list" class="space-y-2 max-h-40 overflow-y-auto">
+                        <p class="text-sm text-gray-400 text-center py-4">No issues recorded yet</p>
+                    </div>
+                </div>
+
+                <!-- Summary Section -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Meeting Summary / Remarks</label>
+                    <textarea id="conduct-summary" rows="3" placeholder="Enter meeting summary and concluding remarks..." class="w-full p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"></textarea>
+                </div>
+            </div>
+
+            <div class="p-5 border-t flex justify-end gap-3">
+                <button onclick="closeConductMeeting()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Cancel</button>
+                <button onclick="submitConductMeeting()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-bold">Complete Meeting</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Issue Dialog (Sub-modal) -->
+    <div id="add-issue-dialog" class="hidden fixed inset-0 bg-black/30 z-[70] flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl p-5 w-full max-w-sm">
+            <h4 class="font-bold text-gray-900 mb-4">Record Issue</h4>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Category</label>
+                    <select id="issue-category" class="w-full p-2 border border-gray-300 rounded-lg text-sm">
+                        <option value="Academic">Academic</option>
+                        <option value="Personal">Personal</option>
+                        <option value="Infrastructure">Infrastructure</option>
+                        <option value="General" selected>General</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Raised By (Optional)</label>
+                    <select id="issue-raised-by" class="w-full p-2 border border-gray-300 rounded-lg text-sm">
+                        <option value="">Anonymous / Group</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Issue Description</label>
+                    <textarea id="issue-description" rows="3" placeholder="Describe the issue..." class="w-full p-2 border border-gray-300 rounded-lg text-sm resize-none"></textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Action Taken (Optional)</label>
+                    <textarea id="issue-action" rows="2" placeholder="Action taken to address this issue..." class="w-full p-2 border border-gray-300 rounded-lg text-sm resize-none"></textarea>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="closeAddIssueDialog()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded text-sm">Cancel</button>
+                <button onclick="submitIssue()" class="px-3 py-1.5 bg-purple-600 text-white rounded text-sm font-medium hover:bg-purple-700">Add Issue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Meeting Report Modal -->
+    <div id="meeting-report-modal" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center p-5 border-b bg-gray-50">
+                <div>
+                    <h3 class="font-bold text-lg mit-purple serif">Meeting Report</h3>
+                    <p class="text-xs text-gray-500" id="report-meeting-info">Loading...</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="downloadMeetingPDF()" class="px-4 py-2 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 flex items-center gap-2">
+                        <i data-lucide="file-down" class="w-4 h-4"></i> PDF
+                    </button>
+                    <button onclick="closeMeetingReport()" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5" id="meeting-report-content">
+                <p class="text-center text-gray-400">Loading report...</p>
             </div>
         </div>
     </div>
@@ -749,8 +867,30 @@
             document.getElementById('meeting-progress-bar').style.width = `${(count/4)*100}%`;
             document.getElementById('meeting-count-text').innerText = `${count} / 4 Mandatory Meetings`;
             const histDiv = document.getElementById('meeting-history');
-            if (data.meetings.length === 0) histDiv.innerHTML = '<span class="text-xs text-gray-400 italic">No meetings yet.</span>';
-            else histDiv.innerHTML = data.meetings.map(m => `<span class="text-[10px] bg-gray-100 border border-gray-200 px-2 py-1 rounded text-gray-600 flex items-center gap-1" title="${m.agenda}"><i data-lucide="calendar" class="w-3 h-3"></i> ${m.date}</span>`).join('');
+            if (data.meetings.length === 0) {
+                histDiv.innerHTML = '<span class="text-xs text-gray-400 italic">No meetings yet.</span>';
+            } else {
+                histDiv.innerHTML = data.meetings.map(m => {
+                    const isCompleted = m.status === 'Completed';
+                    const statusBadge = isCompleted
+                        ? '<span class="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold">Completed</span>'
+                        : '<span class="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold">Scheduled</span>';
+                    const actionBtn = isCompleted
+                        ? `<button onclick="openMeetingReport(${m.id})" class="text-[9px] text-teal-600 hover:text-teal-700 font-bold flex items-center gap-0.5"><i data-lucide="file-text" class="w-3 h-3"></i> Report</button>`
+                        : `<button onclick="openConductMeeting(${m.id})" class="text-[9px] text-blue-600 hover:text-blue-700 font-bold flex items-center gap-0.5"><i data-lucide="play" class="w-3 h-3"></i> Conduct</button>`;
+                    return `<div class="bg-gray-50 border border-gray-200 px-3 py-2 rounded-lg text-gray-600 flex flex-col gap-1">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3"></i> ${m.date}</span>
+                            ${statusBadge}
+                        </div>
+                        <p class="text-[10px] text-gray-500 truncate" title="${m.agenda}">${m.agenda || 'No agenda'}</p>
+                        <div class="flex items-center justify-between pt-1 border-t border-gray-200">
+                            <span class="text-[9px] text-gray-400">${m.attendance_count || 0} attended</span>
+                            ${actionBtn}
+                        </div>
+                    </div>`;
+                }).join('');
+            }
             lucide.createIcons();
         }
 
@@ -791,12 +931,433 @@
         // Auto-refresh is disabled globally.
         
         async function confirmSchedule() {
-            const payload = { mentor_id: userId, batch_id: currentBatchId, date: document.getElementById('meet-date').value, time: document.getElementById('meet-time').value, agenda: document.getElementById('meet-agenda').value };
+            const payload = {
+                mentor_id: userId,
+                batch_id: currentBatchId,
+                date: document.getElementById('meet-date').value,
+                time: document.getElementById('meet-time').value,
+                agenda: document.getElementById('meet-agenda').value,
+                venue: document.getElementById('meet-venue').value,
+                discussion_points: document.getElementById('meet-discussion-points').value
+            };
             if(!payload.date || !payload.time) return showToast("Fill all fields", "error");
             const res = await fetch('/api/mentor/schedule_meeting', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
             if(res.ok) { showToast("Scheduled!"); amsMarkModalClosed(); document.getElementById('meeting-modal').classList.add('hidden'); loadMeetingTracker(); } else { showToast("Failed", "error"); }
         }
 
+        // ==================== MEETING MANAGEMENT FUNCTIONS ====================
+        let currentMeetingData = null;
+        let meetingIssues = [];
+
+        function openConductMeeting(meetingId) {
+            currentMeetingData = null;
+            meetingIssues = [];
+            document.getElementById('conduct-meeting-modal').classList.remove('hidden');
+            document.getElementById('conduct-meeting-loader').classList.remove('hidden');
+            document.getElementById('conduct-meeting-content').classList.add('hidden');
+            loadMeetingDetails(meetingId);
+        }
+
+        function closeConductMeeting() {
+            document.getElementById('conduct-meeting-modal').classList.add('hidden');
+            currentMeetingData = null;
+            meetingIssues = [];
+        }
+
+        async function loadMeetingDetails(meetingId) {
+            try {
+                const res = await fetch(`/api/mentor/get_meeting_details?meeting_id=${meetingId}`);
+                if (!res.ok) throw new Error('Failed to load meeting');
+                const data = await res.json();
+                currentMeetingData = data;
+                meetingIssues = data.issues || [];
+                renderMeetingDetails(data);
+            } catch (e) {
+                console.error(e);
+                showToast('Failed to load meeting details', 'error');
+                closeConductMeeting();
+            }
+        }
+
+        function renderMeetingDetails(data) {
+            document.getElementById('conduct-meeting-loader').classList.add('hidden');
+            document.getElementById('conduct-meeting-content').classList.remove('hidden');
+
+            // Header info
+            document.getElementById('conduct-meeting-title').innerText = `Meeting: ${data.meeting.batch_name}`;
+            document.getElementById('conduct-meeting-date').innerText = `${data.meeting.date} at ${data.meeting.time}`;
+            document.getElementById('conduct-meeting-venue').value = data.meeting.venue || '';
+            document.getElementById('conduct-meeting-agenda').innerText = data.meeting.agenda || 'No agenda specified';
+            document.getElementById('conduct-meeting-discussion').value = data.meeting.discussion_points || '';
+            document.getElementById('conduct-meeting-summary').value = data.meeting.summary || '';
+
+            // Attendance list
+            const attendanceBody = document.getElementById('attendance-list-body');
+            attendanceBody.innerHTML = data.students.map((s, idx) => {
+                const att = data.attendance.find(a => a.student_id === s.student_id);
+                const attended = att ? att.attended : false;
+                const remarks = att ? (att.remarks || '') : '';
+                return `<tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="p-3 text-center text-xs text-gray-500">${idx + 1}</td>
+                    <td class="p-3">
+                        <div class="font-semibold text-sm text-gray-800">${s.name}</div>
+                        <div class="text-xs text-gray-400">${s.roll_no}</div>
+                    </td>
+                    <td class="p-3 text-center">
+                        <input type="checkbox" id="att-${s.student_id}" data-student-id="${s.student_id}" ${attended ? 'checked' : ''} class="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 attendance-checkbox">
+                    </td>
+                    <td class="p-3">
+                        <input type="text" id="rem-${s.student_id}" value="${remarks}" placeholder="Optional remarks" class="w-full text-xs p-1.5 border border-gray-200 rounded focus:ring-1 focus:ring-teal-500 outline-none">
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Render issues
+            renderMeetingIssues();
+            lucide.createIcons();
+        }
+
+        function renderMeetingIssues() {
+            const issuesBody = document.getElementById('issues-list-body');
+            if (meetingIssues.length === 0) {
+                issuesBody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-400 text-sm">No issues recorded yet. Click "Add Issue" to record one.</td></tr>`;
+                return;
+            }
+            issuesBody.innerHTML = meetingIssues.map((issue, idx) => {
+                // Handle both raised_by_name (from API) and lookup from students list
+                let studentName = issue.raised_by_name || 'General';
+                if (!studentName || studentName === 'General') {
+                    const found = currentMeetingData.students?.find(s => s.student_id === issue.raised_by_student_id);
+                    if (found) studentName = found.name;
+                }
+                const statusClass = issue.action_status === 'Resolved' ? 'bg-green-100 text-green-700' : (issue.action_status === 'In Progress' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700');
+                return `<tr class="border-b border-gray-100">
+                    <td class="p-3 text-xs text-gray-500">${idx + 1}</td>
+                    <td class="p-3 text-sm text-gray-700">${studentName}</td>
+                    <td class="p-3 text-sm text-gray-700">${issue.issue_description}</td>
+                    <td class="p-3"><span class="text-xs px-2 py-0.5 rounded font-medium ${statusClass}">${issue.action_status}</span></td>
+                    <td class="p-3 text-right">
+                        <button onclick="editIssueAction(${idx})" class="text-xs text-teal-600 hover:text-teal-700 font-medium">Edit Action</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function markAllAttendance(present) {
+            document.querySelectorAll('.attendance-checkbox').forEach(cb => cb.checked = present);
+        }
+
+        function openAddIssueDialog() {
+            document.getElementById('add-issue-dialog').classList.remove('hidden');
+            document.getElementById('issue-student-select').innerHTML = '<option value="">General Issue</option>' +
+                currentMeetingData.students.map(s => `<option value="${s.student_id}">${s.name}</option>`).join('');
+            document.getElementById('issue-description').value = '';
+            document.getElementById('issue-category').value = 'Academic';
+            document.getElementById('issue-action').value = '';
+        }
+
+        function closeAddIssueDialog() {
+            document.getElementById('add-issue-dialog').classList.add('hidden');
+        }
+
+        async function submitIssue() {
+            const payload = {
+                meeting_id: currentMeetingData.meeting.id,
+                raised_by_student_id: document.getElementById('issue-student-select').value || null,
+                issue_description: document.getElementById('issue-description').value,
+                category: document.getElementById('issue-category').value,
+                action_taken: document.getElementById('issue-action').value || null
+            };
+            if (!payload.issue_description) return showToast('Please describe the issue', 'error');
+
+            try {
+                const res = await fetch('/api/mentor/add_meeting_issue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('Failed to add issue');
+                const data = await res.json();
+                meetingIssues.push(data.issue);
+                renderMeetingIssues();
+                closeAddIssueDialog();
+                showToast('Issue recorded');
+            } catch (e) {
+                console.error(e);
+                showToast('Failed to add issue', 'error');
+            }
+        }
+
+        function editIssueAction(idx) {
+            const issue = meetingIssues[idx];
+            const action = prompt('Enter action taken:', issue.action_taken || '');
+            if (action !== null) {
+                updateIssueAction(issue.issue_id, action, idx);
+            }
+        }
+
+        async function updateIssueAction(issueId, action, idx) {
+            try {
+                const res = await fetch('/api/mentor/update_meeting_issue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ issue_id: issueId, action_taken: action, action_status: action ? 'In Progress' : 'Pending' })
+                });
+                if (!res.ok) throw new Error('Failed to update');
+                meetingIssues[idx].action_taken = action;
+                meetingIssues[idx].action_status = action ? 'In Progress' : 'Pending';
+                renderMeetingIssues();
+                showToast('Issue updated');
+            } catch (e) {
+                console.error(e);
+                showToast('Failed to update issue', 'error');
+            }
+        }
+
+        async function submitConductMeeting() {
+            if (!currentMeetingData) return;
+
+            // Gather attendance data
+            const attendance = currentMeetingData.students.map(s => ({
+                student_id: s.student_id,
+                attended: document.getElementById(`att-${s.student_id}`).checked,
+                remarks: document.getElementById(`rem-${s.student_id}`).value || null
+            }));
+
+            const payload = {
+                meeting_id: currentMeetingData.meeting.id,
+                venue: document.getElementById('conduct-meeting-venue').value,
+                discussion_points: document.getElementById('conduct-meeting-discussion').value,
+                summary: document.getElementById('conduct-meeting-summary').value,
+                attendance: attendance
+            };
+
+            try {
+                const res = await fetch('/api/mentor/conduct_meeting', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('Failed to save meeting');
+                showToast('Meeting completed successfully!');
+                closeConductMeeting();
+                loadMeetingTracker();
+            } catch (e) {
+                console.error(e);
+                showToast('Failed to save meeting', 'error');
+            }
+        }
+
+        // ==================== MEETING REPORT FUNCTIONS ====================
+        let reportMeetingData = null;
+
+        function openMeetingReport(meetingId) {
+            reportMeetingData = null;
+            document.getElementById('meeting-report-modal').classList.remove('hidden');
+            document.getElementById('meeting-report-loader').classList.remove('hidden');
+            document.getElementById('meeting-report-content').classList.add('hidden');
+            loadMeetingReport(meetingId);
+        }
+
+        function closeMeetingReport() {
+            document.getElementById('meeting-report-modal').classList.add('hidden');
+            reportMeetingData = null;
+        }
+
+        async function loadMeetingReport(meetingId) {
+            try {
+                const res = await fetch(`/api/mentor/get_meeting_report?meeting_id=${meetingId}`);
+                if (!res.ok) throw new Error('Failed to load report');
+                reportMeetingData = await res.json();
+                renderMeetingReport(reportMeetingData);
+            } catch (e) {
+                console.error(e);
+                showToast('Failed to load meeting report', 'error');
+                closeMeetingReport();
+            }
+        }
+
+        function renderMeetingReport(data) {
+            document.getElementById('meeting-report-loader').classList.add('hidden');
+            document.getElementById('meeting-report-content').classList.remove('hidden');
+
+            const m = data.meeting;
+            document.getElementById('report-batch-name').innerText = m.batch_name;
+            document.getElementById('report-date').innerText = m.date;
+            document.getElementById('report-time').innerText = m.time;
+            document.getElementById('report-venue').innerText = m.venue || 'Not specified';
+            document.getElementById('report-agenda').innerText = m.agenda || 'Not specified';
+            document.getElementById('report-discussion').innerText = m.discussion_points || 'Not recorded';
+            document.getElementById('report-summary').innerText = m.summary || 'Not recorded';
+
+            // Attendance summary
+            const present = data.attendance.filter(a => a.attended).length;
+            const total = data.attendance.length;
+            document.getElementById('report-attendance-summary').innerText = `${present} / ${total} students present`;
+
+            // Attendance table
+            const attBody = document.getElementById('report-attendance-body');
+            attBody.innerHTML = data.attendance.map((a, idx) => `<tr class="border-b border-gray-100">
+                <td class="p-2 text-xs text-gray-500">${idx + 1}</td>
+                <td class="p-2 text-sm">${a.name}</td>
+                <td class="p-2 text-xs text-gray-400">${a.roll_no}</td>
+                <td class="p-2 text-center"><span class="${a.attended ? 'text-green-600' : 'text-red-500'} font-bold text-xs">${a.attended ? 'Present' : 'Absent'}</span></td>
+                <td class="p-2 text-xs text-gray-500">${a.remarks || '-'}</td>
+            </tr>`).join('');
+
+            // Issues table
+            const issBody = document.getElementById('report-issues-body');
+            if (data.issues.length === 0) {
+                issBody.innerHTML = '<tr><td colspan="4" class="p-3 text-center text-gray-400 text-sm">No issues recorded</td></tr>';
+            } else {
+                issBody.innerHTML = data.issues.map((iss, idx) => `<tr class="border-b border-gray-100">
+                    <td class="p-2 text-xs text-gray-500">${idx + 1}</td>
+                    <td class="p-2 text-sm">${iss.raised_by || 'General'}</td>
+                    <td class="p-2 text-sm">${iss.issue_description}</td>
+                    <td class="p-2 text-sm">${iss.action_taken || 'Pending'}</td>
+                </tr>`).join('');
+            }
+        }
+
+        function downloadMeetingPDF() {
+            if (!reportMeetingData) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'mm', 'a4');
+            const m = reportMeetingData.meeting;
+
+            // Use the same header style as attendance reports
+            const termLine = amsGetAcademicTermLine({ term: m.term, academic_year: m.academic_year });
+            const subLines = [
+                m.school || 'School of Computing',
+                m.department ? `Department: ${m.department}` : ''
+            ].filter(Boolean);
+
+            const y = amsAddReportHeader(doc, {
+                title: 'Mentor-Mentee Meeting Report',
+                termLine: termLine,
+                subLines: subLines
+            });
+
+            let currentY = y + 5;
+
+            // Meeting details section
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Meeting Details', 14, currentY);
+            currentY += 6;
+
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'normal');
+            const details = [
+                ['Batch:', m.batch_name],
+                ['Date:', m.date],
+                ['Time:', m.time],
+                ['Venue:', m.venue || 'Not specified'],
+                ['Mentor:', m.mentor_name || '']
+            ];
+            details.forEach(([label, value]) => {
+                doc.setFont('helvetica', 'bold');
+                doc.text(label, 14, currentY);
+                doc.setFont('helvetica', 'normal');
+                doc.text(value, 40, currentY);
+                currentY += 5;
+            });
+
+            // Agenda
+            currentY += 3;
+            doc.setFont('helvetica', 'bold');
+            doc.text('Agenda:', 14, currentY);
+            currentY += 5;
+            doc.setFont('helvetica', 'normal');
+            const agendaLines = doc.splitTextToSize(m.agenda || 'Not specified', 180);
+            doc.text(agendaLines, 14, currentY);
+            currentY += agendaLines.length * 5 + 3;
+
+            // Discussion Points
+            doc.setFont('helvetica', 'bold');
+            doc.text('Discussion Points:', 14, currentY);
+            currentY += 5;
+            doc.setFont('helvetica', 'normal');
+            const discLines = doc.splitTextToSize(m.discussion_points || 'Not recorded', 180);
+            doc.text(discLines, 14, currentY);
+            currentY += discLines.length * 5 + 3;
+
+            // Summary
+            doc.setFont('helvetica', 'bold');
+            doc.text('Summary:', 14, currentY);
+            currentY += 5;
+            doc.setFont('helvetica', 'normal');
+            const summLines = doc.splitTextToSize(m.summary || 'Not recorded', 180);
+            doc.text(summLines, 14, currentY);
+            currentY += summLines.length * 5 + 8;
+
+            // Attendance Table
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(11);
+            const present = reportMeetingData.attendance.filter(a => a.attended).length;
+            const total = reportMeetingData.attendance.length;
+            doc.text(`Attendance (${present}/${total} Present)`, 14, currentY);
+            currentY += 6;
+
+            doc.autoTable({
+                startY: currentY,
+                head: [['#', 'Name', 'Roll No', 'Status', 'Remarks']],
+                body: reportMeetingData.attendance.map((a, idx) => [
+                    idx + 1,
+                    a.name,
+                    a.roll_no,
+                    a.attended ? 'Present' : 'Absent',
+                    a.remarks || '-'
+                ]),
+                theme: 'grid',
+                styles: { fontSize: 9, cellPadding: 2 },
+                headStyles: { fillColor: [20, 184, 166], textColor: 255 },
+                columnStyles: {
+                    0: { cellWidth: 10 },
+                    3: { cellWidth: 20 }
+                }
+            });
+
+            currentY = doc.lastAutoTable.finalY + 10;
+
+            // Issues Table (if any)
+            if (reportMeetingData.issues.length > 0) {
+                if (currentY > 240) {
+                    doc.addPage();
+                    currentY = 20;
+                }
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(11);
+                doc.text('Issues Raised', 14, currentY);
+                currentY += 6;
+
+                doc.autoTable({
+                    startY: currentY,
+                    head: [['#', 'Raised By', 'Issue', 'Action Taken']],
+                    body: reportMeetingData.issues.map((iss, idx) => [
+                        idx + 1,
+                        iss.raised_by || 'General',
+                        iss.issue_description,
+                        iss.action_taken || 'Pending'
+                    ]),
+                    theme: 'grid',
+                    styles: { fontSize: 9, cellPadding: 2 },
+                    headStyles: { fillColor: [20, 184, 166], textColor: 255 },
+                    columnStyles: { 0: { cellWidth: 10 } }
+                });
+            }
+
+            // Signature section at bottom
+            const pageHeight = doc.internal.pageSize.height;
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            doc.text('Mentor Signature: ____________________', 14, pageHeight - 25);
+            doc.text('Date: ____________________', 140, pageHeight - 25);
+
+            doc.save(`Meeting_Report_${m.batch_name}_${m.date}.pdf`);
+        }
+
+        // ==================== END MEETING MANAGEMENT FUNCTIONS ====================
 
         // Add this inside renderDashboard() at the very end
         function animateDashboard() {
@@ -913,7 +1474,7 @@
             catch (e) { /* ignore */ } 
             window.location.replace('/'); 
         }
-        function closeModal() { document.getElementById('report-modal').classList.add('hidden'); document.getElementById('summary-modal').classList.add('hidden'); document.getElementById('mentee-modal').classList.add('hidden'); document.getElementById('counseling-modal').classList.add('hidden'); document.getElementById('meeting-modal').classList.add('hidden'); document.getElementById('adjust-modal').classList.add('hidden'); amsMarkModalClosed(); closeActionModal(); }
+        function closeModal() { document.getElementById('report-modal').classList.add('hidden'); document.getElementById('summary-modal').classList.add('hidden'); document.getElementById('mentee-modal').classList.add('hidden'); document.getElementById('counseling-modal').classList.add('hidden'); document.getElementById('meeting-modal').classList.add('hidden'); document.getElementById('adjust-modal').classList.add('hidden'); document.getElementById('conduct-meeting-modal').classList.add('hidden'); document.getElementById('meeting-report-modal').classList.add('hidden'); document.getElementById('add-issue-dialog').classList.add('hidden'); amsMarkModalClosed(); closeActionModal(); }
         function toggleUpcoming() { const w = document.getElementById('upcoming-wrapper'); w.classList.toggle('hidden'); document.getElementById('upcoming-icon').style.transform = w.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)'; }
         
         async function openReport(sid, secid) { document.getElementById('report-modal').classList.remove('hidden'); document.getElementById('report-modal-loader').classList.remove('hidden'); const headerRow = document.getElementById('report-modal-header-row'); const body = document.getElementById('report-modal-body'); headerRow.innerHTML = ''; body.innerHTML = ''; try { const res = await fetch(`/api/class_teacher/subject_report?user_id=${userId}&subject_id=${sid}&section_id=${secid}`); const data = await res.json(); reportMeta = data.meta; document.getElementById('report-modal-title').innerText = data.meta.subject; document.getElementById('report-modal-subtitle').innerText = `Report for ${data.meta.class_div}`; let headers = `<th class="p-4 bg-gray-50 border-r w-16">Roll</th><th class="p-4 bg-gray-50 border-r w-48">Name</th>`; data.dates.forEach(d => headers += `<th class="p-4 text-center min-w-[50px]">${d}</th>`); headers += `<th class="p-4 bg-gray-50 border-l text-center">Total</th><th class="p-4 bg-gray-50 border-l text-center">%</th>`; headerRow.innerHTML = headers; body.innerHTML = data.rows.map(r => { let cells = r.record.map(s => `<td class="p-4 text-center border-b border-gray-50 ${s === 'P' ? 'text-green-600 font-bold' : (s === 'OD' ? 'text-purple-600 font-bold' : 'text-red-300')}">${s}</td>`).join(''); return `<tr><td class="p-4 border-r font-mono text-xs text-gray-500">${r.roll}</td><td class="p-4 border-r font-bold text-gray-700 text-sm whitespace-nowrap">${r.name}</td>${cells}<td class="p-4 border-l text-center font-bold">${r.total}</td><td class="p-4 border-l text-center font-bold ${r.perc < 75 ? 'text-red-600' : 'text-green-600'}">${r.perc}%</td></tr>`; }).join(''); } catch (e) { console.error(e); } finally { document.getElementById('report-modal-loader').classList.add('hidden'); } }
