@@ -1,7 +1,7 @@
 """Add meeting management tables for NAAC compliance
 
 Revision ID: a1b2c3d4e5f6
-Revises: f582326554e5
+Revises: cf8f089488d4
 Create Date: 2025-12-27
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'a1b2c3d4e5f6'
-down_revision = '2f64c4bd5778'
+down_revision = 'cf8f089488d4'
 branch_labels = None
 depends_on = None
 
