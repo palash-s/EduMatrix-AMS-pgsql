@@ -224,13 +224,35 @@
         <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div class="flex justify-between items-center p-5 border-b">
                 <div>
-                    <h3 class="font-bold text-lg text-gray-900 serif">Conduct Meeting</h3>
-                    <p class="text-xs text-gray-500" id="conduct-meeting-info">Loading...</p>
+                    <h3 class="font-bold text-lg text-gray-900 serif" id="conduct-meeting-title">Conduct Meeting</h3>
+                    <p class="text-xs text-gray-500" id="conduct-meeting-date">Loading...</p>
                 </div>
                 <button onclick="closeConductMeeting()" class="p-1 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="x" class="w-5 h-5"></i></button>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-5 space-y-5">
+            <!-- Loader -->
+            <div id="conduct-meeting-loader" class="flex-1 flex items-center justify-center p-10">
+                <p class="text-gray-400">Loading meeting details...</p>
+            </div>
+
+            <!-- Content (hidden initially) -->
+            <div id="conduct-meeting-content" class="hidden flex-1 overflow-y-auto p-5 space-y-5">
+                <!-- Meeting Info -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Venue</label>
+                        <input type="text" id="conduct-meeting-venue" class="w-full p-2 border border-gray-300 rounded-lg text-sm" placeholder="Meeting venue">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Agenda</label>
+                        <p id="conduct-meeting-agenda" class="text-sm text-gray-700 p-2 bg-gray-50 rounded-lg">-</p>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Discussion Points</label>
+                    <textarea id="conduct-meeting-discussion" rows="2" class="w-full p-2 border border-gray-300 rounded-lg text-sm resize-none" placeholder="Topics discussed..."></textarea>
+                </div>
+
                 <!-- Attendance Section -->
                 <div>
                     <div class="flex justify-between items-center mb-3">
@@ -271,7 +293,7 @@
                 <!-- Summary Section -->
                 <div>
                     <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Meeting Summary / Remarks</label>
-                    <textarea id="conduct-summary" rows="3" placeholder="Enter meeting summary and concluding remarks..." class="w-full p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"></textarea>
+                    <textarea id="conduct-meeting-summary" rows="3" placeholder="Enter meeting summary and concluding remarks..." class="w-full p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"></textarea>
                 </div>
             </div>
 
