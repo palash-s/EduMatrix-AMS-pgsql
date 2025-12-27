@@ -36,7 +36,7 @@ from sql_connection import (
     EventMaster, EventParticipation, SubjectAllocation, StudentElective,
     SessionLog, AttendanceTransaction, LeaveApplication, 
     LeaveWorkflowLog, DetentionRecord, SystemLog, MentorBatch, ElectiveOffering, 
-    RoomMaster, MentorLog, MentorMeeting, Notification, get_db_uri,CAMarks, TermGrantRecord,
+    RoomMaster, MentorLog, MentorMeeting, MeetingAttendance, MeetingIssue, Notification, get_db_uri,CAMarks, TermGrantRecord,
     FeedbackCycle, FeedbackResponse, StudentFeedbackStatus, SystemConfig, ArchivedAllocation, ArchivedSchedule
 
     , SemesterCourseStructure, ElectiveWindow
@@ -128,6 +128,29 @@ CSRF_EXEMPT_ENDPOINTS = [
     'api_v1_test_push',
     'api_v1_devices_register',
 ]
+
+@app.before_request
+def try_bearer_auth_for_api():
+    """For API requests with Bearer token, authenticate the user via Flask-Login.
+    This allows mobile apps to use @login_required endpoints."""
+    if request.path.startswith('/api/'):
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.lower().startswith('bearer '):
+            token = auth_header.split(' ', 1)[1].strip()
+            if token:
+                try:
+                    payload = _mobile_access_serializer().loads(
+                        token,
+                        max_age=app.config['MOBILE_ACCESS_TOKEN_TTL_SECONDS'],
+                    )
+                    uid = payload.get('uid')
+                    if uid:
+                        user = UserMaster.query.get(uid)
+                        if user and user.is_active:
+                            login_user(user, remember=False)
+                except Exception:
+                    pass  # Token invalid, will fail at @login_required
+
 
 @app.before_request
 def csrf_protect_selectively():
@@ -542,6 +565,16 @@ def _require_mobile_auth() -> UserMaster:
         # 401 is important so mobile can trigger refresh flow.
         raise PermissionError('Unauthorized')
     return user
+
+
+def _try_bearer_login():
+    """If Bearer token is present, verify it and log the user in via Flask-Login.
+    This allows mobile apps to use session-protected endpoints."""
+    token = _get_bearer_token()
+    if token:
+        user = _verify_access_token(token)
+        if user:
+            login_user(user, remember=False)
 
 
 def _find_user_for_login(username: str) -> UserMaster | None:
@@ -3918,7 +3951,6 @@ def assign_detention():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 
-# In app.py
 
 # ==========================================
 # API: DETENTION WATCHLIST
@@ -4112,9 +4144,7 @@ def get_defaulter_watchlist():
 def render_parent_dashboard():
     return render_template('parent_dashboard.html')
 
-# In app.py
 
-# In app.py
 
 @app.route('/api/parent/dashboard', methods=['GET'])
 @login_required
@@ -7841,32 +7871,41 @@ def schedule_mentor_meeting():
         data = request.json
         mentor_id = data.get('mentor_id')
         batch_id = data.get('batch_id')
-        
+
         # 1. Count existing meetings
         count = MentorMeeting.query.filter_by(batch_id=batch_id).count()
         if count >= 4:
             return jsonify({"error": "Maximum 4 mandatory meetings already scheduled."}), 400
 
-        # 2. Create Meeting
+        # 2. Create Meeting with new fields
         date_obj = datetime.strptime(data.get('date'), '%Y-%m-%d').date()
         time_obj = datetime.strptime(data.get('time'), '%H:%M').time()
-        
+
         meeting = MentorMeeting(
             mentor_id=mentor_id,
             batch_id=batch_id,
             date=date_obj,
             time=time_obj,
             agenda=data.get('agenda'),
+            venue=data.get('venue'),  # New field
+            discussion_points=data.get('discussion_points'),  # New field
             status='Scheduled'
         )
 
-        students = StudentProfile.query.filter_by(mentor_batch_id=data.get('batch_id')).all()
+        # 3. Notify students with enhanced message
+        venue_text = f" at {data.get('venue')}" if data.get('venue') else ""
+        students = StudentProfile.query.filter_by(mentor_batch_id=batch_id).all()
         for s in students:
-            send_notification(s.student_id, "New Mentor Meeting", f"Meeting scheduled on {data.get('date')} for {data.get('agenda')}.", "info")
+            send_notification(
+                s.student_id,
+                "Mentor Meeting Scheduled",
+                f"Meeting on {data.get('date')} at {data.get('time')}{venue_text}. Agenda: {data.get('agenda')}",
+                "info"
+            )
         db.session.add(meeting)
         db.session.commit()
-        
-        return jsonify({"message": "Meeting scheduled successfully."}), 200
+
+        return jsonify({"message": "Meeting scheduled successfully.", "meeting_id": meeting.meeting_id}), 200
     except Exception:
         app.logger.exception("schedule_mentor_meeting failed")
         return jsonify({"error": "Failed to schedule meeting."}), 500
@@ -7877,23 +7916,363 @@ def schedule_mentor_meeting():
 def get_mentor_meetings():
     try:
         batch_id = request.args.get('batch_id')
-        
+
         meetings = MentorMeeting.query.filter_by(batch_id=batch_id).order_by(MentorMeeting.date).all()
-        
+
         meeting_list = []
         for m in meetings:
+            # Count attendance and issues
+            attendee_count = MeetingAttendance.query.filter_by(meeting_id=m.meeting_id, attended=True).count()
+            issues_count = MeetingIssue.query.filter_by(meeting_id=m.meeting_id).count()
+
             meeting_list.append({
                 "id": m.meeting_id,
                 "date": m.date.strftime('%d %b %Y'),
+                "date_raw": m.date.strftime('%Y-%m-%d'),
                 "time": m.time.strftime('%I:%M %p'),
+                "time_raw": m.time.strftime('%H:%M'),
                 "agenda": m.agenda,
-                "status": m.status
+                "venue": m.venue,
+                "discussion_points": m.discussion_points,
+                "status": m.status,
+                "attendee_count": attendee_count,
+                "issues_count": issues_count
             })
-            
+
         return jsonify({"meetings": meeting_list, "count": len(meetings)})
     except Exception:
         app.logger.exception("get_mentor_meetings failed")
         return jsonify({"error": "Failed to fetch meetings."}), 500
+
+
+@app.route('/api/mentor/get_meeting_details', methods=['GET'])
+@login_required
+@require_roles('Staff', 'Admin')
+def get_meeting_details():
+    """Get full meeting details including attendance and issues."""
+    try:
+        meeting_id = request.args.get('meeting_id')
+        meeting = db.session.get(MentorMeeting, meeting_id)
+        if not meeting:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        # Get mentor info
+        mentor = StaffProfile.query.get(meeting.mentor_id)
+
+        # Get batch info
+        batch = MentorBatch.query.get(meeting.batch_id)
+        section = ClassSection.query.get(batch.section_id) if batch else None
+
+        # Get all students in batch with attendance status
+        students = StudentProfile.query.filter_by(mentor_batch_id=meeting.batch_id).all()
+        attendance_map = {
+            a.student_id: a for a in
+            MeetingAttendance.query.filter_by(meeting_id=meeting_id).all()
+        }
+
+        # Students list (for populating dropdowns and attendance)
+        students_list = []
+        for s in students:
+            students_list.append({
+                "student_id": s.student_id,
+                "name": s.full_name,
+                "roll_no": s.admission_number
+            })
+
+        # Attendance list with status
+        attendance_list = []
+        for s in students:
+            att = attendance_map.get(s.student_id)
+            attendance_list.append({
+                "student_id": s.student_id,
+                "name": s.full_name,
+                "roll_no": s.admission_number,
+                "attended": att.attended if att else False,
+                "remarks": att.remarks if att else None
+            })
+
+        # Get issues raised
+        issues = MeetingIssue.query.filter_by(meeting_id=meeting_id).order_by(MeetingIssue.created_at).all()
+        issues_list = []
+        for i in issues:
+            raised_by = StudentProfile.query.get(i.raised_by_student_id) if i.raised_by_student_id else None
+            issues_list.append({
+                "issue_id": i.issue_id,
+                "issue_description": i.issue_description,
+                "category": i.category,
+                "raised_by_name": raised_by.full_name if raised_by else None,
+                "raised_by_student_id": i.raised_by_student_id,
+                "action_taken": i.action_taken,
+                "action_status": i.action_status,
+                "created_at": i.created_at.strftime('%Y-%m-%d %H:%M') if i.created_at else None
+            })
+
+        batch_name = f"{section.class_level}-{section.name} ({batch.batch_name})" if section and batch else "Unknown"
+
+        return jsonify({
+            "meeting": {
+                "id": meeting.meeting_id,
+                "date": meeting.date.strftime('%Y-%m-%d'),
+                "date_display": meeting.date.strftime('%d %b %Y'),
+                "time": meeting.time.strftime('%H:%M'),
+                "time_display": meeting.time.strftime('%I:%M %p'),
+                "agenda": meeting.agenda,
+                "venue": meeting.venue,
+                "discussion_points": meeting.discussion_points,
+                "summary": meeting.summary,
+                "status": meeting.status,
+                "batch_name": batch_name,
+                "completed_at": meeting.completed_at.strftime('%Y-%m-%d %H:%M') if meeting.completed_at else None
+            },
+            "mentor": {
+                "id": mentor.staff_id if mentor else None,
+                "name": mentor.full_name if mentor else "Unknown"
+            },
+            "batch": {
+                "id": batch.batch_id if batch else None,
+                "name": batch.batch_name if batch else "Unknown",
+                "class": f"{section.class_level}-{section.name}" if section else "Unknown"
+            },
+            "students": students_list,
+            "attendance": attendance_list,
+            "issues": issues_list
+        })
+    except Exception:
+        app.logger.exception("get_meeting_details failed")
+        return jsonify({"error": "Failed to fetch meeting details."}), 500
+
+
+@app.route('/api/mentor/conduct_meeting', methods=['POST'])
+@login_required
+@require_roles('Staff', 'Admin')
+def conduct_meeting():
+    """Mark meeting as conducted and record attendance."""
+    try:
+        data = request.json
+        meeting_id = data.get('meeting_id')
+        attendance_list = data.get('attendance', [])
+        summary = data.get('summary')
+
+        meeting = db.session.get(MentorMeeting, meeting_id)
+        if not meeting:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        # Update meeting status
+        meeting.status = 'Completed'
+        meeting.completed_at = datetime.now()
+        if summary:
+            meeting.summary = summary
+
+        # Clear existing attendance and insert new
+        MeetingAttendance.query.filter_by(meeting_id=meeting_id).delete()
+        for att in attendance_list:
+            attendance = MeetingAttendance(
+                meeting_id=meeting_id,
+                student_id=att.get('student_id'),
+                attended=att.get('attended', False),
+                remarks=att.get('remarks')
+            )
+            db.session.add(attendance)
+
+        db.session.commit()
+        return jsonify({"message": "Meeting marked as completed."}), 200
+    except Exception:
+        app.logger.exception("conduct_meeting failed")
+        return jsonify({"error": "Failed to complete meeting."}), 500
+
+
+@app.route('/api/mentor/add_meeting_issue', methods=['POST'])
+@login_required
+@require_roles('Staff', 'Admin')
+def add_meeting_issue():
+    """Record an issue raised during meeting."""
+    try:
+        data = request.json
+        meeting_id = data.get('meeting_id')
+        description = data.get('issue_description') or data.get('description')
+        category = data.get('category', 'General')
+        raised_by_id = data.get('raised_by_student_id')
+        action_taken = data.get('action_taken')
+
+        if not meeting_id or not description:
+            return jsonify({"error": "Meeting ID and description are required"}), 400
+
+        # Get student name if provided
+        raised_by_name = None
+        if raised_by_id:
+            student = StudentProfile.query.get(raised_by_id)
+            raised_by_name = student.full_name if student else None
+
+        issue = MeetingIssue(
+            meeting_id=meeting_id,
+            issue_description=description,
+            category=category,
+            raised_by_student_id=raised_by_id if raised_by_id else None,
+            action_taken=action_taken,
+            action_status='Pending' if not action_taken else 'In Progress'
+        )
+        db.session.add(issue)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Issue recorded.",
+            "issue": {
+                "issue_id": issue.issue_id,
+                "issue_description": issue.issue_description,
+                "category": issue.category,
+                "raised_by_student_id": issue.raised_by_student_id,
+                "raised_by_name": raised_by_name,
+                "action_taken": issue.action_taken,
+                "action_status": issue.action_status
+            }
+        }), 200
+    except Exception:
+        app.logger.exception("add_meeting_issue failed")
+        return jsonify({"error": "Failed to add issue."}), 500
+
+
+@app.route('/api/mentor/update_meeting_issue', methods=['POST'])
+@login_required
+@require_roles('Staff', 'Admin')
+def update_meeting_issue():
+    """Update action taken on an issue."""
+    try:
+        data = request.json
+        issue_id = data.get('issue_id')
+        action_taken = data.get('action_taken')
+        action_status = data.get('action_status', 'Pending')
+
+        issue = db.session.get(MeetingIssue, issue_id)
+        if not issue:
+            return jsonify({"error": "Issue not found"}), 404
+
+        issue.action_taken = action_taken
+        issue.action_status = action_status
+        if action_status == 'Resolved':
+            issue.resolved_at = datetime.now()
+
+        db.session.commit()
+        return jsonify({"message": "Issue updated."}), 200
+    except Exception:
+        app.logger.exception("update_meeting_issue failed")
+        return jsonify({"error": "Failed to update issue."}), 500
+
+
+@app.route('/api/mentor/get_meeting_report', methods=['GET'])
+@login_required
+@require_roles('Staff', 'Admin')
+def get_meeting_report():
+    """Get comprehensive meeting data for PDF generation."""
+    try:
+        meeting_id = request.args.get('meeting_id')
+        meeting = db.session.get(MentorMeeting, meeting_id)
+        if not meeting:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        # Get mentor info
+        mentor = StaffProfile.query.get(meeting.mentor_id)
+
+        # Get batch info
+        batch = MentorBatch.query.get(meeting.batch_id)
+        section = ClassSection.query.get(batch.section_id) if batch else None
+
+        # Get attendance with student details
+        students = StudentProfile.query.filter_by(mentor_batch_id=meeting.batch_id).order_by(StudentProfile.roll_number).all()
+        attendance_map = {
+            a.student_id: a for a in
+            MeetingAttendance.query.filter_by(meeting_id=meeting_id).all()
+        }
+
+        attendance_list = []
+        present_count = 0
+        for s in students:
+            att = attendance_map.get(s.student_id)
+            attended = att.attended if att else False
+            if attended:
+                present_count += 1
+            attendance_list.append({
+                "roll": s.roll_number,
+                "name": s.full_name,
+                "attended": attended,
+                "remarks": att.remarks if att else ""
+            })
+
+        # Get issues
+        issues = MeetingIssue.query.filter_by(meeting_id=meeting_id).order_by(MeetingIssue.created_at).all()
+        issues_list = []
+        for i in issues:
+            raised_by = StudentProfile.query.get(i.raised_by_student_id) if i.raised_by_student_id else None
+            issues_list.append({
+                "description": i.issue_description,
+                "category": i.category,
+                "raised_by": raised_by.full_name if raised_by else "Anonymous",
+                "action": i.action_taken or "-",
+                "status": i.action_status
+            })
+
+        return jsonify({
+            "meeting_number": MentorMeeting.query.filter(
+                MentorMeeting.batch_id == meeting.batch_id,
+                MentorMeeting.date <= meeting.date
+            ).count(),
+            "date": meeting.date.strftime('%d %b %Y'),
+            "time": meeting.time.strftime('%I:%M %p'),
+            "venue": meeting.venue or "Not specified",
+            "agenda": meeting.agenda,
+            "discussion_points": meeting.discussion_points,
+            "summary": meeting.summary or "",
+            "mentor_name": mentor.full_name if mentor else "Unknown",
+            "batch_name": f"{section.class_level}-{section.section_name} ({batch.batch_name})" if section and batch else "Unknown",
+            "total_students": len(students),
+            "present_count": present_count,
+            "attendance": attendance_list,
+            "issues": issues_list
+        })
+    except Exception:
+        app.logger.exception("get_meeting_report failed")
+        return jsonify({"error": "Failed to generate report data."}), 500
+
+
+@app.route('/api/mentor/my_pending_issues', methods=['GET'])
+@login_required
+@require_roles('Staff', 'Admin')
+def get_mentor_pending_issues():
+    """Get all pending (Open) logs for a mentor across all their batches."""
+    try:
+        mentor_id = request.args.get('mentor_id')
+
+        # Get all batches for this mentor
+        my_batches = MentorBatch.query.filter_by(mentor_id=mentor_id).all()
+        batch_ids = [b.batch_id for b in my_batches]
+
+        if not batch_ids:
+            return jsonify({"issues": [], "count": 0})
+
+        # Get all Open and Escalated logs for students in mentor's batches
+        logs = (db.session.query(MentorLog, StudentProfile)
+                .join(StudentProfile, MentorLog.student_id == StudentProfile.student_id)
+                .filter(MentorLog.mentor_batch_id.in_(batch_ids))
+                .filter(MentorLog.status.in_(['Open', 'Escalated']))
+                .order_by(MentorLog.date.desc())
+                .all())
+
+        issue_list = []
+        for log, student in logs:
+            issue_list.append({
+                "log_id": log.log_id,
+                "student_id": log.student_id,
+                "student_name": student.full_name,
+                "date": log.date.strftime('%Y-%m-%d'),
+                "category": log.issue_category,
+                "remarks": log.remarks,
+                "action_taken": log.action_taken,
+                "status": log.status
+            })
+
+        return jsonify({"issues": issue_list, "count": len(issue_list)})
+    except Exception:
+        app.logger.exception("get_mentor_pending_issues failed")
+        return jsonify({"error": "Failed to fetch pending issues."}), 500
 
 
 @app.route('/api/mentor/get_logs', methods=['GET'])
