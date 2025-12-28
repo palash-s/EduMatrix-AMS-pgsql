@@ -1203,14 +1203,28 @@
 
         async function loadMeetingReport(meetingId) {
             try {
-                const res = await fetch(`/api/mentor/get_meeting_report?meeting_id=${meetingId}`);
-                if (!res.ok) throw new Error('Failed to load report');
-                reportMeetingData = await res.json();
+                const res = await fetch(`/api/mentor/get_meeting_report?meeting_id=${encodeURIComponent(meetingId)}`);
+                const raw = await res.text();
+                let payload = null;
+                try { payload = raw ? JSON.parse(raw) : null; } catch (_e) { payload = null; }
+                if (!res.ok) {
+                    const msg = (payload && payload.error) ? payload.error : (raw || `HTTP ${res.status}`);
+                    throw new Error(msg);
+                }
+                reportMeetingData = payload;
                 renderMeetingReport(reportMeetingData);
             } catch (e) {
                 console.error(e);
-                showToast('Failed to load meeting report', 'error');
-                closeMeetingReport();
+                const msg = (e && e.message) ? e.message : 'Failed to load meeting report';
+                showToast(msg, 'error');
+                const content = document.getElementById('meeting-report-content');
+                if (content) {
+                    content.innerHTML = `<div class="p-6 text-sm text-gray-600"><p class="font-bold text-red-600 mb-2">Failed to load meeting report</p><p class="break-words">${amsEscapeHtml(String(msg))}</p></div>`;
+                }
+                const loader = document.getElementById('meeting-report-loader');
+                if (loader) loader.classList.add('hidden');
+                const contentEl = document.getElementById('meeting-report-content');
+                if (contentEl) contentEl.classList.remove('hidden');
             }
         }
 
