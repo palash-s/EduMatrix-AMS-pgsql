@@ -1457,6 +1457,24 @@ def api_v1_auth_login():
     access_token = _issue_access_token(user)
     refresh_token = _issue_refresh_token(user, device_id=device_id)
 
+    # Build staff roles for staff users
+    staff_roles = None
+    if role == 'staff':
+        user_id = user.user_id
+        dept_managed = Department.query.filter_by(hod_staff_id=user_id).first()
+        class_managed = ClassSection.query.filter_by(class_teacher_id=user_id).first()
+        staff_profile = StaffProfile.query.filter_by(staff_id=user_id).first()
+        mentor_batch = MentorBatch.query.filter_by(mentor_id=user_id).first()
+
+        staff_roles = {
+            "is_hod": dept_managed is not None,
+            "is_class_teacher": class_managed is not None,
+            "is_event_coordinator": getattr(staff_profile, 'is_event_coordinator', False) if staff_profile else False,
+            "is_amc_member": getattr(staff_profile, 'is_amc_member', False) if staff_profile else False,
+            "is_amc_head": getattr(staff_profile, 'is_amc_head', False) if staff_profile else False,
+            "is_mentor": mentor_batch is not None
+        }
+
     return jsonify({
         "access_token": access_token,
         "expires_in": app.config['MOBILE_ACCESS_TOKEN_TTL_SECONDS'],
@@ -1467,6 +1485,7 @@ def api_v1_auth_login():
             "user_id": user.user_id,
             "role": role,
             "username": user.username,
+            "staff_roles": staff_roles
         }
     }), 200
 
@@ -7919,6 +7938,11 @@ def get_mentor_meetings():
 
         meetings = MentorMeeting.query.filter_by(batch_id=batch_id).order_by(MentorMeeting.date).all()
 
+        # Get batch info for batch_name
+        batch = MentorBatch.query.get(batch_id)
+        section = ClassSection.query.get(batch.section_id) if batch else None
+        batch_name = f"{section.class_level}-{section.name} ({batch.batch_name})" if section and batch else "Unknown"
+
         meeting_list = []
         for m in meetings:
             # Count attendance and issues
@@ -7927,6 +7951,8 @@ def get_mentor_meetings():
 
             meeting_list.append({
                 "id": m.meeting_id,
+                "batch_id": m.batch_id,
+                "batch_name": batch_name,
                 "date": m.date.strftime('%d %b %Y'),
                 "date_raw": m.date.strftime('%Y-%m-%d'),
                 "time": m.time.strftime('%I:%M %p'),
@@ -7934,8 +7960,9 @@ def get_mentor_meetings():
                 "agenda": m.agenda,
                 "venue": m.venue,
                 "discussion_points": m.discussion_points,
+                "summary": m.summary,
                 "status": m.status,
-                "attendee_count": attendee_count,
+                "attendance_count": attendee_count,
                 "issues_count": issues_count
             })
 
@@ -7951,7 +7978,11 @@ def get_mentor_meetings():
 def get_meeting_details():
     """Get full meeting details including attendance and issues."""
     try:
-        meeting_id = request.args.get('meeting_id')
+        meeting_id_raw = request.args.get('meeting_id')
+        try:
+            meeting_id = int(meeting_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid meeting_id"}), 400
         meeting = db.session.get(MentorMeeting, meeting_id)
         if not meeting:
             return jsonify({"error": "Meeting not found"}), 404
@@ -8164,7 +8195,11 @@ def update_meeting_issue():
 def get_meeting_report():
     """Get comprehensive meeting data for PDF generation."""
     try:
-        meeting_id = request.args.get('meeting_id')
+        meeting_id_raw = request.args.get('meeting_id')
+        try:
+            meeting_id = int(meeting_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid meeting_id"}), 400
         meeting = db.session.get(MentorMeeting, meeting_id)
         if not meeting:
             return jsonify({"error": "Meeting not found"}), 404
@@ -8177,7 +8212,7 @@ def get_meeting_report():
         section = ClassSection.query.get(batch.section_id) if batch else None
 
         # Get attendance with student details
-        students = StudentProfile.query.filter_by(mentor_batch_id=meeting.batch_id).order_by(StudentProfile.roll_number).all()
+        students = StudentProfile.query.filter_by(mentor_batch_id=meeting.batch_id).order_by(StudentProfile.admission_number).all()
         attendance_map = {
             a.student_id: a for a in
             MeetingAttendance.query.filter_by(meeting_id=meeting_id).all()
@@ -8191,7 +8226,7 @@ def get_meeting_report():
             if attended:
                 present_count += 1
             attendance_list.append({
-                "roll": s.roll_number,
+                "roll_no": s.admission_number,
                 "name": s.full_name,
                 "attended": attended,
                 "remarks": att.remarks if att else ""
@@ -8203,28 +8238,37 @@ def get_meeting_report():
         for i in issues:
             raised_by = StudentProfile.query.get(i.raised_by_student_id) if i.raised_by_student_id else None
             issues_list.append({
-                "description": i.issue_description,
+                "issue_description": i.issue_description,
                 "category": i.category,
-                "raised_by": raised_by.full_name if raised_by else "Anonymous",
-                "action": i.action_taken or "-",
-                "status": i.action_status
+                "raised_by": raised_by.full_name if raised_by else "General",
+                "action_taken": i.action_taken or "-",
+                "action_status": i.action_status
             })
 
+        batch_name = f"{section.class_level}-{section.name} ({batch.batch_name})" if section and batch else "Unknown"
+
+        # Return structure expected by frontend (data.meeting, data.attendance, data.issues)
         return jsonify({
-            "meeting_number": MentorMeeting.query.filter(
-                MentorMeeting.batch_id == meeting.batch_id,
-                MentorMeeting.date <= meeting.date
-            ).count(),
-            "date": meeting.date.strftime('%d %b %Y'),
-            "time": meeting.time.strftime('%I:%M %p'),
-            "venue": meeting.venue or "Not specified",
-            "agenda": meeting.agenda,
-            "discussion_points": meeting.discussion_points,
-            "summary": meeting.summary or "",
-            "mentor_name": mentor.full_name if mentor else "Unknown",
-            "batch_name": f"{section.class_level}-{section.section_name} ({batch.batch_name})" if section and batch else "Unknown",
-            "total_students": len(students),
-            "present_count": present_count,
+            "meeting": {
+                "meeting_number": MentorMeeting.query.filter(
+                    MentorMeeting.batch_id == meeting.batch_id,
+                    MentorMeeting.date <= meeting.date
+                ).count(),
+                "date": meeting.date.strftime('%d %b %Y'),
+                "time": meeting.time.strftime('%I:%M %p'),
+                "venue": meeting.venue or "Not specified",
+                "agenda": meeting.agenda,
+                "discussion_points": meeting.discussion_points,
+                "summary": meeting.summary or "",
+                "mentor_name": mentor.full_name if mentor else "Unknown",
+                "batch_name": batch_name,
+                "total_students": len(students),
+                "present_count": present_count,
+                "term": "",
+                "academic_year": "",
+                "school": "",
+                "department": ""
+            },
             "attendance": attendance_list,
             "issues": issues_list
         })
