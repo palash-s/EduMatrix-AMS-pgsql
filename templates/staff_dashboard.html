@@ -357,7 +357,93 @@
                 </div>
             </div>
             <div class="flex-1 overflow-y-auto p-5" id="meeting-report-content">
-                <p class="text-center text-gray-400">Loading report...</p>
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">Batch</p>
+                            <p id="report-batch-name" class="text-sm font-bold text-gray-800">—</p>
+                        </div>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">When</p>
+                            <p class="text-sm text-gray-800"><span id="report-date" class="font-bold">—</span> <span class="text-gray-400">•</span> <span id="report-time" class="font-bold">—</span></p>
+                        </div>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">Venue</p>
+                            <p id="report-venue" class="text-sm text-gray-800">—</p>
+                        </div>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">Mentor</p>
+                            <p id="report-mentor-name" class="text-sm text-gray-800">—</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-sm font-bold text-gray-700">Agenda</h4>
+                        </div>
+                        <div class="p-4">
+                            <p id="report-agenda" class="text-sm text-gray-700 whitespace-pre-wrap">—</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-sm font-bold text-gray-700">Discussion Points</h4>
+                        </div>
+                        <div class="p-4">
+                            <p id="report-discussion" class="text-sm text-gray-700 whitespace-pre-wrap">—</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-sm font-bold text-gray-700">Summary</h4>
+                        </div>
+                        <div class="p-4">
+                            <p id="report-summary" class="text-sm text-gray-700 whitespace-pre-wrap">—</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                            <h4 class="text-sm font-bold text-gray-700">Attendance</h4>
+                            <span id="report-attendance-summary" class="text-xs text-gray-500">—</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-100 text-gray-600 font-bold">
+                                    <tr>
+                                        <th class="p-2 text-left">#</th>
+                                        <th class="p-2 text-left">Student</th>
+                                        <th class="p-2 text-left">Roll No</th>
+                                        <th class="p-2 text-center">Status</th>
+                                        <th class="p-2 text-left">Remarks</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="report-attendance-body" class="divide-y divide-gray-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-sm font-bold text-gray-700">Issues</h4>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-100 text-gray-600 font-bold">
+                                    <tr>
+                                        <th class="p-2 text-left">#</th>
+                                        <th class="p-2 text-left">Raised By</th>
+                                        <th class="p-2 text-left">Issue</th>
+                                        <th class="p-2 text-left">Action Taken</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="report-issues-body" class="divide-y divide-gray-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1240,22 +1326,27 @@
                 const parts = [m.batch_name, m.date, m.time].filter(Boolean);
                 info.innerText = parts.join(' • ') || 'Meeting Report';
             }
-            document.getElementById('report-batch-name').innerText = m.batch_name;
-            document.getElementById('report-date').innerText = m.date;
-            document.getElementById('report-time').innerText = m.time;
-            document.getElementById('report-venue').innerText = m.venue || 'Not specified';
-            document.getElementById('report-agenda').innerText = m.agenda || 'Not specified';
-            document.getElementById('report-discussion').innerText = m.discussion_points || 'Not recorded';
-            document.getElementById('report-summary').innerText = m.summary || 'Not recorded';
+            const setText = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = value;
+            };
+            setText('report-batch-name', m.batch_name || '—');
+            setText('report-date', m.date || '—');
+            setText('report-time', m.time || '—');
+            setText('report-venue', m.venue || 'Not specified');
+            setText('report-mentor-name', m.mentor_name || '—');
+            setText('report-agenda', m.agenda || 'Not specified');
+            setText('report-discussion', m.discussion_points || 'Not recorded');
+            setText('report-summary', m.summary || 'Not recorded');
 
             // Attendance summary
             const present = data.attendance.filter(a => a.attended).length;
             const total = data.attendance.length;
-            document.getElementById('report-attendance-summary').innerText = `${present} / ${total} students present`;
+            setText('report-attendance-summary', `${present} / ${total} students present`);
 
             // Attendance table
             const attBody = document.getElementById('report-attendance-body');
-            attBody.innerHTML = data.attendance.map((a, idx) => `<tr class="border-b border-gray-100">
+            if (attBody) attBody.innerHTML = data.attendance.map((a, idx) => `<tr class="border-b border-gray-100">
                 <td class="p-2 text-xs text-gray-500">${idx + 1}</td>
                 <td class="p-2 text-sm">${a.name}</td>
                 <td class="p-2 text-xs text-gray-400">${a.roll_no}</td>
@@ -1265,15 +1356,17 @@
 
             // Issues table
             const issBody = document.getElementById('report-issues-body');
-            if (data.issues.length === 0) {
-                issBody.innerHTML = '<tr><td colspan="4" class="p-3 text-center text-gray-400 text-sm">No issues recorded</td></tr>';
-            } else {
-                issBody.innerHTML = data.issues.map((iss, idx) => `<tr class="border-b border-gray-100">
-                    <td class="p-2 text-xs text-gray-500">${idx + 1}</td>
-                    <td class="p-2 text-sm">${iss.raised_by || 'General'}</td>
-                    <td class="p-2 text-sm">${iss.issue_description}</td>
-                    <td class="p-2 text-sm">${iss.action_taken || 'Pending'}</td>
-                </tr>`).join('');
+            if (issBody) {
+                if (data.issues.length === 0) {
+                    issBody.innerHTML = '<tr><td colspan="4" class="p-3 text-center text-gray-400 text-sm">No issues recorded</td></tr>';
+                } else {
+                    issBody.innerHTML = data.issues.map((iss, idx) => `<tr class="border-b border-gray-100">
+                        <td class="p-2 text-xs text-gray-500">${idx + 1}</td>
+                        <td class="p-2 text-sm">${iss.raised_by || 'General'}</td>
+                        <td class="p-2 text-sm">${iss.issue_description}</td>
+                        <td class="p-2 text-sm">${iss.action_taken || 'Pending'}</td>
+                    </tr>`).join('');
+                }
             }
         }
 
