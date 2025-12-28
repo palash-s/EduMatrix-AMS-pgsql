@@ -1,5 +1,6 @@
 # --- Python / Flask ---
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyd
 *.so
@@ -51,6 +52,7 @@ yarn-error.log*
 **/build/
 **/local.properties
 **/*.iml
+**/.idea/
 .idea/
 
 # --- OS / Editor ---

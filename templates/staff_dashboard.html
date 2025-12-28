@@ -343,6 +343,7 @@
     <!-- Meeting Report Modal -->
     <div id="meeting-report-modal" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div id="meeting-report-loader" class="w-full h-1 aurora-bar hidden"></div>
             <div class="flex justify-between items-center p-5 border-b bg-gray-50">
                 <div>
                     <h3 class="font-bold text-lg mit-purple serif">Meeting Report</h3>
@@ -356,7 +357,93 @@
                 </div>
             </div>
             <div class="flex-1 overflow-y-auto p-5" id="meeting-report-content">
-                <p class="text-center text-gray-400">Loading report...</p>
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">Batch</p>
+                            <p id="report-batch-name" class="text-sm font-bold text-gray-800">—</p>
+                        </div>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">When</p>
+                            <p class="text-sm text-gray-800"><span id="report-date" class="font-bold">—</span> <span class="text-gray-400">•</span> <span id="report-time" class="font-bold">—</span></p>
+                        </div>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">Venue</p>
+                            <p id="report-venue" class="text-sm text-gray-800">—</p>
+                        </div>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">Mentor</p>
+                            <p id="report-mentor-name" class="text-sm text-gray-800">—</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-sm font-bold text-gray-700">Agenda</h4>
+                        </div>
+                        <div class="p-4">
+                            <p id="report-agenda" class="text-sm text-gray-700 whitespace-pre-wrap">—</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-sm font-bold text-gray-700">Discussion Points</h4>
+                        </div>
+                        <div class="p-4">
+                            <p id="report-discussion" class="text-sm text-gray-700 whitespace-pre-wrap">—</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-sm font-bold text-gray-700">Summary</h4>
+                        </div>
+                        <div class="p-4">
+                            <p id="report-summary" class="text-sm text-gray-700 whitespace-pre-wrap">—</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                            <h4 class="text-sm font-bold text-gray-700">Attendance</h4>
+                            <span id="report-attendance-summary" class="text-xs text-gray-500">—</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-100 text-gray-600 font-bold">
+                                    <tr>
+                                        <th class="p-2 text-left">#</th>
+                                        <th class="p-2 text-left">Student</th>
+                                        <th class="p-2 text-left">Roll No</th>
+                                        <th class="p-2 text-center">Status</th>
+                                        <th class="p-2 text-left">Remarks</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="report-attendance-body" class="divide-y divide-gray-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-sm font-bold text-gray-700">Issues</h4>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-100 text-gray-600 font-bold">
+                                    <tr>
+                                        <th class="p-2 text-left">#</th>
+                                        <th class="p-2 text-left">Raised By</th>
+                                        <th class="p-2 text-left">Issue</th>
+                                        <th class="p-2 text-left">Action Taken</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="report-issues-body" class="divide-y divide-gray-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1188,8 +1275,10 @@
         function openMeetingReport(meetingId) {
             reportMeetingData = null;
             document.getElementById('meeting-report-modal').classList.remove('hidden');
-            document.getElementById('meeting-report-loader').classList.remove('hidden');
-            document.getElementById('meeting-report-content').classList.add('hidden');
+            const loader = document.getElementById('meeting-report-loader');
+            if (loader) loader.classList.remove('hidden');
+            const content = document.getElementById('meeting-report-content');
+            if (content) content.classList.add('hidden');
             loadMeetingReport(meetingId);
         }
 
@@ -1200,38 +1289,64 @@
 
         async function loadMeetingReport(meetingId) {
             try {
-                const res = await fetch(`/api/mentor/get_meeting_report?meeting_id=${meetingId}`);
-                if (!res.ok) throw new Error('Failed to load report');
-                reportMeetingData = await res.json();
+                const res = await fetch(`/api/mentor/get_meeting_report?meeting_id=${encodeURIComponent(meetingId)}`);
+                const raw = await res.text();
+                let payload = null;
+                try { payload = raw ? JSON.parse(raw) : null; } catch (_e) { payload = null; }
+                if (!res.ok) {
+                    const msg = (payload && payload.error) ? payload.error : (raw || `HTTP ${res.status}`);
+                    throw new Error(msg);
+                }
+                reportMeetingData = payload;
                 renderMeetingReport(reportMeetingData);
             } catch (e) {
                 console.error(e);
-                showToast('Failed to load meeting report', 'error');
-                closeMeetingReport();
+                const msg = (e && e.message) ? e.message : 'Failed to load meeting report';
+                showToast(msg, 'error');
+                const content = document.getElementById('meeting-report-content');
+                if (content) {
+                    content.innerHTML = `<div class="p-6 text-sm text-gray-600"><p class="font-bold text-red-600 mb-2">Failed to load meeting report</p><p class="break-words">${amsEscapeHtml(String(msg))}</p></div>`;
+                }
+                const loader = document.getElementById('meeting-report-loader');
+                if (loader) loader.classList.add('hidden');
+                const contentEl = document.getElementById('meeting-report-content');
+                if (contentEl) contentEl.classList.remove('hidden');
             }
         }
 
         function renderMeetingReport(data) {
-            document.getElementById('meeting-report-loader').classList.add('hidden');
-            document.getElementById('meeting-report-content').classList.remove('hidden');
+            const loader = document.getElementById('meeting-report-loader');
+            if (loader) loader.classList.add('hidden');
+            const content = document.getElementById('meeting-report-content');
+            if (content) content.classList.remove('hidden');
 
             const m = data.meeting;
-            document.getElementById('report-batch-name').innerText = m.batch_name;
-            document.getElementById('report-date').innerText = m.date;
-            document.getElementById('report-time').innerText = m.time;
-            document.getElementById('report-venue').innerText = m.venue || 'Not specified';
-            document.getElementById('report-agenda').innerText = m.agenda || 'Not specified';
-            document.getElementById('report-discussion').innerText = m.discussion_points || 'Not recorded';
-            document.getElementById('report-summary').innerText = m.summary || 'Not recorded';
+            const info = document.getElementById('report-meeting-info');
+            if (info) {
+                const parts = [m.batch_name, m.date, m.time].filter(Boolean);
+                info.innerText = parts.join(' • ') || 'Meeting Report';
+            }
+            const setText = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = value;
+            };
+            setText('report-batch-name', m.batch_name || '—');
+            setText('report-date', m.date || '—');
+            setText('report-time', m.time || '—');
+            setText('report-venue', m.venue || 'Not specified');
+            setText('report-mentor-name', m.mentor_name || '—');
+            setText('report-agenda', m.agenda || 'Not specified');
+            setText('report-discussion', m.discussion_points || 'Not recorded');
+            setText('report-summary', m.summary || 'Not recorded');
 
             // Attendance summary
             const present = data.attendance.filter(a => a.attended).length;
             const total = data.attendance.length;
-            document.getElementById('report-attendance-summary').innerText = `${present} / ${total} students present`;
+            setText('report-attendance-summary', `${present} / ${total} students present`);
 
             // Attendance table
             const attBody = document.getElementById('report-attendance-body');
-            attBody.innerHTML = data.attendance.map((a, idx) => `<tr class="border-b border-gray-100">
+            if (attBody) attBody.innerHTML = data.attendance.map((a, idx) => `<tr class="border-b border-gray-100">
                 <td class="p-2 text-xs text-gray-500">${idx + 1}</td>
                 <td class="p-2 text-sm">${a.name}</td>
                 <td class="p-2 text-xs text-gray-400">${a.roll_no}</td>
@@ -1241,38 +1356,58 @@
 
             // Issues table
             const issBody = document.getElementById('report-issues-body');
-            if (data.issues.length === 0) {
-                issBody.innerHTML = '<tr><td colspan="4" class="p-3 text-center text-gray-400 text-sm">No issues recorded</td></tr>';
-            } else {
-                issBody.innerHTML = data.issues.map((iss, idx) => `<tr class="border-b border-gray-100">
-                    <td class="p-2 text-xs text-gray-500">${idx + 1}</td>
-                    <td class="p-2 text-sm">${iss.raised_by || 'General'}</td>
-                    <td class="p-2 text-sm">${iss.issue_description}</td>
-                    <td class="p-2 text-sm">${iss.action_taken || 'Pending'}</td>
-                </tr>`).join('');
+            if (issBody) {
+                if (data.issues.length === 0) {
+                    issBody.innerHTML = '<tr><td colspan="4" class="p-3 text-center text-gray-400 text-sm">No issues recorded</td></tr>';
+                } else {
+                    issBody.innerHTML = data.issues.map((iss, idx) => `<tr class="border-b border-gray-100">
+                        <td class="p-2 text-xs text-gray-500">${idx + 1}</td>
+                        <td class="p-2 text-sm">${iss.raised_by || 'General'}</td>
+                        <td class="p-2 text-sm">${iss.issue_description}</td>
+                        <td class="p-2 text-sm">${iss.action_taken || 'Pending'}</td>
+                    </tr>`).join('');
+                }
             }
         }
 
         function downloadMeetingPDF() {
-            if (!reportMeetingData) return;
+            if (!reportMeetingData) {
+                showToast('Open a meeting report first', 'error');
+                return;
+            }
+            if (!window.jspdf || !window.jspdf.jsPDF) {
+                showToast('PDF library failed to load. Please refresh and try again.', 'error');
+                return;
+            }
+
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF('p', 'mm', 'a4');
+            if (typeof doc.autoTable !== 'function') {
+                showToast('PDF table plugin failed to load. Please refresh and try again.', 'error');
+                return;
+            }
+
             const m = reportMeetingData.meeting;
 
-            // Use the same header style as attendance reports
+            // Use the same header style as attendance reports (default template)
             const termLine = amsGetAcademicTermLine({ term: m.term, academic_year: m.academic_year });
             const subLines = [
                 m.school || 'School of Computing',
                 m.department ? `Department: ${m.department}` : ''
             ].filter(Boolean);
+            const metaBits = [
+                m.batch_name ? `Batch: ${m.batch_name}` : '',
+                m.mentor_name ? `Mentor: ${m.mentor_name}` : '',
+                termLine
+            ].filter(Boolean);
+            const startY = amsDrawPdfHeader(
+                doc,
+                'Mentor-Mentee Meeting Report',
+                subLines,
+                metaBits.join(' | ')
+            );
 
-            const y = amsAddReportHeader(doc, {
-                title: 'Mentor-Mentee Meeting Report',
-                termLine: termLine,
-                subLines: subLines
-            });
-
-            let currentY = y + 5;
+            let currentY = startY + 5;
 
             // Meeting details section
             doc.setFontSize(11);
