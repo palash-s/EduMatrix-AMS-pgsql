@@ -343,6 +343,7 @@
     <!-- Meeting Report Modal -->
     <div id="meeting-report-modal" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div id="meeting-report-loader" class="w-full h-1 aurora-bar hidden"></div>
             <div class="flex justify-between items-center p-5 border-b bg-gray-50">
                 <div>
                     <h3 class="font-bold text-lg mit-purple serif">Meeting Report</h3>
@@ -1188,8 +1189,10 @@
         function openMeetingReport(meetingId) {
             reportMeetingData = null;
             document.getElementById('meeting-report-modal').classList.remove('hidden');
-            document.getElementById('meeting-report-loader').classList.remove('hidden');
-            document.getElementById('meeting-report-content').classList.add('hidden');
+            const loader = document.getElementById('meeting-report-loader');
+            if (loader) loader.classList.remove('hidden');
+            const content = document.getElementById('meeting-report-content');
+            if (content) content.classList.add('hidden');
             loadMeetingReport(meetingId);
         }
 
@@ -1212,10 +1215,17 @@
         }
 
         function renderMeetingReport(data) {
-            document.getElementById('meeting-report-loader').classList.add('hidden');
-            document.getElementById('meeting-report-content').classList.remove('hidden');
+            const loader = document.getElementById('meeting-report-loader');
+            if (loader) loader.classList.add('hidden');
+            const content = document.getElementById('meeting-report-content');
+            if (content) content.classList.remove('hidden');
 
             const m = data.meeting;
+            const info = document.getElementById('report-meeting-info');
+            if (info) {
+                const parts = [m.batch_name, m.date, m.time].filter(Boolean);
+                info.innerText = parts.join(' • ') || 'Meeting Report';
+            }
             document.getElementById('report-batch-name').innerText = m.batch_name;
             document.getElementById('report-date').innerText = m.date;
             document.getElementById('report-time').innerText = m.time;
