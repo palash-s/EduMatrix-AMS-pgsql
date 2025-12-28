@@ -1,0 +1,1508 @@
+package com.eduMatrix.ams.data.api
+
+import com.eduMatrix.ams.data.models.*
+import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.reflect.TypeToken
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
+
+// Extension functions for safe JSON parsing (handles JsonNull properly)
+private fun JsonElement?.safeString(): String? = this?.takeIf { !it.isJsonNull }?.asString
+private fun JsonElement?.safeInt(): Int? = this?.takeIf { !it.isJsonNull }?.asInt
+private fun JsonElement?.safeDouble(): Double? = this?.takeIf { !it.isJsonNull }?.asDouble
+private fun JsonElement?.safeBool(): Boolean? = this?.takeIf { !it.isJsonNull }?.asBoolean
+
+/**
+ * Central API service for all HTTP operations.
+ * Handles authentication, staff, student, and parent APIs.
+ */
+object ApiService {
+    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val gson = Gson()
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    // ========================================
+    // AUTHENTICATION APIs
+    // ========================================
+
+    /**
+     * Login with multi-role support.
+     * Returns user info including role and staff-specific roles.
+     */
+    fun login(
+        baseUrl: String,
+        username: String,
+        password: String,
+        deviceId: String
+    ): LoginResponse {
+        val payload = JsonObject().apply {
+            addProperty("username", username)
+            addProperty("password", password)
+            addProperty("device_id", deviceId)
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/v1/auth/login")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val errorMsg = parseError(body)
+                throw ApiException("Login failed: $errorMsg", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val userJson = json.getAsJsonObject("user")
+
+            // Parse staff roles if user is staff
+            val role = UserRole.fromString(userJson.get("role")?.asString ?: "student")
+            val staffRolesJson = userJson.get("staff_roles")
+            val staffRoles = if (role == UserRole.STAFF && staffRolesJson != null && !staffRolesJson.isJsonNull) {
+                val sr = staffRolesJson.asJsonObject
+                StaffRoles(
+                    isClassTeacher = sr.get("is_class_teacher")?.asBoolean ?: false,
+                    isHod = sr.get("is_hod")?.asBoolean ?: false,
+                    isEventCoordinator = sr.get("is_event_coordinator")?.asBoolean ?: false,
+                    isAmcMember = sr.get("is_amc_member")?.asBoolean ?: false,
+                    isAmcHead = sr.get("is_amc_head")?.asBoolean ?: false,
+                    isMentor = sr.get("is_mentor")?.asBoolean ?: false
+                )
+            } else null
+
+            // must_change_password is at root level, not inside user object
+            val mustChangePassword = json.get("must_change_password")?.asBoolean ?: false
+
+            val user = User(
+                userId = userJson.get("user_id")?.asString ?: "",
+                email = userJson.get("email")?.asString ?: userJson.get("username")?.asString ?: "",
+                name = userJson.get("name")?.asString ?: "",
+                role = role,
+                staffRoles = staffRoles,
+                departmentId = userJson.get("department_id")?.asInt,
+                departmentName = userJson.get("department_name")?.asString,
+                mustChangePassword = mustChangePassword
+            )
+
+            return LoginResponse(
+                accessToken = json.get("access_token").asString,
+                refreshToken = json.get("refresh_token").asString,
+                user = user
+            )
+        }
+    }
+
+    /**
+     * Refresh access token using refresh token.
+     */
+    fun refreshToken(baseUrl: String, refreshToken: String): Pair<String, String> {
+        val payload = JsonObject().apply {
+            addProperty("refresh_token", refreshToken)
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/v1/auth/refresh")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Token refresh failed", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            return Pair(
+                json.get("access_token").asString,
+                json.get("refresh_token")?.asString ?: refreshToken
+            )
+        }
+    }
+
+    /**
+     * Change password for first-time login.
+     */
+    fun changePassword(
+        baseUrl: String,
+        accessToken: String,
+        currentPassword: String,
+        newPassword: String
+    ): Boolean {
+        val payload = JsonObject().apply {
+            addProperty("current_password", currentPassword)
+            addProperty("new_password", newPassword)
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/change-password")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                throw ApiException("Password change failed: ${parseError(body)}", response.code)
+            }
+            return true
+        }
+    }
+
+    // ========================================
+    // STAFF APIs
+    // ========================================
+
+    /**
+     * Get staff dashboard data including schedule, stats, and role-specific info.
+     */
+    fun getStaffDashboard(baseUrl: String, accessToken: String, userId: String): StaffDashboardData {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/dashboard?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load dashboard: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+                ?: throw ApiException("Invalid JSON response")
+
+            // Safe helper to get JsonObject (handles null and JsonNull)
+            fun JsonObject.safeGetObject(key: String): JsonObject {
+                val element = this.get(key)
+                return if (element != null && element.isJsonObject) element.asJsonObject else JsonObject()
+            }
+
+            // Parse profile
+            val profileJson = json.safeGetObject("profile")
+            val rolesJson = json.safeGetObject("roles")
+            val widgetsJson = json.safeGetObject("widgets")
+
+            val profile = StaffProfile(
+                staffId = userId,  // Use the userId we passed in
+                employeeCode = profileJson.get("code")?.asString ?: "",
+                name = profileJson.get("name")?.asString ?: "",
+                email = "",  // Not returned by this endpoint
+                designation = profileJson.get("dept")?.asString ?: "Faculty",
+                departmentId = 0,  // Not returned by this endpoint
+                departmentName = profileJson.get("dept")?.asString ?: "",
+                roles = StaffRoles(
+                    isClassTeacher = rolesJson.get("is_class_teacher")?.asBoolean ?: false,
+                    isHod = rolesJson.get("is_hod")?.asBoolean ?: false,
+                    isEventCoordinator = rolesJson.get("is_coordinator")?.asBoolean ?: false,
+                    isAmcMember = rolesJson.get("is_amc_member")?.asBoolean ?: false,
+                    isAmcHead = rolesJson.get("is_amc_head")?.asBoolean ?: false,
+                    isMentor = rolesJson.get("is_mentor")?.asBoolean ?: false
+                )
+            )
+
+            // Parse today's schedule from widgets
+            // Backend returns: { "id", "time", "class", "subject", "day", "status", "type", "batch" }
+            val scheduleElement = widgetsJson.get("today_schedule")
+            val scheduleArr = if (scheduleElement != null && scheduleElement.isJsonArray)
+                scheduleElement.asJsonArray else null
+            val todaySchedule = scheduleArr?.map { elem ->
+                val s = elem.asJsonObject
+                val timeStr = s.get("time")?.asString ?: ""
+                val timeParts = timeStr.split(" - ")
+                val startTime = timeParts.getOrNull(0) ?: ""
+                val endTime = timeParts.getOrNull(1) ?: ""
+                val className = s.get("class")?.asString ?: ""
+                val classParts = className.split("-")
+                val classLevel = classParts.getOrNull(0) ?: ""
+                val sectionName = classParts.getOrNull(1) ?: ""
+
+                ScheduledClass(
+                    scheduleId = s.get("id")?.asInt ?: 0,
+                    dayOfWeek = s.get("day")?.asString ?: "",
+                    startTime = startTime,
+                    endTime = endTime,
+                    subject = SubjectAllocation(
+                        allocationId = 0,
+                        subjectId = 0,
+                        subjectName = s.get("subject")?.asString ?: "",
+                        subjectCode = "",
+                        sectionId = 0,
+                        sectionName = sectionName,
+                        classLevel = classLevel,
+                        sessionType = s.get("type")?.asString ?: "Lecture",
+                        batchDivision = s.get("batch")?.asString
+                    ),
+                    roomNumber = "",
+                    roomType = "Classroom",
+                    isCompleted = s.get("status")?.asString == "Done",
+                    sessionId = null
+                )
+            } ?: emptyList()
+
+            // Parse stats from profile.stats (use safeGetObject)
+            val statsJson = profileJson.safeGetObject("stats")
+
+            // Parse my_subjects from widgets for total count
+            val mySubjectsElement = widgetsJson.get("my_subjects")
+            val mySubjectsArr = if (mySubjectsElement != null && mySubjectsElement.isJsonArray)
+                mySubjectsElement.asJsonArray else null
+            val totalSubjects = mySubjectsArr?.size() ?: 0
+
+            // Parse class teacher info from widgets.class_teacher_data
+            // Backend returns: { "name": "TY - DA", "count": 23 } or empty {}
+            val ctData = widgetsJson.safeGetObject("class_teacher_data")
+            val classTeacherInfo = if (rolesJson.get("is_class_teacher")?.asBoolean == true && ctData.has("name")) {
+                val ctName = ctData.get("name")?.asString ?: ""
+                val ctParts = ctName.split(" - ")
+                ClassTeacherInfo(
+                    sectionId = 0,
+                    sectionName = ctParts.getOrNull(1) ?: ctName,
+                    classLevel = ctParts.getOrNull(0) ?: "",
+                    totalStudents = ctData.get("count")?.asInt ?: 0
+                )
+            } else null
+
+            // HOD info not returned by this endpoint
+            val hodInfo: HodInfo? = null
+
+            // Parse mentor batch info from widgets.mentee_data
+            val menteeData = widgetsJson.safeGetObject("mentee_data")
+            val mentorBatchInfo = if (rolesJson.get("is_mentor")?.asBoolean == true && menteeData.has("count")) {
+                MentorBatchInfo(
+                    batchId = 0,
+                    batchName = "Mentees",
+                    totalMentees = menteeData.get("count")?.asInt ?: 0,
+                    pendingIssues = 0
+                )
+            } else null
+
+            // Get weekly load and pending leaves
+            val weeklyClasses = statsJson.get("weekly_classes")?.asInt ?: 0
+            val pendingLeavesElement = widgetsJson.get("pending_leaves")
+            val pendingLeavesArr = if (pendingLeavesElement != null && pendingLeavesElement.isJsonArray)
+                pendingLeavesElement.asJsonArray else null
+            val pendingLeavesCount = pendingLeavesArr?.size() ?: 0
+
+            return StaffDashboardData(
+                profile = profile,
+                todaySchedule = todaySchedule,
+                totalSubjects = totalSubjects,
+                totalStudents = 0,  // Not returned by this endpoint
+                sessionsThisMonth = weeklyClasses,  // Using weekly_classes as sessions indicator
+                pendingLeaveRequests = pendingLeavesCount,
+                roles = profile.roles,
+                classTeacherSection = classTeacherInfo,
+                hodDepartment = hodInfo,
+                mentorBatch = mentorBatchInfo
+            )
+        }
+    }
+
+    /**
+     * Get attendance sheet for marking attendance.
+     */
+    fun getAttendanceSheet(
+        baseUrl: String,
+        accessToken: String,
+        scheduleId: Int,
+        date: String
+    ): AttendanceSheet {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/attendance/sheet?schedule_id=$scheduleId&date=$date")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load attendance sheet: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+
+            // Parse allocation
+            val allocJson = json.getAsJsonObject("allocation")
+            val allocation = SubjectAllocation(
+                allocationId = allocJson.get("allocation_id")?.asInt ?: 0,
+                subjectId = allocJson.get("subject_id")?.asInt ?: 0,
+                subjectName = allocJson.get("subject_name")?.asString ?: "",
+                subjectCode = allocJson.get("subject_code")?.asString ?: "",
+                sectionId = allocJson.get("section_id")?.asInt ?: 0,
+                sectionName = allocJson.get("section_name")?.asString ?: "",
+                classLevel = allocJson.get("class_level")?.asString ?: "",
+                sessionType = allocJson.get("session_type")?.asString ?: "Lecture",
+                batchDivision = allocJson.get("batch_division")?.asString
+            )
+
+            // Parse schedule info
+            val schedJson = json.getAsJsonObject("schedule")
+            val scheduleInfo = ScheduledClass(
+                scheduleId = schedJson.get("schedule_id")?.asInt ?: scheduleId,
+                dayOfWeek = schedJson.get("day_of_week")?.asString ?: "",
+                startTime = schedJson.get("start_time")?.asString ?: "",
+                endTime = schedJson.get("end_time")?.asString ?: "",
+                subject = allocation,
+                roomNumber = schedJson.get("room_number")?.asString ?: "",
+                roomType = schedJson.get("room_type")?.asString ?: "Classroom",
+                isCompleted = false,
+                sessionId = null
+            )
+
+            // Parse students
+            val studentsArr = json.getAsJsonArray("students")
+            val students = studentsArr?.map { elem ->
+                val st = elem.asJsonObject
+                StudentForAttendance(
+                    studentId = st.get("student_id")?.asString ?: "",
+                    rollNumber = st.get("roll_number")?.asString ?: "",
+                    name = st.get("name")?.asString ?: "",
+                    admissionNumber = st.get("admission_number")?.asString ?: "",
+                    isPresent = true, // Default to present
+                    remarks = null
+                )
+            } ?: emptyList()
+
+            // Parse topics for lesson linking
+            val topicsArr = json.getAsJsonArray("topics")
+            val topics = topicsArr?.map { elem ->
+                val t = elem.asJsonObject
+                TopicForSelection(
+                    planId = t.get("plan_id")?.asInt ?: 0,
+                    unitNumber = t.get("unit_number")?.asInt ?: 0,
+                    unitTitle = t.get("unit_title")?.asString ?: "",
+                    subUnitNumber = t.get("sub_unit_number")?.asInt,
+                    subUnitTitle = t.get("sub_unit_title")?.asString,
+                    isCompleted = t.get("is_completed")?.asBoolean ?: false
+                )
+            } ?: emptyList()
+
+            return AttendanceSheet(
+                allocation = allocation,
+                scheduleInfo = scheduleInfo,
+                students = students,
+                topics = topics
+            )
+        }
+    }
+
+    /**
+     * Submit attendance for a session.
+     */
+    fun submitAttendance(
+        baseUrl: String,
+        accessToken: String,
+        submission: AttendanceSubmission
+    ): Boolean {
+        val attendanceArray = submission.attendance.map { record ->
+            JsonObject().apply {
+                addProperty("student_id", record.studentId)
+                addProperty("status", record.status.toApiString())
+                record.remarks?.let { addProperty("remarks", it) }
+            }
+        }
+
+        val payload = JsonObject().apply {
+            addProperty("schedule_id", submission.scheduleId)
+            addProperty("conducted_date", submission.conductedDate)
+            submission.topicId?.let { addProperty("topic_id", it) }
+            add("attendance", gson.toJsonTree(attendanceArray))
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/attendance/submit")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                throw ApiException("Failed to submit attendance: ${parseError(body)}", response.code)
+            }
+            return true
+        }
+    }
+
+    /**
+     * Get pending leave requests for staff approval.
+     */
+    fun getLeaveRequests(baseUrl: String, accessToken: String): List<LeaveRequest> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/leave_requests")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load leave requests: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val requestsArr = json.getAsJsonArray("requests")
+
+            return requestsArr?.map { elem ->
+                val r = elem.asJsonObject
+                LeaveRequest(
+                    leaveId = r.get("leave_id")?.asInt ?: 0,
+                    applicantId = r.get("applicant_id")?.asInt ?: 0,
+                    applicantName = r.get("applicant_name")?.asString ?: "",
+                    applicantType = r.get("applicant_type")?.asString ?: "Student",
+                    applicantClass = r.get("applicant_class")?.asString,
+                    leaveType = LeaveType.fromString(r.get("leave_type")?.asString ?: "General"),
+                    startDate = r.get("start_date")?.asString ?: "",
+                    endDate = r.get("end_date")?.asString ?: "",
+                    totalDays = r.get("total_days")?.asDouble ?: 0.0,
+                    reason = r.get("reason")?.asString ?: "",
+                    status = LeaveStatus.fromString(r.get("status")?.asString ?: "Pending"),
+                    appliedOn = r.get("applied_on")?.asString ?: "",
+                    documentUrl = r.get("document_url")?.asString
+                )
+            } ?: emptyList()
+        }
+    }
+
+    /**
+     * Perform leave action (approve/reject/escalate).
+     */
+    fun performLeaveAction(
+        baseUrl: String,
+        accessToken: String,
+        action: LeaveAction
+    ): Boolean {
+        val payload = JsonObject().apply {
+            addProperty("leave_id", action.leaveId)
+            addProperty("action", action.action.toApiString())
+            action.remarks?.let { addProperty("remarks", it) }
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/leave_action")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                throw ApiException("Leave action failed: ${parseError(body)}", response.code)
+            }
+            return true
+        }
+    }
+
+    /**
+     * Get subject allocations for staff.
+     */
+    fun getSubjectAllocations(baseUrl: String, accessToken: String): List<SubjectAllocation> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/allocations")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load allocations: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val allocArr = json.getAsJsonArray("allocations")
+
+            return allocArr?.map { elem ->
+                val a = elem.asJsonObject
+                SubjectAllocation(
+                    allocationId = a.get("allocation_id")?.asInt ?: 0,
+                    subjectId = a.get("subject_id")?.asInt ?: 0,
+                    subjectName = a.get("subject_name")?.asString ?: "",
+                    subjectCode = a.get("subject_code")?.asString ?: "",
+                    sectionId = a.get("section_id")?.asInt ?: 0,
+                    sectionName = a.get("section_name")?.asString ?: "",
+                    classLevel = a.get("class_level")?.asString ?: "",
+                    sessionType = a.get("session_type")?.asString ?: "Lecture",
+                    batchDivision = a.get("batch_division")?.asString
+                )
+            } ?: emptyList()
+        }
+    }
+
+    // ========================================
+    // NOTIFICATIONS
+    // ========================================
+
+    /**
+     * Get notifications for current user.
+     */
+    fun getNotifications(baseUrl: String, accessToken: String): List<Notification> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/v1/notifications")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load notifications: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val notifArr = json.getAsJsonArray("notifications")
+
+            return notifArr?.map { elem ->
+                val n = elem.asJsonObject
+                Notification(
+                    id = n.get("id")?.asInt ?: 0,
+                    title = n.get("title")?.asString ?: "",
+                    message = n.get("message")?.asString ?: "",
+                    timestamp = n.get("timestamp")?.asString ?: "",
+                    type = NotificationType.fromString(n.get("type")?.asString ?: "info"),
+                    isRead = n.get("is_read")?.asBoolean ?: false,
+                    actionUrl = n.get("action_url")?.asString
+                )
+            } ?: emptyList()
+        }
+    }
+
+    /**
+     * Mark notification as read.
+     */
+    fun markNotificationRead(baseUrl: String, accessToken: String, notificationId: Int): Boolean {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/v1/notifications/$notificationId/read")
+            .header("Authorization", "Bearer $accessToken")
+            .post("".toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            return response.isSuccessful
+        }
+    }
+
+    // ========================================
+    // MENTOR APIs
+    // ========================================
+
+    /**
+     * Get mentees (students in mentor's batches).
+     * Calls /api/staff/my_mentees endpoint.
+     */
+    fun getMentees(baseUrl: String, accessToken: String, userId: String): MentorDashboardData {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/my_mentees?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load mentees: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+
+            // Parse mentees from backend response
+            // Backend returns: { "mentees": [{ "id", "name", "roll", "class", "batch", "batch_id", "attendance", "father", "mother", "phone" }] }
+            val menteesArr = json.getAsJsonArray("mentees")
+
+            // Group mentees by batch to build batch list
+            val batchMap = mutableMapOf<Int, MutableList<Mentee>>()
+            val batchInfoMap = mutableMapOf<Int, Pair<String, String>>() // batchId -> (batchName, className)
+
+            val mentees = menteesArr?.map { elem ->
+                val m = elem.asJsonObject
+                val batchId = m.get("batch_id")?.asInt ?: 0
+                val batchName = m.get("batch")?.asString ?: ""
+                val className = m.get("class")?.asString ?: ""
+
+                // Track batch info
+                if (batchId > 0 && !batchInfoMap.containsKey(batchId)) {
+                    batchInfoMap[batchId] = Pair(batchName, className)
+                }
+
+                val mentee = Mentee(
+                    studentId = m.get("id")?.asString ?: "",
+                    name = m.get("name")?.asString ?: "",
+                    rollNumber = m.get("roll")?.asString ?: "",
+                    email = "",  // Not returned by this endpoint
+                    phone = m.get("phone")?.asString,
+                    attendancePercentage = m.get("attendance")?.asDouble,
+                    openIssues = 0  // Not returned by this endpoint
+                )
+
+                // Add to batch map
+                batchMap.getOrPut(batchId) { mutableListOf() }.add(mentee)
+
+                mentee
+            } ?: emptyList()
+
+            // Build batches from collected info
+            val batches = batchInfoMap.map { (batchId, info) ->
+                val (batchName, className) = info
+                val classParts = className.split("-")
+                MentorBatchDetail(
+                    batchId = batchId,
+                    batchName = batchName,
+                    sectionName = classParts.getOrNull(1) ?: "",
+                    classLevel = classParts.getOrNull(0) ?: "",
+                    studentCount = batchMap[batchId]?.size ?: 0
+                )
+            }
+
+            return MentorDashboardData(
+                batches = batches,
+                mentees = mentees,
+                pendingIssues = emptyList(),  // Loaded separately via getMentorPendingIssues
+                upcomingMeeting = null,
+                totalMentees = mentees.size,
+                openIssuesCount = 0
+            )
+        }
+    }
+
+    /**
+     * Get pending issues (Open logs) for a mentor.
+     */
+    fun getMentorPendingIssues(baseUrl: String, accessToken: String, mentorId: String): List<MentorLog> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/my_pending_issues?mentor_id=$mentorId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load pending issues: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val issuesArr = json.getAsJsonArray("issues")
+
+            return issuesArr?.map { elem ->
+                val i = elem.asJsonObject
+                MentorLog(
+                    logId = i.get("log_id")?.asInt ?: 0,
+                    studentId = i.get("student_id")?.asString ?: "",
+                    studentName = i.get("student_name")?.asString ?: "",
+                    category = IssueCategory.fromString(i.get("category")?.asString ?: ""),
+                    description = i.get("remarks")?.asString ?: "",
+                    status = IssueStatus.fromString(i.get("status")?.asString ?: "Open"),
+                    createdAt = i.get("date")?.asString ?: "",
+                    resolvedAt = null
+                )
+            } ?: emptyList()
+        }
+    }
+
+    /**
+     * Get all log history for a student (all statuses including resolved).
+     */
+    fun getStudentLogHistory(baseUrl: String, accessToken: String, studentId: String): List<MentorLog> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/get_logs?student_id=$studentId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load log history: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val logsArr = json.getAsJsonArray("logs")
+
+            return logsArr?.map { elem ->
+                val l = elem.asJsonObject
+                MentorLog(
+                    logId = l.get("id")?.asInt ?: 0,
+                    studentId = studentId,
+                    studentName = "",  // Not returned by this endpoint
+                    category = IssueCategory.fromString(l.get("category")?.asString ?: ""),
+                    description = l.get("remarks")?.asString ?: "",
+                    status = IssueStatus.fromString(l.get("status")?.asString ?: "Open"),
+                    createdAt = l.get("date")?.asString ?: "",
+                    resolvedAt = null
+                )
+            } ?: emptyList()
+        }
+    }
+
+    /**
+     * Get detailed mentee profile.
+     */
+    fun getMenteeDetail(baseUrl: String, accessToken: String, studentId: String): MenteeDetail {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/mentee/$studentId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load mentee details: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val studentJson = json.getAsJsonObject("student") ?: JsonObject()
+            val statsJson = json.getAsJsonObject("stats") ?: JsonObject()
+
+            // Parse subject-wise attendance
+            val subjectsArr = json.getAsJsonArray("subjects")
+            val subjects = subjectsArr?.map { elem ->
+                val s = elem.asJsonObject
+                SubjectAttendance(
+                    subjectName = s.get("subject_name")?.asString ?: "",
+                    subjectCode = s.get("subject_code")?.asString ?: "",
+                    attended = s.get("attended")?.asInt ?: 0,
+                    total = s.get("total")?.asInt ?: 0,
+                    percentage = s.get("percentage")?.asDouble ?: 0.0
+                )
+            } ?: emptyList()
+
+            // Parse logs
+            val logsArr = json.getAsJsonArray("logs")
+            val logs = logsArr?.map { elem ->
+                val l = elem.asJsonObject
+                MentorLog(
+                    logId = l.get("log_id")?.asInt ?: 0,
+                    studentId = studentId,
+                    studentName = studentJson.get("name")?.asString ?: "",
+                    category = IssueCategory.fromString(l.get("category")?.asString ?: ""),
+                    description = l.get("remarks")?.asString ?: "",
+                    status = IssueStatus.fromString(l.get("status")?.asString ?: ""),
+                    createdAt = l.get("date")?.asString ?: "",
+                    resolvedAt = null
+                )
+            } ?: emptyList()
+
+            return MenteeDetail(
+                studentId = studentJson.get("student_id")?.asString ?: studentId,
+                name = studentJson.get("name")?.asString ?: "",
+                rollNumber = studentJson.get("roll_number")?.asString ?: "",
+                email = studentJson.get("email")?.asString ?: "",
+                phone = studentJson.get("phone")?.asString,
+                className = studentJson.get("class")?.asString ?: "",
+                overallAttendance = statsJson.get("percentage")?.asDouble ?: 0.0,
+                totalLectures = statsJson.get("total")?.asInt ?: 0,
+                attended = statsJson.get("attended")?.asInt ?: 0,
+                isDefaulter = statsJson.get("is_defaulter")?.asBoolean ?: false,
+                subjectAttendance = subjects,
+                logs = logs,
+                hasDetention = json.get("detention") != null && !json.get("detention").isJsonNull,
+                hasEscalation = json.get("escalation") != null && !json.get("escalation").isJsonNull
+            )
+        }
+    }
+
+    /**
+     * Add a mentor log for a student.
+     */
+    fun addMentorLog(
+        baseUrl: String,
+        accessToken: String,
+        studentId: String,
+        mentorId: String,
+        category: String,
+        remarks: String,
+        actionTaken: String?
+    ): Boolean {
+        val payload = JsonObject().apply {
+            addProperty("student_id", studentId)
+            addProperty("mentor_id", mentorId)
+            addProperty("category", category)
+            addProperty("remarks", remarks)
+            actionTaken?.let { addProperty("action_taken", it) }
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/add_log")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                throw ApiException("Failed to add log: ${parseError(body)}", response.code)
+            }
+            return true
+        }
+    }
+
+    /**
+     * Update mentor log status.
+     */
+    fun updateLogStatus(
+        baseUrl: String,
+        accessToken: String,
+        logId: Int,
+        newStatus: String
+    ): Boolean {
+        val payload = JsonObject().apply {
+            addProperty("log_id", logId)
+            addProperty("status", newStatus)
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/update_log_status")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                throw ApiException("Failed to update log: ${parseError(body)}", response.code)
+            }
+            return true
+        }
+    }
+
+    /**
+     * Schedule a mentor meeting.
+     */
+    fun scheduleMentorMeeting(
+        baseUrl: String,
+        accessToken: String,
+        mentorId: String,
+        batchId: Int,
+        date: String,
+        time: String,
+        agenda: String,
+        venue: String? = null,
+        discussionPoints: String? = null
+    ): Boolean {
+        val payload = JsonObject().apply {
+            addProperty("mentor_id", mentorId)
+            addProperty("batch_id", batchId)
+            addProperty("date", date)
+            addProperty("time", time)
+            addProperty("agenda", agenda)
+            venue?.let { addProperty("venue", it) }
+            discussionPoints?.let { addProperty("discussion_points", it) }
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/schedule_meeting")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                throw ApiException("Failed to schedule meeting: ${parseError(body)}", response.code)
+            }
+            return true
+        }
+    }
+
+    /**
+     * Get mentor meetings.
+     */
+    fun getMentorMeetings(baseUrl: String, accessToken: String, batchId: Int): List<MentorMeeting> {
+        val url = "${baseUrl.trimEnd('/')}/api/mentor/get_meetings?batch_id=$batchId"
+        android.util.Log.d("ApiService", "getMentorMeetings: calling $url")
+
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            android.util.Log.d("ApiService", "getMentorMeetings: response code=${response.code}, body=$body")
+
+            if (!response.isSuccessful) {
+                android.util.Log.e("ApiService", "getMentorMeetings failed: code=${response.code}, body=$body")
+                throw ApiException("Failed to load meetings: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val meetingsArr = json.getAsJsonArray("meetings")
+            android.util.Log.d("ApiService", "getMentorMeetings: parsed ${meetingsArr?.size() ?: 0} meetings")
+
+            return meetingsArr?.map { elem ->
+                val m = elem.asJsonObject
+                MentorMeeting(
+                    meetingId = m.get("id").safeInt() ?: 0,
+                    batchId = m.get("batch_id").safeInt() ?: batchId,
+                    scheduledDate = m.get("date").safeString() ?: "",
+                    scheduledTime = m.get("time").safeString() ?: "",
+                    agenda = m.get("agenda").safeString() ?: "",
+                    isCompleted = m.get("status").safeString() == "Completed",
+                    attendeeCount = m.get("attendance_count").safeInt(),
+                    venue = m.get("venue").safeString(),
+                    discussionPoints = m.get("discussion_points").safeString(),
+                    summary = m.get("summary").safeString(),
+                    batchName = m.get("batch_name").safeString()
+                )
+            } ?: emptyList()
+        }
+    }
+
+    /**
+     * Get meeting details with attendance and issues.
+     */
+    fun getMeetingDetails(baseUrl: String, accessToken: String, meetingId: Int): MeetingDetails {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/get_meeting_details?meeting_id=$meetingId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load meeting details: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val meetingJson = json.getAsJsonObject("meeting")
+            val studentsArr = json.getAsJsonArray("students")
+            val attendanceArr = json.getAsJsonArray("attendance")
+            val issuesArr = json.getAsJsonArray("issues")
+
+            val meeting = MentorMeeting(
+                meetingId = meetingJson.get("id").safeInt() ?: meetingId,
+                batchId = meetingJson.get("batch_id").safeInt() ?: 0,
+                scheduledDate = meetingJson.get("date").safeString() ?: "",
+                scheduledTime = meetingJson.get("time").safeString() ?: "",
+                agenda = meetingJson.get("agenda").safeString() ?: "",
+                isCompleted = meetingJson.get("status").safeString() == "Completed",
+                attendeeCount = null,
+                venue = meetingJson.get("venue").safeString(),
+                discussionPoints = meetingJson.get("discussion_points").safeString(),
+                summary = meetingJson.get("summary").safeString(),
+                batchName = meetingJson.get("batch_name").safeString()
+            )
+
+            val students = studentsArr?.map { elem ->
+                val s = elem.asJsonObject
+                MeetingStudent(
+                    studentId = s.get("student_id").safeString() ?: "",
+                    name = s.get("name").safeString() ?: "",
+                    rollNo = s.get("roll_no").safeString() ?: ""
+                )
+            } ?: emptyList()
+
+            val attendance = attendanceArr?.map { elem ->
+                val a = elem.asJsonObject
+                MeetingAttendance(
+                    studentId = a.get("student_id").safeString() ?: "",
+                    attended = a.get("attended").safeBool() ?: false,
+                    remarks = a.get("remarks").safeString()
+                )
+            } ?: emptyList()
+
+            val issues = issuesArr?.map { elem ->
+                val i = elem.asJsonObject
+                MeetingIssue(
+                    issueId = i.get("issue_id").safeInt() ?: 0,
+                    raisedByStudentId = i.get("raised_by_student_id").safeString(),
+                    raisedByName = i.get("raised_by_name").safeString(),
+                    issueDescription = i.get("issue_description").safeString() ?: "",
+                    category = i.get("category").safeString() ?: "General",
+                    actionTaken = i.get("action_taken").safeString(),
+                    actionStatus = i.get("action_status").safeString() ?: "Pending"
+                )
+            } ?: emptyList()
+
+            return MeetingDetails(meeting, students, attendance, issues)
+        }
+    }
+
+    /**
+     * Conduct/complete a meeting with attendance data.
+     */
+    fun conductMeeting(
+        baseUrl: String,
+        accessToken: String,
+        meetingId: Int,
+        venue: String?,
+        discussionPoints: String?,
+        summary: String?,
+        attendance: List<Map<String, Any?>>
+    ): Boolean {
+        val attendanceArr = JsonArray()
+        attendance.forEach { att ->
+            val obj = JsonObject().apply {
+                addProperty("student_id", att["student_id"] as? String)
+                addProperty("attended", att["attended"] as? Boolean ?: false)
+                (att["remarks"] as? String)?.let { addProperty("remarks", it) }
+            }
+            attendanceArr.add(obj)
+        }
+
+        val payload = JsonObject().apply {
+            addProperty("meeting_id", meetingId)
+            venue?.let { addProperty("venue", it) }
+            discussionPoints?.let { addProperty("discussion_points", it) }
+            summary?.let { addProperty("summary", it) }
+            add("attendance", attendanceArr)
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/conduct_meeting")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                throw ApiException("Failed to complete meeting: ${parseError(body)}", response.code)
+            }
+            return true
+        }
+    }
+
+    /**
+     * Add an issue to a meeting.
+     */
+    fun addMeetingIssue(
+        baseUrl: String,
+        accessToken: String,
+        meetingId: Int,
+        raisedByStudentId: String?,
+        issueDescription: String,
+        category: String,
+        actionTaken: String?
+    ): MeetingIssue {
+        val payload = JsonObject().apply {
+            addProperty("meeting_id", meetingId)
+            raisedByStudentId?.let { addProperty("raised_by_student_id", it) }
+            addProperty("issue_description", issueDescription)
+            addProperty("category", category)
+            actionTaken?.let { addProperty("action_taken", it) }
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/mentor/add_meeting_issue")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to add issue: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val i = json.getAsJsonObject("issue")
+            return MeetingIssue(
+                issueId = i.get("issue_id")?.asInt ?: 0,
+                raisedByStudentId = raisedByStudentId,
+                raisedByName = null,
+                issueDescription = issueDescription,
+                category = category,
+                actionTaken = actionTaken,
+                actionStatus = if (actionTaken.isNullOrBlank()) "Pending" else "In Progress"
+            )
+        }
+    }
+
+    // ========================================
+    // CLASS TEACHER APIs
+    // ========================================
+
+    /**
+     * Get class teacher analytics - subject performance, defaulters, top students.
+     */
+    fun getClassTeacherAnalytics(baseUrl: String, accessToken: String, userId: String): ClassTeacherAnalytics {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/class_teacher/analytics?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load analytics: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+                ?: throw ApiException("Invalid JSON response")
+
+            // Parse class_info
+            val classInfoJson = json.getAsJsonObject("class_info") ?: JsonObject()
+            val classInfo = ClassInfo(
+                name = classInfoJson.get("name")?.asString ?: "",
+                totalStudents = classInfoJson.get("total_students")?.asInt ?: 0,
+                totalSessions = classInfoJson.get("total_sessions")?.asInt ?: 0
+            )
+
+            // Parse summary
+            val summaryJson = json.getAsJsonObject("summary") ?: JsonObject()
+            val summary = ClassSummary(
+                defaulterCount = summaryJson.get("defaulter_count")?.asInt ?: 0,
+                pendingLeaves = summaryJson.get("pending_leaves")?.asInt ?: 0,
+                classHealth = summaryJson.get("class_health")?.asString ?: "Good"
+            )
+
+            // Parse subjects
+            val subjectsArr = json.getAsJsonArray("subjects")
+            val subjects = subjectsArr?.map { elem ->
+                val s = elem.asJsonObject
+                SubjectStats(
+                    subjectId = s.get("id")?.asInt ?: 0,
+                    subjectName = s.get("subject")?.asString ?: "",
+                    teacherName = s.get("teacher")?.asString ?: "",
+                    sessionsConducted = s.get("conducted")?.asInt ?: 0,
+                    avgAttendance = s.get("avg_attendance")?.asDouble ?: 0.0
+                )
+            } ?: emptyList()
+
+            // Parse defaulters
+            val defaultersArr = json.getAsJsonArray("defaulters")
+            val defaulters = defaultersArr?.map { elem ->
+                val d = elem.asJsonObject
+                StudentAttendanceInfo(
+                    name = d.get("name")?.asString ?: "",
+                    rollNumber = d.get("roll")?.asString ?: "",
+                    percentage = d.get("perc")?.asDouble ?: 0.0,
+                    attended = d.get("attended")?.asInt ?: 0,
+                    total = d.get("total")?.asInt ?: 0
+                )
+            } ?: emptyList()
+
+            // Parse top students
+            val topStudentsArr = json.getAsJsonArray("top_students")
+            val topStudents = topStudentsArr?.map { elem ->
+                val t = elem.asJsonObject
+                StudentAttendanceInfo(
+                    name = t.get("name")?.asString ?: "",
+                    rollNumber = t.get("roll")?.asString ?: "",
+                    percentage = t.get("perc")?.asDouble ?: 0.0,
+                    attended = t.get("attended")?.asInt ?: 0,
+                    total = t.get("total")?.asInt ?: 0
+                )
+            } ?: emptyList()
+
+            return ClassTeacherAnalytics(
+                classInfo = classInfo,
+                summary = summary,
+                subjects = subjects,
+                defaulters = defaulters,
+                topStudents = topStudents
+            )
+        }
+    }
+
+    // ========================================
+    // PASSWORD MANAGEMENT
+    // ========================================
+
+    /**
+     * Change user's password.
+     * Used for first-time login password reset and regular password changes.
+     */
+    fun changePassword(
+        baseUrl: String,
+        accessToken: String,
+        currentPassword: String,
+        newPassword: String,
+        confirmPassword: String
+    ): Boolean {
+        val url = "${baseUrl.trimEnd('/')}/api/change-password"
+
+        val payload = JsonObject().apply {
+            addProperty("current_password", currentPassword)
+            addProperty("new_password", newPassword)
+            addProperty("confirm_password", confirmPassword)
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $accessToken")
+            .post(payload.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+                throw ApiException(parseError(body), response.code)
+            }
+
+            return true
+        }
+    }
+
+    // ========================================
+    // UPCOMING SCHEDULE & ADJUSTMENT APIs
+    // ========================================
+
+    /**
+     * Get upcoming schedule from dashboard widgets.
+     * Returns today's schedule + upcoming schedule with adjustment info.
+     */
+    fun getUpcomingSchedule(baseUrl: String, accessToken: String, userId: String): Pair<List<UpcomingClass>, List<UpcomingClass>> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/dashboard?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load schedule: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val widgetsJson = json.getAsJsonObject("widgets") ?: JsonObject()
+
+            fun parseScheduleList(arr: com.google.gson.JsonArray?): List<UpcomingClass> {
+                return arr?.map { elem ->
+                    val s = elem.asJsonObject
+                    val adjustmentJson = s.get("adjustment")
+                    val adjustment = if (adjustmentJson != null && !adjustmentJson.isJsonNull && adjustmentJson.isJsonObject) {
+                        val adj = adjustmentJson.asJsonObject
+                        val swapJson = adj.get("swap")
+                        val swap = if (swapJson != null && !swapJson.isJsonNull && swapJson.isJsonObject) {
+                            val sw = swapJson.asJsonObject
+                            SwapSlotInfo(
+                                scheduleId = sw.get("schedule_id").safeInt() ?: 0,
+                                day = sw.get("day").safeString() ?: "",
+                                time = sw.get("time").safeString() ?: "",
+                                subject = sw.get("subject").safeString() ?: "",
+                                className = sw.get("class").safeString() ?: "",
+                                dateIso = sw.get("date_iso").safeString() ?: "",
+                                dateDisplay = sw.get("date_display").safeString() ?: ""
+                            )
+                        } else null
+
+                        AdjustmentInfo(
+                            id = adj.get("id").safeInt() ?: 0,
+                            status = adj.get("status").safeString() ?: "",
+                            role = adj.get("role").safeString() ?: "",
+                            kind = adj.get("kind").safeString() ?: "",
+                            partnerId = adj.get("partner_id").safeString() ?: "",
+                            partnerName = adj.get("partner_name").safeString() ?: "",
+                            partnerCode = adj.get("partner_code").safeString() ?: "",
+                            swap = swap
+                        )
+                    } else null
+
+                    UpcomingClass(
+                        scheduleId = s.get("id").safeInt() ?: 0,
+                        time = s.get("time").safeString() ?: "",
+                        className = s.get("class").safeString() ?: "",
+                        subject = s.get("subject").safeString() ?: "",
+                        day = s.get("day").safeString() ?: "",
+                        dateIso = s.get("date_iso").safeString() ?: "",
+                        dateDisplay = s.get("date_display").safeString() ?: "",
+                        type = s.get("type").safeString() ?: "Lecture",
+                        batch = s.get("batch").safeString(),
+                        status = s.get("status").safeString() ?: "Pending",
+                        adjustment = adjustment
+                    )
+                } ?: emptyList()
+            }
+
+            val todaySchedule = parseScheduleList(
+                widgetsJson.get("today_schedule")?.takeIf { it.isJsonArray }?.asJsonArray
+            )
+            val upcomingSchedule = parseScheduleList(
+                widgetsJson.get("upcoming_schedule")?.takeIf { it.isJsonArray }?.asJsonArray
+            )
+
+            return Pair(todaySchedule, upcomingSchedule)
+        }
+    }
+
+    /**
+     * Find available faculty for session adjustment.
+     */
+    fun findAdjustmentFaculty(
+        baseUrl: String,
+        accessToken: String,
+        scheduleId: Int,
+        date: String,
+        userId: String
+    ): List<AdjustmentFaculty> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/find_adjustment_faculty?schedule_id=$scheduleId&date=$date&user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to find faculty: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val facultyArr = json.getAsJsonArray("faculty")
+
+            return facultyArr?.map { elem ->
+                val f = elem.asJsonObject
+                val slotsArr = f.getAsJsonArray("slots")
+                val slots = slotsArr?.map { slotElem ->
+                    val sl = slotElem.asJsonObject
+                    AvailableSlot(
+                        scheduleId = sl.get("schedule_id").safeInt() ?: 0,
+                        day = sl.get("day").safeString() ?: "",
+                        time = sl.get("time").safeString() ?: "",
+                        subject = sl.get("subject").safeString() ?: "",
+                        className = sl.get("class").safeString() ?: "",
+                        dateIso = sl.get("date_iso").safeString() ?: "",
+                        dateDisplay = sl.get("date_display").safeString() ?: ""
+                    )
+                } ?: emptyList()
+
+                AdjustmentFaculty(
+                    facultyId = f.get("id").safeString() ?: "",
+                    name = f.get("name").safeString() ?: "",
+                    code = f.get("code").safeString() ?: "",
+                    availableSlots = slots
+                )
+            } ?: emptyList()
+        }
+    }
+
+    /**
+     * Submit an adjustment request.
+     */
+    fun submitAdjustment(
+        baseUrl: String,
+        accessToken: String,
+        request: AdjustmentRequest
+    ): Int {
+        val payload = JsonObject().apply {
+            addProperty("requester_id", request.requesterId)
+            addProperty("schedule_id", request.scheduleId)
+            addProperty("original_date", request.originalDate)
+            addProperty("substitute_id", request.substituteId)
+            addProperty("swap_slot_id", request.swapSlotId)
+            addProperty("compensation_date", request.compensationDate)
+            request.reason?.let { addProperty("reason", it) }
+        }
+
+        val httpRequest = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/submit_adjustment")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(httpRequest).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to submit adjustment: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            return json.get("id")?.asInt ?: 0
+        }
+    }
+
+    /**
+     * Respond to an adjustment request (approve/reject).
+     */
+    fun respondToAdjustment(
+        baseUrl: String,
+        accessToken: String,
+        requestId: Int,
+        status: String  // "Approved" or "Rejected"
+    ): Boolean {
+        val payload = JsonObject().apply {
+            addProperty("request_id", requestId)
+            addProperty("status", status)
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/respond_adjustment")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                throw ApiException("Failed to respond to adjustment: ${parseError(body)}", response.code)
+            }
+            return true
+        }
+    }
+
+    // ========================================
+    // SESSION HISTORY APIs
+    // ========================================
+
+    /**
+     * Get session history (conducted sessions).
+     */
+    fun getSessionHistory(baseUrl: String, accessToken: String, userId: String): List<SessionHistoryRecord> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/session_history?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load session history: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val historyArr = json.getAsJsonArray("history")
+
+            return historyArr?.map { elem ->
+                val h = elem.asJsonObject
+                SessionHistoryRecord(
+                    scheduleId = h.get("schedule_id").safeInt() ?: 0,
+                    dateIso = h.get("date_iso").safeString() ?: "",
+                    dateDisplay = h.get("date_display").safeString() ?: "",
+                    time = h.get("time").safeString() ?: "",
+                    subject = h.get("subject").safeString() ?: "",
+                    className = h.get("class").safeString() ?: "",
+                    percentage = h.get("percentage").safeInt() ?: 0
+                )
+            } ?: emptyList()
+        }
+    }
+
+    // ========================================
+    // HELPER FUNCTIONS
+    // ========================================
+
+    private fun parseError(body: String): String {
+        return try {
+            val json = gson.fromJson(body, JsonObject::class.java)
+            json.get("error")?.asString ?: json.get("message")?.asString ?: body
+        } catch (e: Exception) {
+            body.ifBlank { "Unknown error" }
+        }
+    }
+}
+
+/**
+ * Custom exception for API errors.
+ */
+class ApiException(message: String, val code: Int? = null) : Exception(message)

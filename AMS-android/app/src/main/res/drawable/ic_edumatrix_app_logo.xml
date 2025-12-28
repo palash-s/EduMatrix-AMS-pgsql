@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="512dp"
+    android:height="512dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Background: MIT Purple with rounded corners -->
+    <path
+        android:pathData="M100,0 L412,0 Q512,0 512,100 L512,412 Q512,512 412,512 L100,512 Q0,512 0,412 L0,100 Q0,0 100,0 Z"
+        android:fillColor="#48166D"/>
+
+    <!-- Abstract Matrix Grid (Subtle Background Pattern) -->
+    <path
+        android:pathData="M100,100m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.1"/>
+    <path
+        android:pathData="M256,100m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.1"/>
+    <path
+        android:pathData="M412,100m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.1"/>
+    <path
+        android:pathData="M100,256m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.1"/>
+    <path
+        android:pathData="M412,256m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.1"/>
+    <path
+        android:pathData="M100,412m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.1"/>
+    <path
+        android:pathData="M256,412m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.1"/>
+    <path
+        android:pathData="M412,412m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.1"/>
+
+    <!-- Central Logo Element: "E" + Matrix Nodes (scaled 0.6 and translated by 106,106) -->
+    <!-- Vertical Bar (Left) - transformed: x=106+50*0.6=136, y=106+50*0.6=136, w=60*0.6=36, h=400*0.6=240 -->
+    <path
+        android:pathData="M136,154 L136,358 Q136,376 154,376 L154,376 Q172,376 172,358 L172,154 Q172,136 154,136 L154,136 Q136,136 136,154 Z"
+        android:fillColor="#FFFFFF"/>
+
+    <!-- Horizontal Bar Top - x=106+130*0.6=184, y=106+50*0.6=136, w=250*0.6=150, h=60*0.6=36 -->
+    <path
+        android:pathData="M184,154 L316,154 Q334,154 334,172 L334,172 Q334,190 316,190 L184,190 Q166,190 166,172 L166,172 Q166,154 184,154 Z"
+        android:fillColor="#FFFFFF"/>
+
+    <!-- Horizontal Bar Middle - x=106+130*0.6=184, y=106+220*0.6=238, w=200*0.6=120, h=60*0.6=36 -->
+    <path
+        android:pathData="M184,256 L286,256 Q304,256 304,274 L304,274 Q304,292 286,292 L184,292 Q166,292 166,274 L166,274 Q166,256 184,256 Z"
+        android:fillColor="#FFFFFF"/>
+
+    <!-- Horizontal Bar Bottom - x=106+130*0.6=184, y=106+390*0.6=340, w=250*0.6=150, h=60*0.6=36 -->
+    <path
+        android:pathData="M184,358 L316,358 Q334,358 334,376 L334,376 Q334,394 316,394 L184,394 Q166,394 166,376 L166,376 Q166,358 184,358 Z"
+        android:fillColor="#FFFFFF"/>
+
+    <!-- Connection Nodes - Teal top: x=106+420*0.6=358, y=106+80*0.6=154, r=40*0.6=24 -->
+    <path
+        android:pathData="M358,154m-24,0a24,24 0,1 1,48 0a24,24 0,1 1,-48 0"
+        android:fillColor="#00A887"/>
+
+    <!-- Connection Node - Orange middle: x=106+370*0.6=328, y=106+250*0.6=256, r=40*0.6=24 -->
+    <path
+        android:pathData="M328,256m-24,0a24,24 0,1 1,48 0a24,24 0,1 1,-48 0"
+        android:fillColor="#F17736"/>
+
+    <!-- Connection Node - Teal bottom: x=106+420*0.6=358, y=106+420*0.6=358, r=40*0.6=24 -->
+    <path
+        android:pathData="M358,358m-24,0a24,24 0,1 1,48 0a24,24 0,1 1,-48 0"
+        android:fillColor="#00A887"/>
+</vector>
