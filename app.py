@@ -17,7 +17,7 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 try:
@@ -8272,6 +8272,14 @@ def get_meeting_report():
             "attendance": attendance_list,
             "issues": issues_list
         })
+    except ProgrammingError:
+        app.logger.exception("get_meeting_report failed (db schema)")
+        return jsonify({
+            "error": "Meeting report tables are not ready. Run database migrations (flask db upgrade) and retry."
+        }), 503
+    except SQLAlchemyError:
+        app.logger.exception("get_meeting_report failed (db)")
+        return jsonify({"error": "Database error while generating meeting report."}), 500
     except Exception:
         app.logger.exception("get_meeting_report failed")
         return jsonify({"error": "Failed to generate report data."}), 500
