@@ -291,7 +291,7 @@
             const list = document.getElementById('activity-list');
             if (data.recent_activity.length === 0) list.innerHTML = `<div class="text-center text-gray-400 py-4 text-sm">No recent activity.</div>`;
             else list.innerHTML = data.recent_activity.map((item) => {
-                const isPresent = item.status === 'Present' || item.status === 'OnDuty';
+                const isPresent = ['Present', 'OnDuty', 'OD', 'ML', 'CL'].includes(item.status);
                 const dotColor = isPresent ? 'bg-green-500' : 'bg-red-500';
                 return `<div class="pl-4 pb-6 relative group last:pb-0"><div class="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full ${dotColor} border-2 border-white ring-1 ring-gray-100"></div><div class="flex justify-between items-start"><div><h4 class="font-bold text-gray-800 text-sm">${item.subject}</h4><p class="text-[10px] text-gray-400 mt-0.5">${item.date} • ${item.time}</p></div><span class="text-[10px] font-bold px-2 py-0.5 rounded ${isPresent ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">${item.status}</span></div></div>`;
             }).join('');
