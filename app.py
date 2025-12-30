@@ -229,6 +229,29 @@ def require_auth(f):
     return decorated_function
 
 PRESENT_STATUSES = ['Present', 'OnDuty', 'OD', 'ML', 'CL']
+
+
+def _normalize_leave_type(leave_type: str | None) -> str:
+    if not leave_type:
+        return ''
+    return str(leave_type).strip().lower()
+
+
+def _leave_type_to_attendance_code(leave_type: str | None) -> str:
+    """Map LeaveApplication.leave_type to attendance status codes used by the UI.
+
+    Known leave types (from UI): Casual, Sick, Event.
+    We normalize for safety so older data/variants don't accidentally fall back to OD.
+    """
+    lt = _normalize_leave_type(leave_type)
+    if lt in {'sick', 'medical', 'medical leave', 'sick leave', 'medical / sick leave', 'medical/sick'}:
+        return 'ML'
+    if lt in {'casual', 'casual leave'}:
+        return 'CL'
+    if lt in {'event', 'od', 'on duty', 'onduty', 'on-duty'}:
+        return 'OD'
+    # Preserve existing behavior for unexpected values
+    return 'OD'
 FIXED_DEPT_NAME = os.environ.get('APP_DEPARTMENT_NAME', 'Department of Information Technology')
 
 
@@ -3469,10 +3492,13 @@ def get_attendance_sheet():
         # Map: student_id -> leave_type_code
         leave_map = {}
         for l in active_leaves:
-            code = 'OD'
-            if l.leave_type == 'Sick': code = 'ML'
-            elif l.leave_type == 'Casual': code = 'CL'
-            leave_map[l.student_id] = code
+            code = _leave_type_to_attendance_code(l.leave_type)
+            # If multiple approved leaves overlap the same date for a student,
+            # prefer ML/CL over OD so medical/casual never downgrade to OD.
+            priority = {'OD': 1, 'CL': 2, 'ML': 3}
+            prev = leave_map.get(l.student_id)
+            if (prev is None) or (priority.get(code, 1) > priority.get(prev, 1)):
+                leave_map[l.student_id] = code
 
         # Pre-fetch Events (OD)
         active_events = (db.session.query(EventParticipation)
@@ -3505,18 +3531,20 @@ def get_attendance_sheet():
             if is_locked:
                 status = saved_status_map.get(s.student_id, "Present")
             else:
-                if s.student_id in event_map:
+                leave_code = leave_map.get(s.student_id)
+                # If the student has an approved leave, do not let event OD override ML/CL.
+                if leave_code in {'ML', 'CL'}:
+                    status = leave_code
+                    status_label = f"Approved {leave_code}"
+                elif s.student_id in event_map:
                     status = 'OnDuty'
                     is_od = True
                     status_label = "Event OD"
-                elif s.student_id in leave_map:
-                    # Auto-mark as ML/CL/OD based on leave type
-                    # In our DB we store 'OnDuty', 'Present', 'Absent'. 
-                    # We can store 'ML' or 'CL' directly if the system supports it, 
-                    # OR map them to 'OnDuty'/Absent with a label.
-                    # Let's store the specific code for better reporting.
-                    status = leave_map[s.student_id] 
-                    status_label = f"Approved {status}"
+                elif leave_code == 'OD':
+                    # OD-style leave: store as OnDuty to keep DB consistent, but show as OD.
+                    status = 'OnDuty'
+                    is_od = True
+                    status_label = "Approved OD"
 
             student_list.append({
                 "student_id": s.student_id,
@@ -3767,7 +3795,7 @@ def student_dashboard():
                 attended_sub = AttendanceTransaction.query.filter(
                     AttendanceTransaction.session_id.in_(applicable_ids),
                     AttendanceTransaction.student_id == student.student_id,
-                    AttendanceTransaction.status.in_(['Present', 'OnDuty'])
+                    AttendanceTransaction.status.in_(PRESENT_STATUSES)
                 ).count()
             
             grand_total_conducted += conducted
@@ -7247,8 +7275,9 @@ def mark_event_attendance():
                 transactions = query.all()
                 updated_count = 0
                 for txn in transactions:
-                    # Overwrite Absent/Present with OnDuty
-                    if txn.status != 'OnDuty':
+                    # Overwrite only basic statuses with OnDuty.
+                    # Never overwrite leave-coded statuses like ML/CL.
+                    if txn.status in {'Absent', 'Present', 'OD'}:
                         txn.status = 'OnDuty'
                         updated_count += 1
                 
