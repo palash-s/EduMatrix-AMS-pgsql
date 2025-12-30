@@ -20,7 +20,10 @@ import com.eduMatrix.ams.data.models.UserRole
 import com.eduMatrix.ams.ui.auth.LoginScreen
 import com.eduMatrix.ams.ui.navigation.NavRoutes
 import com.eduMatrix.ams.ui.staff.StaffMainScreen
+import com.eduMatrix.ams.ui.student.StudentMainScreen
 import com.eduMatrix.ams.ui.theme.AMSandroidTheme
+import com.eduMatrix.ams.ui.theme.ThemeState
+import com.eduMatrix.ams.ui.theme.rememberIsDarkTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,9 +39,12 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Initialize theme from saved preferences
+        ThemeState.initialize(this)
         enableEdgeToEdge()
         setContent {
-            AMSandroidTheme {
+            val isDarkTheme = rememberIsDarkTheme()
+            AMSandroidTheme(darkTheme = isDarkTheme) {
                 AppRoot()
             }
         }
@@ -469,36 +475,3 @@ fun PlaceholderScreen(
     }
 }
 
-/**
- * Student main screen - wrapper for existing student functionality.
- * TODO: Migrate to new architecture
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun StudentMainScreen(
-    onLogout: () -> Unit
-) {
-    // For now, use a simple placeholder
-    // The existing student screens can be migrated later
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Student Portal") },
-                actions = {
-                    TextButton(onClick = onLogout) {
-                        Text("Logout")
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("Student portal - Migrating to new architecture")
-        }
-    }
-}

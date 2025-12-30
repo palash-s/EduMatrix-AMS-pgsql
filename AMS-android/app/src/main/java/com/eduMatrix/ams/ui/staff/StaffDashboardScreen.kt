@@ -25,6 +25,7 @@ import com.eduMatrix.ams.data.api.ApiService
 import com.eduMatrix.ams.data.models.*
 import com.eduMatrix.ams.ui.components.*
 import com.eduMatrix.ams.ui.theme.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,12 +44,17 @@ fun StaffDashboardScreen(
     onNavigateToMentees: () -> Unit,
     onNavigateToClassTeacher: () -> Unit,
     onNavigateToHod: () -> Unit,
+    onNavigateToEvents: () -> Unit,
     onNavigateToNotifications: () -> Unit,
     onLogout: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
+
+    // Theme state
+    val themeMode by ThemeState.themeMode
+    val isSystemDark = isSystemInDarkTheme()
 
     // State
     var isLoading by rememberSaveable { mutableStateOf(true) }
@@ -121,6 +127,19 @@ fun StaffDashboardScreen(
                             contentDescription = "Refresh"
                         )
                     }
+                    // Dark mode toggle
+                    IconButton(
+                        onClick = { ThemeState.toggle(context, isSystemDark) }
+                    ) {
+                        Icon(
+                            imageVector = when (themeMode) {
+                                ThemeMode.DARK -> Icons.Outlined.DarkMode
+                                ThemeMode.LIGHT -> Icons.Outlined.LightMode
+                                ThemeMode.SYSTEM -> if (isSystemDark) Icons.Outlined.DarkMode else Icons.Outlined.LightMode
+                            },
+                            contentDescription = "Toggle dark mode"
+                        )
+                    }
                     IconButton(onClick = onNavigateToNotifications) {
                         BadgedBox(
                             badge = {
@@ -191,7 +210,7 @@ fun StaffDashboardScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
                             onClick = { refreshTrigger++ },
-                            colors = ButtonDefaults.buttonColors(containerColor = MitPurple)
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryAccent())
                         ) {
                             Text("Retry")
                         }
@@ -211,7 +230,7 @@ fun StaffDashboardScreen(
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = MitPurple
+                                    containerColor = primaryAccent()
                                 ),
                                 shape = RoundedCornerShape(16.dp)
                             ) {
@@ -290,7 +309,7 @@ fun StaffDashboardScreen(
                                     subtitle = "${data.classTeacherSection.classLevel} - ${data.classTeacherSection.sectionName}",
                                     detail = "${data.classTeacherSection.totalStudents} Students",
                                     icon = Icons.Filled.Class,
-                                    accentColor = MitTeal,
+                                    accentColor = secondaryAccent(),
                                     onClick = onNavigateToClassTeacher
                                 )
                             }
@@ -317,7 +336,7 @@ fun StaffDashboardScreen(
                                     subtitle = data.hodDepartment.departmentName,
                                     detail = "${data.hodDepartment.totalFaculty} faculty | ${data.hodDepartment.pendingLongLeaves} pending leaves",
                                     icon = Icons.Filled.AdminPanelSettings,
-                                    accentColor = MitPurple,
+                                    accentColor = primaryAccent(),
                                     onClick = onNavigateToHod
                                 )
                             }
@@ -332,6 +351,20 @@ fun StaffDashboardScreen(
                                     icon = Icons.Filled.SupervisedUserCircle,
                                     accentColor = MitOrange,
                                     onClick = onNavigateToMentees
+                                )
+                            }
+                        }
+
+                        // Event Coordinator card
+                        if (data.roles.isEventCoordinator) {
+                            item {
+                                RoleCard(
+                                    title = "Event Manager",
+                                    subtitle = "Manage Events",
+                                    detail = "Create & Manage",
+                                    icon = Icons.Filled.Event,
+                                    accentColor = MitGold,
+                                    onClick = onNavigateToEvents
                                 )
                             }
                         }
@@ -496,11 +529,13 @@ private fun RoleCard(
             )
 
             // Icon
+            val isDark = isSystemInDarkTheme()
+            val iconBgAlpha = if (isDark) 0.2f else 0.1f
             Box(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(accentColor.copy(alpha = 0.1f)),
+                    .background(accentColor.copy(alpha = iconBgAlpha)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

@@ -437,6 +437,109 @@ fun SessionCard(
 }
 
 // ========================================
+// UPCOMING SESSION CARD - For 2-Week Preview
+// ========================================
+
+/**
+ * Compact session card for upcoming schedule preview (next 2 weeks).
+ */
+@Composable
+fun UpcomingSessionCard(
+    time: String,
+    subject: String,
+    className: String,
+    sessionType: String,
+    batch: String? = null,
+    modifier: Modifier = Modifier
+) {
+    val accentColor = when (sessionType.lowercase()) {
+        "practical", "lab" -> MitOrange
+        "tutorial" -> accentTeal()
+        else -> accentPurple()
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left accent bar
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(accentColor)
+            )
+
+            // Time column
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.width(70.dp)
+            ) {
+                Text(
+                    text = time.split(" - ").firstOrNull() ?: time,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = accentColor
+                )
+                if (time.contains(" - ")) {
+                    Text(
+                        text = time.split(" - ").lastOrNull() ?: "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Content
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = subject,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = buildString {
+                        append(className)
+                        if (!batch.isNullOrBlank()) {
+                            append(" • $batch")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Session type badge
+            Surface(
+                color = accentColor.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(4.dp)
+            ) {
+                Text(
+                    text = sessionType.take(3).uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = accentColor,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+// ========================================
 // QUICK ACTION BUTTON
 // ========================================
 
