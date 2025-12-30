@@ -43,7 +43,11 @@ def get_db_uri(app):
         )
         return url.render_as_string(hide_password=False)
 
-    return 'sqlite:///school_system.db'
+    # PostgreSQL is required - raise error if not configured
+    raise RuntimeError(
+        "PostgreSQL environment variables not configured. "
+        "Please set POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB."
+    )
 
 
 # ==========================================
@@ -57,6 +61,8 @@ class UserMaster(db.Model):
     user_type = db.Column(db.String(20), nullable=False) # 'Staff', 'Student', 'Parent', 'Admin'
     two_factor_secret = db.Column(db.String(100), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    # Security: Force password change on first login for bulk-uploaded accounts
+    must_change_password = db.Column(db.Boolean, default=False)
 
 # ==========================================
 # 2. PROFILES
@@ -334,16 +340,52 @@ class MentorMeeting(db.Model):
     meeting_id = db.Column(db.Integer, primary_key=True)
     mentor_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=False)
     batch_id = db.Column(db.Integer, db.ForeignKey('mentor_batch.batch_id'), nullable=False)
-    
+
     date = db.Column(db.Date, nullable=False)
     time = db.Column(db.Time, nullable=False)
     agenda = db.Column(db.String(255), nullable=False) # e.g. "Term Start Review"
-    
+
+    # New fields for NAAC compliance
+    venue = db.Column(db.String(100), nullable=True)  # e.g., "Room C-101" or "HOD Chamber"
+    discussion_points = db.Column(db.Text, nullable=True)  # Newline-separated topics
+    summary = db.Column(db.Text, nullable=True)  # Notes after meeting is conducted
+    completed_at = db.Column(db.DateTime, nullable=True)  # When meeting was marked complete
+
     # Status: 'Scheduled', 'Completed'
     status = db.Column(db.String(20), default='Scheduled')
 
 
-# In sql_connection.py
+class MeetingAttendance(db.Model):
+    """Tracks which students attended each mentor meeting."""
+    __tablename__ = 'meeting_attendance'
+    attendance_id = db.Column(db.Integer, primary_key=True)
+    meeting_id = db.Column(db.Integer, db.ForeignKey('mentor_meeting.meeting_id'), nullable=False)
+    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=False)
+    attended = db.Column(db.Boolean, default=False)
+    remarks = db.Column(db.String(255), nullable=True)  # Reason for absence or special notes
+
+
+class MeetingIssue(db.Model):
+    """Records issues raised during mentor meetings and actions taken."""
+    __tablename__ = 'meeting_issue'
+    issue_id = db.Column(db.Integer, primary_key=True)
+    meeting_id = db.Column(db.Integer, db.ForeignKey('mentor_meeting.meeting_id'), nullable=False)
+
+    # Who raised the issue (optional - for anonymous issues)
+    raised_by_student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=True)
+
+    # Issue details
+    issue_description = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(50), default='General')  # Academic, Personal, Infrastructure, Other
+
+    # Action taken
+    action_taken = db.Column(db.Text, nullable=True)
+    action_status = db.Column(db.String(20), default='Pending')  # Pending, In Progress, Resolved
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    resolved_at = db.Column(db.DateTime, nullable=True)
+
 
 class Notification(db.Model):
     __tablename__ = 'notification'

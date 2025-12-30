@@ -54,7 +54,7 @@ def upgrade():
         try:
             op.create_foreign_key(op.f('fk_elective_offering_window_id_elective_window'), 'elective_offering', 'elective_window', ['window_id'], ['id'])
         except Exception:
-            # SQLite may already have the constraint from db.create_all
+            # Constraint may already exist from db.create_all
             pass
 
     se_cols = [c['name'] for c in insp.get_columns('student_elective')]

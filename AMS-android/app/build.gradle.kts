@@ -18,8 +18,9 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Android emulator reaches host machine via 10.0.2.2
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2\"")
+        // Use your computer's local IP address for emulator connection
+        // Port 80 when using docker-compose (Nginx proxy)
+        buildConfigField("String", "API_BASE_URL", "\"http://192.168.1.3:80\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -49,18 +50,23 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation(libs.gson)
+    implementation(libs.coil.compose)
+    implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

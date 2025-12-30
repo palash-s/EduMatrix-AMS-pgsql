@@ -6,6 +6,7 @@
     <title>Admin Console - MIT ADT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -617,7 +618,11 @@
         }
 
         function closePopup(e) { e.stopPropagation(); document.getElementById('student-popup').classList.add('hidden'); }
-        function logout() { sessionStorage.removeItem('user_id'); window.location.href = '/'; }
+        async function logout() { 
+            try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } 
+            catch (e) { /* ignore */ } 
+            window.location.replace('/'); 
+        }
         document.addEventListener('click', function(event) {
             const popup = document.getElementById('student-popup');
             const card = document.getElementById('student-card');
@@ -717,8 +722,19 @@
             }
         }
 
-        loadDashboard();
-        loadCurrentTermBadge();
+        // SECURITY: Validate session with server before loading dashboard
+        (async function() {
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                if (meData.role !== 'Admin') { window.location.replace('/'); return; }
+                // Session valid - load dashboard
+                loadDashboard();
+                loadCurrentTermBadge();
+            } catch (e) { window.location.replace('/'); }
+        })();
         // Auto-refresh is disabled globally.
     </script>
 </body>

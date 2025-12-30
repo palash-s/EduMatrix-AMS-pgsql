@@ -18,18 +18,23 @@
         @keyframes aurora-move { 0% { background-position: 0% 50%; } 100% { background-position: 100% 50%; } }
     </style>
     
-    <!-- SECURITY CHECK: Redirect if already logged in -->
+    <!-- SECURITY: Server-side session check - redirect if already logged in -->
     <script>
-        (function() {
-            const userId = sessionStorage.getItem('user_id');
-            const role = sessionStorage.getItem('role');
-            
-            // Redirect map
-            const paths = { 'Staff': '/staff/dashboard', 'Student': '/student/dashboard', 'Admin': '/admin/dashboard', 'Parent': '/parent/dashboard' };
-            
-            if (userId && role && paths[role]) {
-                window.location.replace(paths[role]); // Auto-forward
-            }
+        (async function() {
+            try {
+                const res = await fetch('/api/me', { credentials: 'same-origin' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.must_change_password) {
+                        window.location.replace('/change-password');
+                        return;
+                    }
+                    const paths = { 'Staff': '/staff/dashboard', 'Student': '/student/dashboard', 'Admin': '/admin/dashboard', 'Parent': '/parent/dashboard' };
+                    if (data.role && paths[data.role]) {
+                        window.location.replace(paths[data.role]);
+                    }
+                }
+            } catch (e) { /* Not logged in or network error - stay on login */ }
         })();
     </script>
 </head>
@@ -102,7 +107,7 @@
                     throw new Error(`Server returned ${response.status} ${response.statusText} (non-JSON). ${preview}`);
                 }
                 if (response.ok) {
-                    sessionStorage.setItem('user_id', data.user_id); sessionStorage.setItem('role', data.role);
+                    // Server-side session established - redirect based on server response
                     btnSpinner.classList.add('hidden'); btnText.classList.remove('hidden'); btnText.innerText = "Success! Redirecting..."; submitBtn.classList.remove('bg-mit-purple', 'hover-mit-purple'); submitBtn.classList.add('bg-green-600', 'hover:bg-green-700');
                     
                     // --- CRITICAL FIX: Use replace() to overwrite history ---

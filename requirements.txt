@@ -1,8 +1,27 @@
-flask
-flask-sqlalchemy
-flask-migrate
-pandas
-werkzeug
-gunicorn
-psycopg2-binary
-firebase-admin
+# Core Framework
+flask==3.0.3
+flask-sqlalchemy==3.1.1
+flask-migrate==4.0.7
+werkzeug==3.0.3
+gunicorn==22.0.0
+
+# Security
+flask-login==0.6.3
+flask-wtf==1.2.1
+flask-limiter==3.8.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Data Processing
+pandas==2.2.2
+
+# Push Notifications
+firebase-admin==6.5.0
+
+# Testing
+pytest==8.3.4
+pytest-cov==4.1.0
+
+# For rate limiter storage (optional, use memory for dev)
+# redis==5.0.4

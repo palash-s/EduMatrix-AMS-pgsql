@@ -125,13 +125,24 @@
     <script>
         lucide.createIcons();
         document.getElementById('current-date').innerText = new Date().toLocaleDateString();
-        const studentId = sessionStorage.getItem('user_id');
-        document.getElementById('student-id').value = studentId;
+        let studentId = null;
         
         let currentBalance = 0;
         let blockedDates = [];
 
-        document.addEventListener('DOMContentLoaded', loadLeaveData);
+        document.addEventListener('DOMContentLoaded', async function() {
+            // SECURITY: Validate session with server before loading
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                studentId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+
+            document.getElementById('student-id').value = studentId;
+            loadLeaveData();
+        });
 
         async function loadLeaveData() {
             try {

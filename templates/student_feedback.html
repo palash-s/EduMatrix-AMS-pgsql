@@ -39,7 +39,7 @@
 
     <script>
         lucide.createIcons();
-        const userId = sessionStorage.getItem('user_id');
+        let userId = null;
         let currentCycleId = null;
         let currentSubjectId = null;
         let currentSectionId = null; // Need to fetch from profile or context
@@ -47,6 +47,15 @@
         let questions = [];
 
         document.addEventListener('DOMContentLoaded', async () => {
+            // SECURITY: Validate session with server before loading
+            try {
+                const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                if (!meRes.ok) { window.location.replace('/'); return; }
+                const meData = await meRes.json();
+                if (meData.must_change_password) { window.location.replace('/change-password'); return; }
+                userId = meData.user_id;
+            } catch (e) { window.location.replace('/'); return; }
+
             // 1. Get Questions
             const qRes = await fetch('/api/feedback/questions');
             questions = (await qRes.json()).questions;

@@ -26,7 +26,8 @@
         const POLL_MS = 30000;
 
         function getUserId() {
-            return sessionStorage.getItem('user_id');
+            // Use the global userId set by the parent template's /api/me session validation
+            return typeof userId !== 'undefined' ? userId : (typeof staffId !== 'undefined' ? staffId : (typeof studentId !== 'undefined' ? studentId : null));
         }
 
         function el(id) {
