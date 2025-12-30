@@ -68,8 +68,8 @@
             </div>
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                 <div class="p-5 border-b border-gray-50 flex justify-between items-center">
-                    <h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="flag" class="w-4 h-4 text-gray-400"></i> Out for Events Today</h2>
-                    <span class="text-xs text-gray-400 italic" id="events-as-of">Today</span>
+                    <h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="flag" class="w-4 h-4 text-gray-400"></i> Students in Events</h2>
+                    <span class="text-xs text-gray-400 italic" id="events-as-of">All</span>
                 </div>
                 <div id="event-out-list" class="divide-y divide-gray-50"></div>
             </div>
@@ -231,13 +231,20 @@
             }
 
             const eventOutEl = document.getElementById('event-out-list');
-            const outItems = (data.alerts && data.alerts.out_for_events_today) ? data.alerts.out_for_events_today : [];
+            const outItems = (data.alerts && data.alerts.out_for_events_all)
+                ? data.alerts.out_for_events_all
+                : ((data.alerts && data.alerts.out_for_events_today) ? data.alerts.out_for_events_today : []);
             if (eventOutEl) {
                 if (!outItems || outItems.length === 0) {
-                    eventOutEl.innerHTML = `<div class="p-8 text-center text-gray-400">No students are marked for events today</div>`;
+                    eventOutEl.innerHTML = `<div class="p-8 text-center text-gray-400">No students are marked for events</div>`;
                 } else {
                     eventOutEl.innerHTML = outItems.map(s => {
-                        const evs = (s.events || []).map(e => `${e.event_name || 'Event'} (${e.status || 'Nominated'})`).join(', ');
+                        const evs = (s.events || []).map(e => {
+                            const name = e.event_name || 'Event';
+                            const status = e.status || 'Nominated';
+                            const range = e.date_range || '';
+                            return range ? `${name} (${status}) — ${range}` : `${name} (${status})`;
+                        }).join(', ');
                         return `<div class="p-4 hover:bg-gray-50 flex justify-between items-start gap-4">
                             <div>
                                 <h4 class="font-bold text-gray-800 text-sm">${s.student_name || '-'}</h4>

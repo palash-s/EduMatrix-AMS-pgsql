@@ -3251,7 +3251,7 @@ def get_class_analytics():
 
         pending_leaves_count = LeaveApplication.query.join(StudentProfile).filter(StudentProfile.current_section_id == class_managed.section_id, LeaveApplication.status == 'Pending_CT').count()
 
-        # Alerts: approved leave history + students out for events (today)
+        # Alerts: approved leave history + students in events (today + all)
         today = date.today()
 
         approved_leave_rows = (
@@ -3278,40 +3278,65 @@ def get_class_analytics():
                 "reason": leave.reason,
             })
 
-        event_rows = (
+        # NOTE: We return both:
+        # - out_for_events_today: students currently out today due to an event
+        # - out_for_events_all: students with any non-cancelled event participation (past/upcoming)
+        # To keep payload size reasonable, we cap participation rows.
+        MAX_EVENT_PARTICIPATION_ROWS = 500
+
+        participation_rows = (
             db.session.query(EventParticipation, EventMaster, StudentProfile)
             .join(EventMaster, EventParticipation.event_id == EventMaster.event_id)
             .join(StudentProfile, EventParticipation.student_id == StudentProfile.student_id)
             .filter(StudentProfile.current_section_id == class_managed.section_id)
-            .filter(EventMaster.start_date <= today)
-            .filter(EventMaster.end_date >= today)
+            .order_by(EventMaster.start_date.desc(), EventMaster.event_id.desc())
+            .limit(MAX_EVENT_PARTICIPATION_ROWS)
             .all()
         )
 
-        out_map = {}
-        for part, event, student in event_rows:
+        out_all_map = {}
+        out_today_map = {}
+
+        for part, event, student in participation_rows:
             raw_status = (getattr(part, 'status', '') or '').strip()
             status_norm = raw_status.lower()
             if status_norm in {'cancelled', 'canceled', 'rejected'}:
                 continue
 
             sid = student.student_id
-            if sid not in out_map:
-                out_map[sid] = {
+            event_payload = {
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "status": raw_status or 'Nominated',
+                "start_date": event.start_date.isoformat() if event.start_date else None,
+                "end_date": event.end_date.isoformat() if event.end_date else None,
+                "date_range": f"{event.start_date.strftime('%d %b')} - {event.end_date.strftime('%d %b')}" if (event.start_date and event.end_date) else "",
+            }
+
+            if sid not in out_all_map:
+                out_all_map[sid] = {
                     "student_id": sid,
                     "student_name": student.full_name,
                     "roll_no": student.admission_number,
                     "events": [],
                 }
-            out_map[sid]["events"].append({
-                "event_id": event.event_id,
-                "event_name": event.event_name,
-                "status": raw_status or 'Nominated',
-                "date_range": f"{event.start_date.strftime('%d %b')} - {event.end_date.strftime('%d %b')}" if (event.start_date and event.end_date) else "",
-            })
+            out_all_map[sid]["events"].append(event_payload)
 
-        out_for_events_today = list(out_map.values())
+            if event.start_date and event.end_date and (event.start_date <= today <= event.end_date):
+                if sid not in out_today_map:
+                    out_today_map[sid] = {
+                        "student_id": sid,
+                        "student_name": student.full_name,
+                        "roll_no": student.admission_number,
+                        "events": [],
+                    }
+                out_today_map[sid]["events"].append(event_payload)
+
+        out_for_events_today = list(out_today_map.values())
         out_for_events_today.sort(key=lambda x: (x.get('roll_no') or '', x.get('student_name') or ''))
+
+        out_for_events_all = list(out_all_map.values())
+        out_for_events_all.sort(key=lambda x: (x.get('roll_no') or '', x.get('student_name') or ''))
 
         return jsonify({
             "class_info": { "name": f"{class_managed.class_level} - {class_managed.name}", "total_students": len(students), "total_sessions": total_class_sessions },
@@ -3322,6 +3347,7 @@ def get_class_analytics():
             "alerts": {
                 "approved_leave_history": approved_leave_history,
                 "out_for_events_today": out_for_events_today,
+                "out_for_events_all": out_for_events_all,
                 "as_of": today.isoformat(),
             },
         })
