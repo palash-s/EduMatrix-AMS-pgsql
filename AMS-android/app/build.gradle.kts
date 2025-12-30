@@ -20,7 +20,7 @@ android {
 
         // Use your computer's local IP address for emulator connection
         // Port 80 when using docker-compose (Nginx proxy)
-        buildConfigField("String", "API_BASE_URL", "\"http://192.168.1.3:80\"")
+        buildConfigField("String", "API_BASE_URL", "\"http://100.80.42.107:80\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

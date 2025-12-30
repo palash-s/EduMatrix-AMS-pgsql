@@ -3,6 +3,7 @@ package com.eduMatrix.ams.ui.staff.attendance
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -78,8 +79,18 @@ fun StaffMarkAttendanceScreen(
                 )
             }
             attendanceSheet = sheet
-            // Initialize all students as present by default
-            studentAttendance = sheet.students.associate { it.studentId to AttendanceStatus.PRESENT }
+            // Initialize attendance based on backend-provided status
+            // Students with approved leaves/events should be marked as ON_DUTY
+            // Use StatusUtils for robust matching of status variants
+            studentAttendance = sheet.students.associate { student ->
+                val hasApprovedLeave = student.isOnDuty || StatusUtils.isLeaveOrDuty(student.status)
+                val attendanceStatus = when {
+                    hasApprovedLeave -> AttendanceStatus.ON_DUTY
+                    student.status.equals("Absent", ignoreCase = true) -> AttendanceStatus.ABSENT
+                    else -> AttendanceStatus.PRESENT
+                }
+                student.studentId to attendanceStatus
+            }
         } catch (e: ApiException) {
             errorMessage = e.message ?: "Failed to load attendance sheet"
         } catch (e: Exception) {
@@ -160,7 +171,7 @@ fun StaffMarkAttendanceScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MitPurple,
+                    containerColor = primaryAccent(),
                     titleContentColor = Color.White,
                     navigationIconContentColor = Color.White
                 )
@@ -195,7 +206,7 @@ fun StaffMarkAttendanceScreen(
                                 color = StatusRed
                             )
                             AttendanceSummaryChip(
-                                label = "On Duty",
+                                label = "Leave/OD",
                                 count = onDutyCount,
                                 color = StatusBlue
                             )
@@ -208,7 +219,7 @@ fun StaffMarkAttendanceScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(52.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MitPurple),
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryAccent()),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             if (isSubmitting) {
@@ -240,7 +251,7 @@ fun StaffMarkAttendanceScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(AppBackgroundLight)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             when {
                 isLoading -> {
@@ -287,8 +298,16 @@ fun StaffMarkAttendanceScreen(
                                             )
                                         }
                                         attendanceSheet = sheet
-                                        studentAttendance = sheet.students.associate {
-                                            it.studentId to AttendanceStatus.PRESENT
+                                        // Initialize attendance based on backend-provided status
+                                        // Use StatusUtils for robust matching of status variants
+                                        studentAttendance = sheet.students.associate { student ->
+                                            val hasApprovedLeave = student.isOnDuty || StatusUtils.isLeaveOrDuty(student.status)
+                                            val attendanceStatus = when {
+                                                hasApprovedLeave -> AttendanceStatus.ON_DUTY
+                                                student.status.equals("Absent", ignoreCase = true) -> AttendanceStatus.ABSENT
+                                                else -> AttendanceStatus.PRESENT
+                                            }
+                                            student.studentId to attendanceStatus
                                         }
                                     } catch (e: Exception) {
                                         errorMessage = e.message
@@ -297,7 +316,7 @@ fun StaffMarkAttendanceScreen(
                                     }
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = MitPurple)
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryAccent())
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -325,13 +344,29 @@ fun StaffMarkAttendanceScreen(
                         item {
                             QuickActionsRow(
                                 onMarkAllPresent = {
-                                    studentAttendance = attendanceSheet!!.students.associate {
-                                        it.studentId to AttendanceStatus.PRESENT
+                                    // Preserve leave/OD status for students with approved leaves/events
+                                    // Use StatusUtils for robust matching of status variants
+                                    studentAttendance = attendanceSheet!!.students.associate { student ->
+                                        val hasApprovedLeave = student.isOnDuty || StatusUtils.isLeaveOrDuty(student.status)
+                                        val status = if (hasApprovedLeave) {
+                                            AttendanceStatus.ON_DUTY
+                                        } else {
+                                            AttendanceStatus.PRESENT
+                                        }
+                                        student.studentId to status
                                     }
                                 },
                                 onMarkAllAbsent = {
-                                    studentAttendance = attendanceSheet!!.students.associate {
-                                        it.studentId to AttendanceStatus.ABSENT
+                                    // Preserve leave/OD status for students with approved leaves/events
+                                    // Use StatusUtils for robust matching of status variants
+                                    studentAttendance = attendanceSheet!!.students.associate { student ->
+                                        val hasApprovedLeave = student.isOnDuty || StatusUtils.isLeaveOrDuty(student.status)
+                                        val status = if (hasApprovedLeave) {
+                                            AttendanceStatus.ON_DUTY
+                                        } else {
+                                            AttendanceStatus.ABSENT
+                                        }
+                                        student.studentId to status
                                     }
                                 }
                             )
@@ -350,11 +385,17 @@ fun StaffMarkAttendanceScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     color = accentPurple()
                                 )
-                                Text(
-                                    text = "Tap to toggle",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Tap card to toggle P/A",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -457,7 +498,7 @@ fun StaffMarkAttendanceScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "On Duty",
+                                text = "Leave/OD",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -470,7 +511,7 @@ fun StaffMarkAttendanceScreen(
                         showConfirmDialog = false
                         submitAttendance()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MitPurple)
+                    colors = ButtonDefaults.buttonColors(containerColor = primaryAccent())
                 ) {
                     Text("Submit")
                 }
@@ -532,22 +573,20 @@ private fun SessionInfoCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                val sessionTypeColor = when (sheet.allocation.sessionType.lowercase()) {
+                    "practical", "lab" -> MitOrange
+                    "tutorial" -> secondaryAccent()
+                    else -> primaryAccent()
+                }
+                val isDark = isSystemInDarkTheme()
                 Surface(
-                    color = when (sheet.allocation.sessionType.lowercase()) {
-                        "practical", "lab" -> MitOrange.copy(alpha = 0.1f)
-                        "tutorial" -> MitTeal.copy(alpha = 0.1f)
-                        else -> MitPurple.copy(alpha = 0.1f)
-                    },
+                    color = sessionTypeColor.copy(alpha = if (isDark) 0.2f else 0.1f),
                     shape = RoundedCornerShape(4.dp)
                 ) {
                     Text(
                         text = sheet.allocation.sessionType,
                         style = MaterialTheme.typography.labelSmall,
-                        color = when (sheet.allocation.sessionType.lowercase()) {
-                            "practical", "lab" -> MitOrange
-                            "tutorial" -> MitTeal
-                            else -> MitPurple
-                        },
+                        color = sessionTypeColor,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -679,7 +718,9 @@ private fun QuickActionsRow(
 }
 
 /**
- * Individual student attendance card.
+ * Individual student attendance card with modern design.
+ * Students with approved leaves (OD/ML/CL) are locked and show their status.
+ * Regular students can be marked Present or Absent only.
  */
 @Composable
 private fun StudentAttendanceCard(
@@ -688,97 +729,160 @@ private fun StudentAttendanceCard(
     status: AttendanceStatus,
     onStatusChange: (AttendanceStatus) -> Unit
 ) {
-    val statusColor = when (status) {
-        AttendanceStatus.PRESENT -> StatusGreen
-        AttendanceStatus.ABSENT -> StatusRed
-        AttendanceStatus.ON_DUTY -> StatusBlue
+    // Check if student has approved leave/duty (locked status)
+    // Use StatusUtils for robust matching of status variants (handles case/spacing)
+    val normalizedStatus = StatusUtils.normalizeLeaveStatus(student.status)
+    val isLocked = student.isOnDuty || normalizedStatus != null
+
+    // Get appropriate colors, code, and label based on leave type
+    // Use theme-aware teal for CL
+    val tealColor = secondaryAccent()
+    data class LeaveInfo(val color: Color, val code: String, val label: String)
+    val leaveInfo = when (normalizedStatus) {
+        "ML" -> LeaveInfo(MitOrange, "ML", student.statusLabel ?: "Medical Leave")
+        "CL" -> LeaveInfo(tealColor, "CL", student.statusLabel ?: "Casual Leave")
+        "OD" -> LeaveInfo(StatusBlue, "OD", student.statusLabel ?: "Event OD")
+        else -> if (student.isOnDuty) {
+            LeaveInfo(StatusBlue, "OD", student.statusLabel ?: "On Duty")
+        } else {
+            LeaveInfo(StatusBlue, "", "")
+        }
+    }
+    val leaveColor = leaveInfo.color
+    val leaveCode = leaveInfo.code
+    val leaveLabel = leaveInfo.label
+
+    val cardBackground = if (isLocked) {
+        leaveColor.copy(alpha = 0.06f)
+    } else {
+        MaterialTheme.colorScheme.surface
     }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                // Cycle through statuses on tap
-                val nextStatus = when (status) {
-                    AttendanceStatus.PRESENT -> AttendanceStatus.ABSENT
-                    AttendanceStatus.ABSENT -> AttendanceStatus.ON_DUTY
-                    AttendanceStatus.ON_DUTY -> AttendanceStatus.PRESENT
-                }
-                onStatusChange(nextStatus)
-            },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        shape = RoundedCornerShape(12.dp)
+            .then(
+                if (!isLocked) {
+                    Modifier.clickable {
+                        // Toggle between Present and Absent only
+                        val nextStatus = when (status) {
+                            AttendanceStatus.PRESENT -> AttendanceStatus.ABSENT
+                            AttendanceStatus.ABSENT -> AttendanceStatus.PRESENT
+                            AttendanceStatus.ON_DUTY -> AttendanceStatus.PRESENT
+                        }
+                        onStatusChange(nextStatus)
+                    }
+                } else Modifier
+            ),
+        colors = CardDefaults.cardColors(containerColor = cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isLocked) 0.dp else 1.dp),
+        shape = RoundedCornerShape(16.dp),
+        border = if (isLocked) {
+            androidx.compose.foundation.BorderStroke(1.dp, leaveColor.copy(alpha = 0.3f))
+        } else null
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Serial number
+            // Serial number with status indicator
+            val isDark = isSystemInDarkTheme()
+            val indexBgAlpha = if (isDark) 0.2f else 0.1f
             Box(
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
-                    .background(MitPurple.copy(alpha = 0.1f)),
+                    .background(
+                        if (isLocked) leaveColor.copy(alpha = indexBgAlpha)
+                        else primaryAccent().copy(alpha = indexBgAlpha)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "$index",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = accentPurple()
+                    color = if (isLocked) leaveColor else primaryAccent()
                 )
             }
 
-            // Student info
+            // Student info - use theme-aware text colors
+            // For locked cards, use the leave color for better contrast in both themes
+            val nameColor = if (isLocked) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface
+            val rollColor = if (isLocked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = student.name,
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                    color = nameColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${student.rollNumber} • ${student.admissionNumber}",
+                    text = student.rollNumber,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = rollColor
                 )
             }
 
-            // Status indicator chips
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                StatusChip(
-                    text = "P",
-                    isSelected = status == AttendanceStatus.PRESENT,
-                    selectedColor = StatusGreen,
-                    onClick = { onStatusChange(AttendanceStatus.PRESENT) }
-                )
-                StatusChip(
-                    text = "A",
-                    isSelected = status == AttendanceStatus.ABSENT,
-                    selectedColor = StatusRed,
-                    onClick = { onStatusChange(AttendanceStatus.ABSENT) }
-                )
-                StatusChip(
-                    text = "OD",
-                    isSelected = status == AttendanceStatus.ON_DUTY,
-                    selectedColor = StatusBlue,
-                    onClick = { onStatusChange(AttendanceStatus.ON_DUTY) }
-                )
+            // Status indicator - Locked badge OR P/A chips
+            if (isLocked) {
+                // Show locked status badge with leave type code and icon
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Leave type code badge (ML, CL, OD)
+                    Surface(
+                        color = leaveColor,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = leaveCode,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                    // Lock icon
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Locked",
+                        modifier = Modifier.size(16.dp),
+                        tint = leaveColor
+                    )
+                }
+            } else {
+                // Show P/A chips for regular students
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    StatusChip(
+                        text = "P",
+                        isSelected = status == AttendanceStatus.PRESENT,
+                        selectedColor = StatusGreen,
+                        onClick = { onStatusChange(AttendanceStatus.PRESENT) }
+                    )
+                    StatusChip(
+                        text = "A",
+                        isSelected = status == AttendanceStatus.ABSENT,
+                        selectedColor = StatusRed,
+                        onClick = { onStatusChange(AttendanceStatus.ABSENT) }
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * Status chip for attendance selection.
+ * Modern status chip for attendance selection.
  */
 @Composable
 private fun StatusChip(
@@ -789,29 +893,27 @@ private fun StatusChip(
 ) {
     Surface(
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .size(40.dp)
+            .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() },
         color = if (isSelected) selectedColor else Color.Transparent,
-        shape = RoundedCornerShape(6.dp)
+        shape = RoundedCornerShape(12.dp),
+        border = if (!isSelected) {
+            androidx.compose.foundation.BorderStroke(
+                width = 1.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+        } else null,
+        shadowElevation = if (isSelected) 2.dp else 0.dp
     ) {
         Box(
-            modifier = Modifier
-                .then(
-                    if (!isSelected)
-                        Modifier.border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            shape = RoundedCornerShape(6.dp)
-                        )
-                    else Modifier
-                )
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = text,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
                 color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -856,6 +958,11 @@ private fun TopicSelectionDialog(
     onTopicSelected: (Int?) -> Unit,
     onDismiss: () -> Unit
 ) {
+    // Theme-aware alpha for selected backgrounds
+    val isDark = isSystemInDarkTheme()
+    val selectedBgAlpha = if (isDark) 0.2f else 0.1f
+    val accentColor = primaryAccent()
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -874,7 +981,7 @@ private fun TopicSelectionDialog(
                             .clickable { onTopicSelected(null) }
                             .background(
                                 if (selectedTopicId == null)
-                                    MitPurple.copy(alpha = 0.1f)
+                                    accentColor.copy(alpha = selectedBgAlpha)
                                 else
                                     Color.Transparent
                             )
@@ -886,7 +993,7 @@ private fun TopicSelectionDialog(
                             selected = selectedTopicId == null,
                             onClick = { onTopicSelected(null) },
                             colors = RadioButtonDefaults.colors(
-                                selectedColor = accentPurple()
+                                selectedColor = accentColor
                             )
                         )
                         Text(
@@ -906,7 +1013,7 @@ private fun TopicSelectionDialog(
                             .clickable { onTopicSelected(topic.planId) }
                             .background(
                                 if (selectedTopicId == topic.planId)
-                                    MitPurple.copy(alpha = 0.1f)
+                                    accentColor.copy(alpha = selectedBgAlpha)
                                 else
                                     Color.Transparent
                             )
@@ -918,7 +1025,7 @@ private fun TopicSelectionDialog(
                             selected = selectedTopicId == topic.planId,
                             onClick = { onTopicSelected(topic.planId) },
                             colors = RadioButtonDefaults.colors(
-                                selectedColor = accentPurple()
+                                selectedColor = accentColor
                             )
                         )
                         Column(modifier = Modifier.weight(1f)) {

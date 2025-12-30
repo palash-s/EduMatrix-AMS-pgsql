@@ -19,6 +19,7 @@ import androidx.navigation.compose.rememberNavController
 import com.eduMatrix.ams.AppPrefs
 import com.eduMatrix.ams.ui.navigation.NavRoutes
 import com.eduMatrix.ams.ui.staff.attendance.StaffMarkAttendanceScreen
+import com.eduMatrix.ams.ui.staff.events.EventDashboardScreen
 import com.eduMatrix.ams.ui.staff.leaves.StaffLeaveApprovalsScreen
 import com.eduMatrix.ams.ui.staff.mentor.MentorDashboardScreen
 import com.eduMatrix.ams.ui.theme.accentPurple
@@ -121,6 +122,9 @@ fun StaffMainScreen(
                     onNavigateToHod = {
                         navController.navigate(NavRoutes.HOD_DASHBOARD)
                     },
+                    onNavigateToEvents = {
+                        navController.navigate(NavRoutes.EVENT_DASHBOARD)
+                    },
                     onNavigateToNotifications = {
                         navController.navigate(NavRoutes.STAFF_NOTIFICATIONS)
                     },
@@ -195,6 +199,13 @@ fun StaffMainScreen(
                     onAddLog = { studentId ->
                         navController.navigate(NavRoutes.mentorAddLog(studentId))
                     }
+                )
+            }
+
+            // Event Dashboard
+            composable(NavRoutes.EVENT_DASHBOARD) {
+                EventDashboardScreen(
+                    onBack = { navController.popBackStack() }
                 )
             }
         }

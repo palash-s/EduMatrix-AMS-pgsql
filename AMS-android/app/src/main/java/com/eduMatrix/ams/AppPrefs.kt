@@ -16,6 +16,9 @@ object AppPrefs {
 
     // Token keys
     private const val KEY_ACCESS_TOKEN = "access_token"
+
+    // Theme keys
+    private const val KEY_DARK_MODE = "dark_mode"
     private const val KEY_REFRESH_TOKEN = "refresh_token"
     private const val KEY_FCM_TOKEN = "fcm_token"
 
@@ -204,5 +207,35 @@ object AppPrefs {
             .edit()
             .clear()
             .apply()
+    }
+
+    // ========================================
+    // THEME MANAGEMENT
+    // ========================================
+
+    /**
+     * Dark mode setting: null = follow system, true = dark, false = light
+     */
+    fun getDarkMode(context: Context): Boolean? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return if (prefs.contains(KEY_DARK_MODE)) {
+            prefs.getBoolean(KEY_DARK_MODE, false)
+        } else {
+            null  // Follow system
+        }
+    }
+
+    /**
+     * Save dark mode preference.
+     * @param darkMode true = dark, false = light, null = follow system
+     */
+    fun setDarkMode(context: Context, darkMode: Boolean?) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+        if (darkMode == null) {
+            prefs.remove(KEY_DARK_MODE)
+        } else {
+            prefs.putBoolean(KEY_DARK_MODE, darkMode)
+        }
+        prefs.apply()
     }
 }
