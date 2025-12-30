@@ -3204,6 +3204,11 @@ def assign_hod():
 def get_class_analytics():
     try:
         user_id = request.args.get('user_id')
+        # Prevent data leakage via user_id spoofing
+        if user_id and str(user_id) != str(getattr(current_user, 'user_id', '')):
+            return jsonify({"error": "Forbidden"}), 403
+
+        user_id = str(getattr(current_user, 'user_id', user_id))
         class_managed = ClassSection.query.filter_by(class_teacher_id=user_id).first()
         if not class_managed: return jsonify({"error": "No class assigned"}), 404
 
@@ -3246,12 +3251,79 @@ def get_class_analytics():
 
         pending_leaves_count = LeaveApplication.query.join(StudentProfile).filter(StudentProfile.current_section_id == class_managed.section_id, LeaveApplication.status == 'Pending_CT').count()
 
+        # Alerts: approved leave history + students out for events (today)
+        today = date.today()
+
+        approved_leave_rows = (
+            db.session.query(LeaveApplication, StudentProfile)
+            .join(StudentProfile, LeaveApplication.student_id == StudentProfile.student_id)
+            .filter(StudentProfile.current_section_id == class_managed.section_id)
+            .filter(LeaveApplication.status == 'Approved')
+            .order_by(LeaveApplication.start_date.desc(), LeaveApplication.leave_id.desc())
+            .limit(30)
+            .all()
+        )
+        approved_leave_history = []
+        for leave, student in approved_leave_rows:
+            approved_leave_history.append({
+                "leave_id": leave.leave_id,
+                "student_id": student.student_id,
+                "student_name": student.full_name,
+                "roll_no": student.admission_number,
+                "leave_type": leave.leave_type or "General",
+                "days": leave.total_days,
+                "start_date": leave.start_date.isoformat() if leave.start_date else None,
+                "end_date": leave.end_date.isoformat() if leave.end_date else None,
+                "date_range": f"{leave.start_date.strftime('%d %b')} - {leave.end_date.strftime('%d %b')}" if (leave.start_date and leave.end_date) else "",
+                "reason": leave.reason,
+            })
+
+        event_rows = (
+            db.session.query(EventParticipation, EventMaster, StudentProfile)
+            .join(EventMaster, EventParticipation.event_id == EventMaster.event_id)
+            .join(StudentProfile, EventParticipation.student_id == StudentProfile.student_id)
+            .filter(StudentProfile.current_section_id == class_managed.section_id)
+            .filter(EventMaster.start_date <= today)
+            .filter(EventMaster.end_date >= today)
+            .all()
+        )
+
+        out_map = {}
+        for part, event, student in event_rows:
+            raw_status = (getattr(part, 'status', '') or '').strip()
+            status_norm = raw_status.lower()
+            if status_norm in {'cancelled', 'canceled', 'rejected'}:
+                continue
+
+            sid = student.student_id
+            if sid not in out_map:
+                out_map[sid] = {
+                    "student_id": sid,
+                    "student_name": student.full_name,
+                    "roll_no": student.admission_number,
+                    "events": [],
+                }
+            out_map[sid]["events"].append({
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "status": raw_status or 'Nominated',
+                "date_range": f"{event.start_date.strftime('%d %b')} - {event.end_date.strftime('%d %b')}" if (event.start_date and event.end_date) else "",
+            })
+
+        out_for_events_today = list(out_map.values())
+        out_for_events_today.sort(key=lambda x: (x.get('roll_no') or '', x.get('student_name') or ''))
+
         return jsonify({
             "class_info": { "name": f"{class_managed.class_level} - {class_managed.name}", "total_students": len(students), "total_sessions": total_class_sessions },
             "summary": { "defaulter_count": len(defaulters), "pending_leaves": pending_leaves_count, "class_health": "Good" if len(defaulters) < (len(students)*0.2) else "At Risk" },
             "subjects": subject_stats,
             "defaulters": sorted(defaulters, key=lambda x: x['perc']),
-            "top_students": sorted(top_students, key=lambda x: x['perc'], reverse=True)[:5]
+            "top_students": sorted(top_students, key=lambda x: x['perc'], reverse=True)[:5],
+            "alerts": {
+                "approved_leave_history": approved_leave_history,
+                "out_for_events_today": out_for_events_today,
+                "as_of": today.isoformat(),
+            },
         })
     except Exception as e: return jsonify({"error": str(e)}), 500
 
