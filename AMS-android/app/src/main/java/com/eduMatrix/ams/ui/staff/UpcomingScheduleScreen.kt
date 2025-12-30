@@ -1,30 +1,40 @@
 package com.eduMatrix.ams.ui.staff
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.eduMatrix.ams.AppPrefs
 import com.eduMatrix.ams.BuildConfig
 import com.eduMatrix.ams.data.api.ApiService
 import com.eduMatrix.ams.data.models.*
+import com.eduMatrix.ams.ui.theme.StatusGreen
+import com.eduMatrix.ams.ui.theme.StatusRed
 import com.eduMatrix.ams.ui.theme.accentPurple
+import com.eduMatrix.ams.ui.theme.accentTeal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,11 +55,17 @@ fun UpcomingScheduleScreen(
     var todaySchedule by remember { mutableStateOf<List<UpcomingClass>>(emptyList()) }
     var upcomingSchedule by remember { mutableStateOf<List<UpcomingClass>>(emptyList()) }
 
-    // Day filter for upcoming schedule
-    val availableDays = remember(upcomingSchedule) {
-        upcomingSchedule.map { it.day }.distinct()
+    // Date filter for upcoming schedule (group by date for 2-week view)
+    val availableDates = remember(upcomingSchedule) {
+        upcomingSchedule.map { it.dateIso }.distinct().sorted()
     }
-    var selectedDay by remember { mutableStateOf<String?>(null) }
+    var selectedDate by remember { mutableStateOf<String?>(null) }
+
+    // Get display text for a date
+    fun getDateLabel(dateIso: String): String {
+        val parts = upcomingSchedule.firstOrNull { it.dateIso == dateIso }
+        return parts?.let { "${it.day.take(3)} ${it.dateDisplay}" } ?: dateIso
+    }
 
     // Adjustment modal state
     var showAdjustmentModal by remember { mutableStateOf(false) }
@@ -70,9 +86,9 @@ fun UpcomingScheduleScreen(
                 todaySchedule = today
                 upcomingSchedule = upcoming
 
-                // Set default selected day
-                if (selectedDay == null && upcoming.isNotEmpty()) {
-                    selectedDay = upcoming.firstOrNull()?.day
+                // Set default selected date (first upcoming date)
+                if (selectedDate == null && upcoming.isNotEmpty()) {
+                    selectedDate = upcoming.firstOrNull()?.dateIso
                 }
             } catch (e: Exception) {
                 error = e.message ?: "Failed to load schedule"
@@ -197,27 +213,27 @@ fun UpcomingScheduleScreen(
                         }
                     }
 
-                    // Upcoming Schedule Section
+                    // Upcoming Schedule Section (Next 2 Weeks)
                     item {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Upcoming Classes",
+                            text = "Upcoming Classes (Next 2 Weeks)",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
-                    // Day filter chips
-                    if (availableDays.isNotEmpty()) {
+                    // Date filter chips (for 2-week view)
+                    if (availableDates.isNotEmpty()) {
                         item {
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(availableDays) { day ->
+                                items(availableDates) { dateIso ->
                                     FilterChip(
-                                        selected = selectedDay == day,
-                                        onClick = { selectedDay = day },
-                                        label = { Text(day) },
+                                        selected = selectedDate == dateIso,
+                                        onClick = { selectedDate = dateIso },
+                                        label = { Text(getDateLabel(dateIso)) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = accentPurple(),
                                             selectedLabelColor = Color.White
@@ -229,7 +245,7 @@ fun UpcomingScheduleScreen(
                     }
 
                     val filteredUpcoming = upcomingSchedule.filter {
-                        selectedDay == null || it.day == selectedDay
+                        selectedDate == null || it.dateIso == selectedDate
                     }
 
                     if (filteredUpcoming.isEmpty()) {
@@ -324,10 +340,15 @@ private fun ScheduleClassCard(
     val isRequester = adjustment?.role == "requester"
     val isAdjuster = adjustment?.role == "adjuster"
 
+    val isCompleted = classItem.status == "Done"
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (isCompleted) Modifier.alpha(0.6f) else Modifier),
         colors = CardDefaults.cardColors(
             containerColor = when {
+                isCompleted -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 isApprovedAdjustment && adjustment?.kind == "in" -> Color(0xFFE8F5E9)  // Green for swapped-in
                 isPendingAdjustment -> Color(0xFFFFF8E1)  // Amber for pending
                 else -> MaterialTheme.colorScheme.surface
@@ -520,7 +541,8 @@ private fun ScheduleClassCard(
 }
 
 /**
- * Dialog for creating an adjustment request.
+ * Modern bottom sheet dialog for creating an adjustment request.
+ * Uses a stepped approach for cleaner UX.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -541,6 +563,14 @@ private fun AdjustmentDialog(
     var selectedSlot by remember { mutableStateOf<AvailableSlot?>(null) }
     var reason by remember { mutableStateOf("") }
 
+    // Current step: 0 = initial/search, 1 = select faculty, 2 = select slot, 3 = confirm
+    val currentStep = when {
+        selectedSlot != null -> 3
+        selectedFaculty != null -> 2
+        availableFaculty.isNotEmpty() -> 1
+        else -> 0
+    }
+
     // Search for available faculty
     fun searchFaculty() {
         scope.launch {
@@ -560,7 +590,7 @@ private fun AdjustmentDialog(
                 }
                 availableFaculty = faculty
                 if (faculty.isEmpty()) {
-                    error = "No faculty available for swap"
+                    error = "No faculty available for swap on this date"
                 }
             } catch (e: Exception) {
                 error = e.message ?: "Failed to search faculty"
@@ -605,212 +635,643 @@ private fun AdjustmentDialog(
         }
     }
 
-    AlertDialog(
+    // Full screen modal with modern design
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text("Request Session Adjustment")
-        },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 32.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 400.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(20.dp)
             ) {
-                // Current slot info
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                    )
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column {
                         Text(
-                            "Your Slot",
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "Request Swap",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Find a colleague to swap sessions",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            "${classItem.day}, ${classItem.dateDisplay} ${classItem.time}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            "${classItem.subject} - ${classItem.className}",
-                            style = MaterialTheme.typography.bodySmall
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                // Search button
-                if (availableFaculty.isEmpty() && !isSearching) {
-                    Button(
-                        onClick = { searchFaculty() },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = accentPurple())
-                    ) {
-                        Icon(Icons.Default.Search, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Search Available Faculty")
-                    }
-                }
+                Spacer(modifier = Modifier.height(20.dp))
 
-                // Loading indicator
-                if (isSearching) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                    }
-                }
+                // Your session card - always visible
+                SessionInfoCard(
+                    label = "Your Session",
+                    day = classItem.day,
+                    date = classItem.dateDisplay,
+                    time = classItem.time,
+                    subject = classItem.subject,
+                    className = classItem.className,
+                    accentColor = accentPurple()
+                )
 
-                // Faculty list
-                if (availableFaculty.isNotEmpty()) {
-                    Text(
-                        "Select Faculty",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                    LazyColumn(
-                        modifier = Modifier.heightIn(max = 120.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(availableFaculty) { faculty ->
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        selectedFaculty = faculty
-                                        selectedSlot = null
-                                    },
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (selectedFaculty == faculty)
-                                    accentPurple().copy(alpha = 0.1f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    RadioButton(
-                                        selected = selectedFaculty == faculty,
-                                        onClick = {
-                                            selectedFaculty = faculty
-                                            selectedSlot = null
-                                        },
-                                        colors = RadioButtonDefaults.colors(
-                                            selectedColor = accentPurple()
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(
-                                            faculty.name,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            faculty.code,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Swap slot selection
-                if (selectedFaculty != null && selectedFaculty!!.availableSlots.isNotEmpty()) {
-                    Text(
-                        "Select Swap Slot",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                    LazyColumn(
-                        modifier = Modifier.heightIn(max = 100.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(selectedFaculty!!.availableSlots) { slot ->
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { selectedSlot = slot },
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (selectedSlot == slot)
-                                    accentPurple().copy(alpha = 0.1f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    RadioButton(
-                                        selected = selectedSlot == slot,
-                                        onClick = { selectedSlot = slot },
-                                        colors = RadioButtonDefaults.colors(
-                                            selectedColor = accentPurple()
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(
-                                            "${slot.day}, ${slot.dateDisplay} ${slot.time}",
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                        Text(
-                                            "${slot.subject} - ${slot.className}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Reason field
-                if (selectedSlot != null) {
-                    OutlinedTextField(
-                        value = reason,
-                        onValueChange = { reason = it },
-                        label = { Text("Reason (optional)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                }
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Error message
-                error?.let {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                AnimatedVisibility(visible = error != null) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = StatusRed.copy(alpha = 0.1f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = StatusRed,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = error ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = StatusRed
+                            )
+                        }
+                    }
                 }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { submitAdjustment() },
-                enabled = selectedFaculty != null && selectedSlot != null && !isLoading,
-                colors = ButtonDefaults.buttonColors(containerColor = accentPurple())
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Text("Submit Request")
+
+                // Content based on current step
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .heightIn(max = 350.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Step 0: Search button
+                    if (currentStep == 0 && !isSearching) {
+                        item {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { searchFaculty() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = accentPurple())
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Find Available Faculty",
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
+                    }
+
+                    // Loading state
+                    if (isSearching) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(40.dp),
+                                        color = accentPurple(),
+                                        strokeWidth = 3.dp
+                                    )
+                                    Text(
+                                        text = "Searching for available faculty...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Step 1+: Faculty selection
+                    if (availableFaculty.isNotEmpty() && currentStep >= 1) {
+                        item {
+                            SectionHeader(
+                                title = "Select Faculty",
+                                subtitle = "${availableFaculty.size} colleague${if (availableFaculty.size > 1) "s" else ""} available"
+                            )
+                        }
+
+                        items(availableFaculty) { faculty ->
+                            FacultyCard(
+                                faculty = faculty,
+                                isSelected = selectedFaculty == faculty,
+                                onClick = {
+                                    selectedFaculty = faculty
+                                    selectedSlot = null
+                                    error = null
+                                }
+                            )
+                        }
+                    }
+
+                    // Step 2+: Swap slot selection
+                    if (selectedFaculty != null && selectedFaculty!!.availableSlots.isNotEmpty() && currentStep >= 2) {
+                        item {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            SectionHeader(
+                                title = "Select Swap Slot",
+                                subtitle = "Choose ${selectedFaculty?.name}'s session to swap with"
+                            )
+                        }
+
+                        items(selectedFaculty!!.availableSlots) { slot ->
+                            SwapSlotCard(
+                                slot = slot,
+                                isSelected = selectedSlot == slot,
+                                onClick = {
+                                    selectedSlot = slot
+                                    error = null
+                                }
+                            )
+                        }
+                    }
+
+                    // Step 3: Reason and summary
+                    if (selectedSlot != null && currentStep == 3) {
+                        item {
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Swap preview
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = StatusGreen.copy(alpha = 0.08f)
+                                ),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.SwapHoriz,
+                                            contentDescription = null,
+                                            tint = StatusGreen,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Text(
+                                            text = "Swap Summary",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = StatusGreen
+                                        )
+                                    }
+
+                                    HorizontalDivider(
+                                        color = StatusGreen.copy(alpha = 0.2f),
+                                        thickness = 1.dp
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "You give",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "${classItem.day.take(3)}, ${classItem.dateDisplay}",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = null,
+                                            tint = StatusGreen,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(
+                                                text = "You get",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "${selectedSlot?.day?.take(3)}, ${selectedSlot?.dateDisplay}",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        item {
+                            OutlinedTextField(
+                                value = reason,
+                                onValueChange = { reason = it },
+                                label = { Text("Reason (optional)") },
+                                placeholder = { Text("e.g., Medical appointment") },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = accentPurple(),
+                                    cursorColor = accentPurple()
+                                )
+                            )
+                        }
+                    }
                 }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Action buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Back/Cancel button
+                    OutlinedButton(
+                        onClick = {
+                            when {
+                                selectedSlot != null -> selectedSlot = null
+                                selectedFaculty != null -> selectedFaculty = null
+                                else -> onDismiss()
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text(
+                            text = if (currentStep > 0) "Back" else "Cancel",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+
+                    // Submit button
+                    Button(
+                        onClick = { submitAdjustment() },
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .height(50.dp),
+                        enabled = selectedFaculty != null && selectedSlot != null && !isLoading,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = accentPurple(),
+                            disabledContainerColor = accentPurple().copy(alpha = 0.3f)
+                        )
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Submit Request",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
+                }
             }
         }
-    )
+    }
+}
+
+/**
+ * Session info card for displaying session details
+ */
+@Composable
+private fun SessionInfoCard(
+    label: String,
+    day: String,
+    date: String,
+    time: String,
+    subject: String,
+    className: String,
+    accentColor: Color
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = accentColor.copy(alpha = 0.08f)
+        ),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Accent bar
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(accentColor)
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "$day, $date",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = time,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = subject,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
+                )
+                Text(
+                    text = className,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Section header for dialog sections
+ */
+@Composable
+private fun SectionHeader(title: String, subtitle: String) {
+    Column {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * Faculty selection card
+ */
+@Composable
+private fun FacultyCard(
+    faculty: AdjustmentFaculty,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val borderColor = if (isSelected) accentPurple() else Color.Transparent
+    val backgroundColor = if (isSelected)
+        accentPurple().copy(alpha = 0.08f)
+    else
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                width = if (isSelected) 2.dp else 0.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable(onClick = onClick),
+        color = backgroundColor,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Avatar
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isSelected) accentPurple()
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = faculty.name.take(1).uppercase(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isSelected) Color.White
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = faculty.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = faculty.code,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Slot count badge
+            Surface(
+                color = accentPurple().copy(alpha = 0.1f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = "${faculty.availableSlots.size} slot${if (faculty.availableSlots.size > 1) "s" else ""}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentPurple(),
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = accentPurple(),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Swap slot selection card
+ */
+@Composable
+private fun SwapSlotCard(
+    slot: AvailableSlot,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val borderColor = if (isSelected) accentTeal() else Color.Transparent
+    val backgroundColor = if (isSelected)
+        accentTeal().copy(alpha = 0.08f)
+    else
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                width = if (isSelected) 2.dp else 0.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable(onClick = onClick),
+        color = backgroundColor,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Date icon
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (isSelected) accentTeal()
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CalendarMonth,
+                    contentDescription = null,
+                    tint = if (isSelected) Color.White
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "${slot.day}, ${slot.dateDisplay}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = slot.time,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = slot.subject,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
+                )
+                Text(
+                    text = slot.className,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = accentTeal(),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+    }
 }

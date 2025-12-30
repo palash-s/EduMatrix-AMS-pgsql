@@ -2,7 +2,9 @@ package com.eduMatrix.ams.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -12,7 +14,22 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+
+/**
+ * EduMatrix AMS Shape System
+ *
+ * Uses 12dp corner radius for a sharper, professional look.
+ * Standard MD3 is too rounded for information-dense layouts.
+ */
+private val AmsShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),  // Primary shape for cards
+    large = RoundedCornerShape(12.dp),   // Same as medium for consistency
+    extraLarge = RoundedCornerShape(16.dp)
+)
 
 /**
  * Dark color scheme using MIT brand colors
@@ -130,6 +147,7 @@ fun AMSandroidTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
+        shapes = AmsShapes,
         content = content
     )
 }

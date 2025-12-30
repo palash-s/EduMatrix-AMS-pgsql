@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -69,10 +70,12 @@ fun StaffLeaveApprovalsScreen(
             errorMessage = null
             try {
                 val token = AppPrefs.getAccessToken(context) ?: throw Exception("Not authenticated")
+                val user = AppPrefs.getUser(context) ?: throw Exception("User not found")
                 val requests = withContext(Dispatchers.IO) {
                     ApiService.getLeaveRequests(
                         baseUrl = BuildConfig.API_BASE_URL,
-                        accessToken = token
+                        accessToken = token,
+                        userId = user.userId
                     )
                 }
                 leaveRequests = requests
@@ -159,7 +162,7 @@ fun StaffLeaveApprovalsScreen(
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MitPurple,
+                    containerColor = primaryAccent(),
                     titleContentColor = Color.White
                 ),
                 actions = {
@@ -179,7 +182,7 @@ fun StaffLeaveApprovalsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(AppBackgroundLight)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             // Filter tabs
             ScrollableTabRow(
@@ -238,7 +241,7 @@ fun StaffLeaveApprovalsScreen(
                     ) {
                         Button(
                             onClick = { loadLeaveRequests() },
-                            colors = ButtonDefaults.buttonColors(containerColor = MitPurple)
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryAccent())
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -503,6 +506,10 @@ private fun LeaveRequestCard(
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
+    // Theme-aware alpha values
+    val isDark = isSystemInDarkTheme()
+    val bgAlpha = if (isDark) 0.2f else 0.1f
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -530,14 +537,14 @@ private fun LeaveRequestCard(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(MitPurple.copy(alpha = 0.1f)),
+                            .background(primaryAccent().copy(alpha = bgAlpha)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = request.applicantName.take(1).uppercase(),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = accentPurple()
+                            color = primaryAccent()
                         )
                     }
                     Column {
@@ -574,14 +581,15 @@ private fun LeaveRequestCard(
             }
 
             // Leave type chip
+            val leaveTypeColor = secondaryAccent()
             Surface(
-                color = MitTeal.copy(alpha = 0.1f),
+                color = leaveTypeColor.copy(alpha = bgAlpha),
                 shape = RoundedCornerShape(4.dp)
             ) {
                 Text(
                     text = request.leaveType.toDisplayString(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MitTeal,
+                    color = leaveTypeColor,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }

@@ -50,6 +50,7 @@ data class ScheduledClass(
 data class StaffDashboardData(
     val profile: StaffProfile,
     val todaySchedule: List<ScheduledClass>,
+    val upcomingSchedule: List<UpcomingClass> = emptyList(),  // Next 2 weeks schedule
     val totalSubjects: Int,
     val totalStudents: Int,
     val sessionsThisMonth: Int,
@@ -114,7 +115,10 @@ data class StudentForAttendance(
     val name: String,
     val admissionNumber: String,
     val isPresent: Boolean = true,
-    val remarks: String? = null
+    val remarks: String? = null,
+    val status: String = "Present",  // Backend status: Present, OnDuty, ML, CL, Absent
+    val statusLabel: String? = null, // Display label: "Event OD", "Approved ML", etc.
+    val isOnDuty: Boolean = false    // True if on approved leave/event
 )
 
 /**
@@ -328,3 +332,136 @@ data class SessionHistoryRecord(
     val className: String,
     val percentage: Int
 )
+
+// ========================================
+// EVENT MANAGER MODELS
+// ========================================
+
+/**
+ * Event summary for list display
+ */
+data class EventSummary(
+    val eventId: Int,
+    val name: String,
+    val dateDisplay: String,
+    val time: String?,
+    val studentCount: Int
+)
+
+/**
+ * Event details for creation/editing
+ */
+data class EventDetail(
+    val eventId: Int,
+    val name: String,
+    val description: String?,
+    val startDate: String,
+    val endDate: String,
+    val startTime: String?,
+    val endTime: String?,
+    val coordinatorId: String,
+    val studentCount: Int
+)
+
+/**
+ * Event participant
+ */
+data class EventParticipant(
+    val participationId: Int,
+    val studentId: String,
+    val name: String,
+    val rollNumber: String,
+    val className: String,
+    val role: String,  // Participant, Student Coordinator, Volunteer
+    val status: String  // Nominated, Attended
+)
+
+/**
+ * Event creation request
+ */
+data class EventCreateRequest(
+    val name: String,
+    val description: String?,
+    val startDate: String,
+    val endDate: String,
+    val startTime: String?,
+    val endTime: String?,
+    val coordinatorId: String,
+    val notifyAllStudents: Boolean = false
+)
+
+/**
+ * Student for event participant selection
+ */
+data class StudentForEvent(
+    val studentId: String,
+    val name: String,
+    val rollNumber: String,
+    val admissionNumber: String
+)
+
+// ========================================
+// STATUS UTILITIES
+// ========================================
+
+/**
+ * Utility object for normalizing and checking attendance/leave statuses.
+ * Handles case-insensitive matching and various string variants.
+ */
+object StatusUtils {
+    /**
+     * Normalizes a status string to standard leave code (ML, CL, OD) or null.
+     * Handles various backend formats like "Sick/Medical", "MedicalLeave", "medical leave", etc.
+     */
+    fun normalizeLeaveStatus(status: String?): String? {
+        if (status.isNullOrBlank()) return null
+        val normalized = status.trim().lowercase().replace("_", "").replace("-", "").replace(" ", "")
+
+        return when {
+            // Medical Leave variants
+            normalized == "ml" ||
+            normalized == "medicalleave" ||
+            normalized == "medical" ||
+            normalized == "sick" ||
+            normalized == "sickleave" ||
+            normalized == "sick/medical" ||
+            normalized == "sickmedical" ||
+            normalized.contains("medical") -> "ML"
+
+            // Casual Leave variants
+            normalized == "cl" ||
+            normalized == "casualleave" ||
+            normalized == "casual" ||
+            normalized == "personal" ||
+            normalized == "personalleave" -> "CL"
+
+            // On Duty variants
+            normalized == "od" ||
+            normalized == "onduty" ||
+            normalized == "duty" ||
+            normalized == "event" ||
+            normalized == "eventod" -> "OD"
+
+            else -> null
+        }
+    }
+
+    /**
+     * Checks if a status is "present-like" (counts positively for attendance).
+     * Includes: Present, ML (Medical Leave), CL (Casual Leave), OD (On Duty)
+     */
+    fun isPresentLike(status: String?): Boolean {
+        if (status.isNullOrBlank()) return false
+        val normalized = status.trim().lowercase().replace("_", "").replace("-", "").replace(" ", "")
+
+        return normalized == "present" || normalizeLeaveStatus(status) != null
+    }
+
+    /**
+     * Checks if a status represents any approved leave/duty (ML, CL, or OD).
+     * These statuses should lock attendance and show special UI.
+     */
+    fun isLeaveOrDuty(status: String?): Boolean {
+        return normalizeLeaveStatus(status) != null
+    }
+}

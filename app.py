@@ -2084,7 +2084,7 @@ def staff_dashboard():
         current_day_idx = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6}.get(today_name, 0)
 
         window_start = today_date
-        window_end = today_date + timedelta(days=6)
+        window_end = today_date + timedelta(days=13)  # 2 weeks window for upcoming sessions
         
         all_slots = (db.session.query(WeeklySchedule, ClassSection, Subject)
                     .join(ClassSection, WeeklySchedule.section_id == ClassSection.section_id)
@@ -2201,53 +2201,65 @@ def staff_dashboard():
 
             return None
 
+        # Helper to convert time to float (e.g. 09:30 -> 9.5) - define once
+        def time_to_float(t): return t.hour + (t.minute / 60.0)
+
         for slot, section, subject in all_slots:
             slot_day_idx = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6}.get(slot.day_of_week, 7)
-            
+
             s_type = getattr(slot, 'session_type', 'Lecture')
             s_batch = getattr(slot, 'target_batch', None)
-            
-            # Helper to convert time to float (e.g. 09:30 -> 9.5)
-            def time_to_float(t): return t.hour + (t.minute / 60.0)
-            
+
             start_float = time_to_float(slot.start_time)
             end_float = time_to_float(slot.end_time)
 
-            # Compute the next occurrence date for this weekday relative to today.
-            # For today it will be today_date; for future days in the week it will be within the next 6 days.
-            days_ahead = (slot_day_idx - current_day_idx) % 7
-            slot_date = today_date + timedelta(days=days_ahead)
+            # Generate slots for both this week and next week (2 weeks total)
+            for week_offset in range(2):
+                # Compute the occurrence date for this weekday
+                days_ahead = (slot_day_idx - current_day_idx) % 7 + (week_offset * 7)
+                slot_date = today_date + timedelta(days=days_ahead)
 
-            slot_data = {
-                "id": slot.schedule_id,
-                "time": f"{slot.start_time.strftime('%I:%M %p')} - {slot.end_time.strftime('%I:%M %p')}",
-                "class": f"{section.class_level}-{section.name}",
-                "subject": subject.name,
-                "day": slot.day_of_week,
-                "date_iso": slot_date.strftime('%Y-%m-%d'),
-                "date_display": slot_date.strftime('%d %b'),
-                "type": s_type, 
-                "batch": s_batch,
-                "sort_key": slot_day_idx * 10000 + int(slot.start_time.strftime('%H%M')),
-                # NEW FIELDS FOR CALENDAR
-                "start_float": start_float,
-                "duration_float": end_float - start_float,
-                "adjustment": _slot_adjustment_payload(slot.schedule_id, slot_date),
-            }
+                # Skip if beyond window
+                if slot_date > window_end:
+                    continue
 
-            if slot_day_idx == current_day_idx:
-                session_exists = SessionLog.query.filter_by(schedule_id=slot.schedule_id, session_date=today_date).first()
-                slot_data["status"] = "Done" if session_exists else "Pending"
-                today_schedule.append(slot_data)
-            elif slot_day_idx > current_day_idx:
-                upcoming_schedule.append(slot_data)
-            
-            # Add to Weekly Calendar
-            weekly_calendar.append(slot_data)
+                # Generate sort_key that accounts for actual date (not just day of week)
+                # Use days_from_today * 10000 + time for proper ordering
+                days_from_today = (slot_date - today_date).days
+                sort_key = days_from_today * 10000 + int(slot.start_time.strftime('%H%M'))
+
+                slot_data = {
+                    "id": slot.schedule_id,
+                    "time": f"{slot.start_time.strftime('%I:%M %p')} - {slot.end_time.strftime('%I:%M %p')}",
+                    "class": f"{section.class_level}-{section.name}",
+                    "subject": subject.name,
+                    "day": slot.day_of_week,
+                    "date_iso": slot_date.strftime('%Y-%m-%d'),
+                    "date_display": slot_date.strftime('%d %b'),
+                    "type": s_type,
+                    "batch": s_batch,
+                    "sort_key": sort_key,
+                    # NEW FIELDS FOR CALENDAR
+                    "start_float": start_float,
+                    "duration_float": end_float - start_float,
+                    "adjustment": _slot_adjustment_payload(slot.schedule_id, slot_date),
+                }
+
+                if slot_date == today_date:
+                    session_exists = SessionLog.query.filter_by(schedule_id=slot.schedule_id, session_date=today_date).first()
+                    slot_data["status"] = "Done" if session_exists else "Pending"
+                    today_schedule.append(slot_data)
+                elif slot_date > today_date:
+                    upcoming_schedule.append(slot_data)
+
+                # Add to Weekly Calendar (only first week for calendar view)
+                if week_offset == 0:
+                    weekly_calendar.append(slot_data)
 
         today_schedule.sort(key=lambda x: x['sort_key'])
+        upcoming_schedule.sort(key=lambda x: x['sort_key'])
 
-        # Inject swapped-in classes for Approved adjustments (today + upcoming within the next 7 days)
+        # Inject swapped-in classes for Approved adjustments (today + upcoming within the 2-week window)
         try:
             approved_only = [a for a in adjustments if a.status == 'Approved']
             inject_pairs = []  # (schedule_id, date, role, partner_id)
@@ -3653,16 +3665,72 @@ def get_full_session_history():
 @login_required
 def get_staff_leave_requests():
     user_id = request.args.get('user_id')
+    include_all = request.args.get('include_all', 'false').lower() == 'true'
     class_managed = ClassSection.query.filter_by(class_teacher_id=user_id).first()
     dept_managed = Department.query.filter_by(hod_staff_id=user_id).first()
-    pending_leaves = []
+    leave_list = []
+
+    def format_leave(leave, student, section, role_context):
+        return {
+            "leave_id": leave.leave_id,
+            "student_name": student.full_name,
+            "roll_no": student.admission_number,
+            "class_name": f"{section.class_level}-{section.name}",
+            "leave_type": leave.leave_type or "General",
+            "days": leave.total_days,
+            "start_date": leave.start_date.strftime('%Y-%m-%d') if leave.start_date else "",
+            "end_date": leave.end_date.strftime('%Y-%m-%d') if leave.end_date else "",
+            "date_range": f"{leave.start_date.strftime('%d %b')} - {leave.end_date.strftime('%d %b')}",
+            "reason": leave.reason,
+            "status": leave.status.replace('Pending_CT', 'Pending').replace('Pending_HOD', 'Pending'),
+            "applied_on": leave.start_date.strftime('%d %b %Y') if leave.start_date else "",
+            "role_context": role_context
+        }
+
     if class_managed:
-        ct_requests = (db.session.query(LeaveApplication, StudentProfile, ClassSection).join(StudentProfile, LeaveApplication.student_id == StudentProfile.student_id).join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id).filter(ClassSection.section_id == class_managed.section_id).filter(LeaveApplication.status == 'Pending_CT').all())
-        for leave, student, section in ct_requests: pending_leaves.append({ "leave_id": leave.leave_id, "student_name": student.full_name, "roll_no": student.admission_number, "class_name": f"{section.class_level}-{section.name}", "leave_type": leave.leave_type or "General", "days": leave.total_days, "date_range": f"{leave.start_date.strftime('%d %b')} - {leave.end_date.strftime('%d %b')}", "reason": leave.reason, "role_context": "Class Teacher" })
+        # Pending requests for Class Teacher
+        ct_pending = (db.session.query(LeaveApplication, StudentProfile, ClassSection)
+            .join(StudentProfile, LeaveApplication.student_id == StudentProfile.student_id)
+            .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
+            .filter(ClassSection.section_id == class_managed.section_id)
+            .filter(LeaveApplication.status == 'Pending_CT').all())
+        for leave, student, section in ct_pending:
+            leave_list.append(format_leave(leave, student, section, "Class Teacher"))
+
+        # Include approved/rejected if requested
+        if include_all:
+            ct_history = (db.session.query(LeaveApplication, StudentProfile, ClassSection)
+                .join(StudentProfile, LeaveApplication.student_id == StudentProfile.student_id)
+                .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
+                .filter(ClassSection.section_id == class_managed.section_id)
+                .filter(LeaveApplication.status.in_(['Approved', 'Rejected']))
+                .order_by(LeaveApplication.start_date.desc())
+                .limit(50).all())
+            for leave, student, section in ct_history:
+                leave_list.append(format_leave(leave, student, section, "Class Teacher"))
+
     if dept_managed:
-        hod_requests = (db.session.query(LeaveApplication, StudentProfile, ClassSection).join(StudentProfile, LeaveApplication.student_id == StudentProfile.student_id).join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id).filter(LeaveApplication.status == 'Pending_HOD').all())
-        for leave, student, section in hod_requests: pending_leaves.append({ "leave_id": leave.leave_id, "student_name": student.full_name, "roll_no": student.admission_number, "class_name": f"{section.class_level}-{section.name}", "leave_type": leave.leave_type or "Long Leave", "days": leave.total_days, "date_range": f"{leave.start_date.strftime('%d %b')} - {leave.end_date.strftime('%d %b')}", "reason": leave.reason, "role_context": "HOD Approval" })
-    return jsonify({"requests": pending_leaves})
+        # Pending requests for HOD
+        hod_pending = (db.session.query(LeaveApplication, StudentProfile, ClassSection)
+            .join(StudentProfile, LeaveApplication.student_id == StudentProfile.student_id)
+            .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
+            .filter(LeaveApplication.status == 'Pending_HOD').all())
+        for leave, student, section in hod_pending:
+            leave_list.append(format_leave(leave, student, section, "HOD Approval"))
+
+        # Include approved/rejected if requested (HOD scope - long leaves)
+        if include_all:
+            hod_history = (db.session.query(LeaveApplication, StudentProfile, ClassSection)
+                .join(StudentProfile, LeaveApplication.student_id == StudentProfile.student_id)
+                .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
+                .filter(LeaveApplication.total_days > 15)
+                .filter(LeaveApplication.status.in_(['Approved', 'Rejected']))
+                .order_by(LeaveApplication.start_date.desc())
+                .limit(50).all())
+            for leave, student, section in hod_history:
+                leave_list.append(format_leave(leave, student, section, "HOD Approval"))
+
+    return jsonify({"requests": leave_list})
 
 @app.route('/api/staff/leave_action', methods=['POST'])
 @login_required
@@ -3671,7 +3739,9 @@ def staff_leave_action():
         data = request.json
         leave = LeaveApplication.query.get(data.get('leave_id'))
         if not leave: return jsonify({"error": "Leave not found"}), 404
-        leave.status = data.get('action')
+        # Capitalize the action to match the status values in the database
+        action = data.get('action', '').capitalize()
+        leave.status = action
         
         # NOTIFY STUDENT
         msg_type = "success" if leave.status == "Approved" else "danger"
