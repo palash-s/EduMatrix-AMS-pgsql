@@ -46,6 +46,35 @@
             <div class="bg-green-50 p-4 rounded-xl border border-green-100 shadow-sm"><p class="text-xs text-green-600 font-bold uppercase">Class Health</p><p class="text-xl font-bold text-green-800 mt-1" id="stat-health">--</p></div>
         </div>
 
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div class="p-5 border-b border-gray-50 flex justify-between items-center">
+                    <h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="calendar" class="w-4 h-4 text-gray-400"></i> Approved Leave History</h2>
+                    <span class="text-xs text-gray-400 italic">Last 30</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-gray-50 text-gray-500 font-medium">
+                            <tr>
+                                <th class="p-4">Student</th>
+                                <th class="p-4">Type</th>
+                                <th class="p-4">Dates</th>
+                                <th class="p-4 text-right">Days</th>
+                            </tr>
+                        </thead>
+                        <tbody id="approved-leave-history" class="divide-y divide-gray-50"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div class="p-5 border-b border-gray-50 flex justify-between items-center">
+                    <h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="flag" class="w-4 h-4 text-gray-400"></i> Out for Events Today</h2>
+                    <span class="text-xs text-gray-400 italic" id="events-as-of">Today</span>
+                </div>
+                <div id="event-out-list" class="divide-y divide-gray-50"></div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                 <div class="p-5 border-b border-gray-50 flex justify-between items-center"><h2 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="book-open" class="w-4 h-4 text-gray-400"></i> Subject Performance</h2><span class="text-xs text-gray-400 italic">Click row for details</span></div>
@@ -176,6 +205,49 @@
             const defList = document.getElementById('defaulter-list');
             if (data.defaulters.length === 0) defList.innerHTML = `<div class="p-8 text-center text-green-600">No defaulters!</div>`;
             else defList.innerHTML = data.defaulters.map(d => `<div class="p-4 hover:bg-red-50 flex justify-between items-center"><div><h4 class="font-bold text-gray-800 text-sm">${d.name}</h4><p class="text-xs text-gray-400">${d.roll}</p></div><div class="text-right"><span class="block text-lg font-bold text-red-600">${d.perc}%</span><span class="text-[10px] text-gray-400 font-bold">${d.attended}/${d.total}</span></div></div>`).join('');
+
+            const leaveBody = document.getElementById('approved-leave-history');
+            const leaveItems = (data.alerts && data.alerts.approved_leave_history) ? data.alerts.approved_leave_history : [];
+            if (!leaveBody) return;
+            if (!leaveItems || leaveItems.length === 0) {
+                leaveBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-400">No approved leaves</td></tr>`;
+            } else {
+                leaveBody.innerHTML = leaveItems.map(l => `
+                    <tr class="hover:bg-gray-50">
+                        <td class="p-4">
+                            <div class="font-bold text-gray-700 text-sm">${l.student_name || '-'}</div>
+                            <div class="text-xs text-gray-400">${l.roll_no || ''}</div>
+                        </td>
+                        <td class="p-4 text-gray-600 text-sm">${l.leave_type || 'General'}</td>
+                        <td class="p-4 text-gray-600 text-sm">${l.date_range || '-'}</td>
+                        <td class="p-4 text-right font-bold text-gray-700">${(l.days != null) ? l.days : '-'}</td>
+                    </tr>
+                `).join('');
+            }
+
+            const eventsAsOf = document.getElementById('events-as-of');
+            if (eventsAsOf && data.alerts && data.alerts.as_of) {
+                eventsAsOf.textContent = `As of ${data.alerts.as_of}`;
+            }
+
+            const eventOutEl = document.getElementById('event-out-list');
+            const outItems = (data.alerts && data.alerts.out_for_events_today) ? data.alerts.out_for_events_today : [];
+            if (eventOutEl) {
+                if (!outItems || outItems.length === 0) {
+                    eventOutEl.innerHTML = `<div class="p-8 text-center text-gray-400">No students are marked for events today</div>`;
+                } else {
+                    eventOutEl.innerHTML = outItems.map(s => {
+                        const evs = (s.events || []).map(e => `${e.event_name || 'Event'} (${e.status || 'Nominated'})`).join(', ');
+                        return `<div class="p-4 hover:bg-gray-50 flex justify-between items-start gap-4">
+                            <div>
+                                <h4 class="font-bold text-gray-800 text-sm">${s.student_name || '-'}</h4>
+                                <p class="text-xs text-gray-400">${s.roll_no || ''}</p>
+                                <p class="text-xs text-gray-600 mt-1">${evs || '-'}</p>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+            }
         }
 
         async function openSummary() {
