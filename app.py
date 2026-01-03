@@ -8,7 +8,7 @@ import secrets
 import hashlib
 import json
 from functools import wraps
-from datetime import timedelta
+from datetime import timedelta, timezone
 from datetime import datetime, date
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, g
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -79,6 +79,15 @@ app.config['WTF_CSRF_CHECK_DEFAULT'] = False  # We'll selectively protect routes
 
 db.init_app(app)
 migrate = Migrate(app, db)
+
+
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    """Clean up database session after each request to prevent stale transactions."""
+    if exception:
+        db.session.rollback()
+    db.session.remove()
+
 
 # ==========================================
 # FLASK-LOGIN SETUP
@@ -258,6 +267,22 @@ def api_admin_download_import_template(key: str):
 
 
 # ==========================================
+# HELPER: TIMEZONE CONVERSION
+# ==========================================
+# India Standard Time is UTC+5:30
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def _to_ist(dt):
+    """Convert a naive UTC datetime to IST string for display."""
+    if dt is None:
+        return None
+    # If naive datetime, assume UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).isoformat()
+
+
+# ==========================================
 # HELPER: NOTIFICATION SYSTEM
 # ==========================================
 _FIREBASE_APP = None
@@ -270,6 +295,7 @@ def _firebase_get_app():
     - FIREBASE_CREDENTIALS_FILE (path to service account json)
     - FIREBASE_CREDENTIALS_JSON (service account json string)
     - GOOGLE_APPLICATION_CREDENTIALS (path)
+    - Auto-discovery in secrets/ folder (for local development)
 
     Returns None when not configured; callers must treat push as best-effort.
     """
@@ -284,6 +310,16 @@ def _firebase_get_app():
     creds_file = os.environ.get('FIREBASE_CREDENTIALS_FILE') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
     creds_json = os.environ.get('FIREBASE_CREDENTIALS_JSON')
 
+    # Auto-discover Firebase credentials in secrets/ folder for local development
+    if not creds_file and not creds_json:
+        secrets_dir = os.path.join(os.path.dirname(__file__), 'secrets')
+        if os.path.isdir(secrets_dir):
+            for fname in os.listdir(secrets_dir):
+                if 'firebase' in fname.lower() and fname.endswith('.json'):
+                    creds_file = os.path.join(secrets_dir, fname)
+                    print(f"FCM: Auto-discovered credentials at {creds_file}")
+                    break
+
     if not creds_file and not creds_json:
         _FIREBASE_APP = None
         return None
@@ -292,27 +328,48 @@ def _firebase_get_app():
         if creds_json:
             info = json.loads(creds_json)
             cred = firebase_credentials.Certificate(info)
+            print(f"FCM: Loaded credentials from JSON env var, project_id={info.get('project_id')}")
         else:
+            print(f"FCM: Loading credentials from file: {creds_file}")
             cred = firebase_credentials.Certificate(creds_file)
 
         try:
             _FIREBASE_APP = firebase_admin.initialize_app(cred)
+            print(f"FCM: Firebase app initialized, project_id={_FIREBASE_APP.project_id}")
         except ValueError:
             _FIREBASE_APP = firebase_admin.get_app()
+            print(f"FCM: Firebase app already existed, project_id={_FIREBASE_APP.project_id}")
         return _FIREBASE_APP
     except Exception as e:
+        import traceback
         print(f"FCM init failed: {e}")
+        traceback.print_exc()
         _FIREBASE_APP = None
         return None
 
 
+_fcm_last_error = None  # Store last FCM error for debugging
+
 def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
     """Send a push notification to a list of FCM tokens (best-effort)."""
+    global _fcm_last_error
+    _fcm_last_error = None
+
     if not tokens:
+        _fcm_last_error = "no tokens provided"
         return 0
 
-    if _firebase_get_app() is None:
+    fb_app = _firebase_get_app()
+    if fb_app is None:
+        _fcm_last_error = "Firebase not initialized - check credentials"
         return 0
+
+    # Log project info for debugging
+    try:
+        project_id = fb_app.project_id
+        print(f"FCM: Using project_id={project_id}, sending to {len(tokens)} token(s)")
+    except Exception as e:
+        print(f"FCM: Could not get project_id: {e}")
 
     try:
         # FCM requires all data values to be strings.
@@ -322,9 +379,26 @@ def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
                 continue
             safe_data[str(k)] = str(v)
 
+        # Include title/body in data so our app always handles display (even in background)
+        safe_data['title'] = title or ''
+        safe_data['body'] = (body or '')[:240]
+        safe_data['message'] = (body or '')[:240]
+
+        # Android config for high-priority delivery and our custom channel
+        android_config = firebase_messaging.AndroidConfig(
+            priority='high',
+            notification=firebase_messaging.AndroidNotification(
+                channel_id='ams_alerts',
+                priority='high',
+                default_sound=True,
+                default_vibrate_timings=True,
+            )
+        )
+
         msg = firebase_messaging.MulticastMessage(
             notification=firebase_messaging.Notification(title=title or '', body=(body or '')[:240]),
             data=safe_data,
+            android=android_config,
             tokens=tokens,
         )
 
@@ -343,6 +417,7 @@ def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
                     m = firebase_messaging.Message(
                         notification=firebase_messaging.Notification(title=title or '', body=(body or '')[:240]),
                         data=safe_data,
+                        android=android_config,
                         token=t,
                     )
                     firebase_messaging.send(m)
@@ -364,6 +439,7 @@ def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
                     exc = getattr(r, 'exception', None)
                     if exc:
                         errors.append(str(exc))
+                _fcm_last_error = "; ".join(errors) if errors else f"{failure_count} failures (no details)"
                 print(f"FCM send result: success={success_count} failure={failure_count} sample_errors={errors}")
             else:
                 print(f"FCM send result: success={success_count} failure={failure_count}")
@@ -372,6 +448,7 @@ def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
 
         return success_count
     except Exception as e:
+        _fcm_last_error = str(e)
         print(f"FCM send failed: {e}")
         return 0
 
@@ -396,23 +473,31 @@ def _fcm_send_to_user(user_id: str, title: str, body: str, data: dict):
 
 
 def _fcm_send_to_user_debug(user_id: str, title: str, body: str, data: dict) -> dict:
-    """Debug helper returning counts: {tokens, success}."""
+    """Debug helper returning counts: {tokens, success, error}."""
     if not user_id:
-        return {"tokens": 0, "success": 0}
+        return {"tokens": 0, "success": 0, "error": "no user_id"}
 
     try:
+        # Check if Firebase is initialized
+        firebase_app = _firebase_get_app()
+        if firebase_app is None:
+            return {"tokens": 0, "success": 0, "error": "Firebase not initialized - check credentials"}
+
         devices = (PushDevice.query
                    .filter_by(user_id=user_id, is_active=True)
                    .all())
         tokens = [d.fcm_token for d in devices if d.fcm_token]
         if not tokens:
-            return {"tokens": 0, "success": 0}
+            return {"tokens": 0, "success": 0, "error": "no tokens registered"}
 
         success = _fcm_send_to_tokens(tokens, title, body, data)
-        return {"tokens": len(tokens), "success": int(success or 0)}
+        result = {"tokens": len(tokens), "success": int(success or 0)}
+        if success == 0:
+            result["error"] = _fcm_last_error or "FCM send returned 0 success - unknown error"
+        return result
     except Exception as e:
         print(f"FCM debug lookup/send failed for user {user_id}: {e}")
-        return {"tokens": 0, "success": 0}
+        return {"tokens": 0, "success": 0, "error": str(e)}
 
 
 def send_notification(user_id, title, message, type='info', link=None):
@@ -1605,7 +1690,7 @@ def api_v1_notifications_list():
                 "type": n.type,
                 "link": n.link,
                 "is_read": bool(n.is_read),
-                "timestamp": n.timestamp.isoformat() if n.timestamp else None,
+                "timestamp": _to_ist(n.timestamp),
                 "child": c,
             })
     else:
@@ -1618,7 +1703,7 @@ def api_v1_notifications_list():
                 "type": n.type,
                 "link": n.link,
                 "is_read": bool(n.is_read),
-                "timestamp": n.timestamp.isoformat() if n.timestamp else None,
+                "timestamp": _to_ist(n.timestamp),
             })
 
     return jsonify({"notifications": items}), 200
@@ -1647,6 +1732,31 @@ def api_v1_notifications_mark_read(notif_id: int):
     n.is_read = True
     db.session.commit()
     return jsonify({"message": "OK"}), 200
+
+
+@app.route('/api/v1/notifications/clear', methods=['DELETE'])
+def api_v1_notifications_clear():
+    """Delete all notifications for the current user."""
+    try:
+        user = _require_mobile_auth()
+    except PermissionError:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    role = (user.user_type or '').lower()
+    deleted_count = 0
+
+    if role == 'parent':
+        # For parents, delete notifications for all their children
+        children = StudentProfile.query.filter_by(parent_user_id=user.user_id).all()
+        child_ids = [c.student_id for c in children]
+        if child_ids:
+            deleted_count = Notification.query.filter(Notification.user_id.in_(child_ids)).delete(synchronize_session=False)
+    else:
+        # For other users, delete their own notifications
+        deleted_count = Notification.query.filter_by(user_id=user.user_id).delete(synchronize_session=False)
+
+    db.session.commit()
+    return jsonify({"message": "OK", "deleted": deleted_count}), 200
 
 
 # ==========================================
@@ -1758,11 +1868,14 @@ def api_v1_push_test():
         },
     )
 
-    return jsonify({
+    response = {
         "message": "sent",
         "push_tokens": push_stats.get("tokens", 0),
         "push_success": push_stats.get("success", 0),
-    }), 200
+    }
+    if push_stats.get("error"):
+        response["push_error"] = push_stats.get("error")
+    return jsonify(response), 200
 
 
 # ==========================================
@@ -3828,7 +3941,52 @@ def get_staff_leave_requests():
             for leave, student, section in hod_history:
                 leave_list.append(format_leave(leave, student, section, "HOD Approval"))
 
-    return jsonify({"requests": leave_list})
+    # Fetch students on duty (events) for Class Teacher's section
+    # Include ALL event participations (not just today) to match web app behavior
+    on_duty_list = []
+    if class_managed:
+        today = date.today()
+        MAX_EVENT_ROWS = 500
+        event_participants = (
+            db.session.query(EventParticipation, EventMaster, StudentProfile)
+            .join(EventMaster, EventParticipation.event_id == EventMaster.event_id)
+            .join(StudentProfile, EventParticipation.student_id == StudentProfile.student_id)
+            .filter(StudentProfile.current_section_id == class_managed.section_id)
+            .order_by(EventMaster.start_date.desc(), EventMaster.event_id.desc())
+            .limit(MAX_EVENT_ROWS)
+            .all()
+        )
+
+        # Group by student to avoid duplicates
+        student_events = {}
+        for part, event, student in event_participants:
+            raw_status = (getattr(part, 'status', '') or '').strip()
+            if raw_status.lower() in ('cancelled', 'canceled', 'rejected'):
+                continue
+
+            sid = student.student_id
+            # Check if event is active today
+            is_today = event.start_date and event.end_date and (event.start_date <= today <= event.end_date)
+
+            if sid not in student_events:
+                student_events[sid] = {
+                    "student_id": sid,
+                    "student_name": student.full_name,
+                    "roll_no": student.admission_number,
+                    "events": []
+                }
+            student_events[sid]["events"].append({
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "role": part.student_role or "Participant",
+                "status": raw_status or "Nominated",
+                "date_range": f"{event.start_date.strftime('%d %b')} - {event.end_date.strftime('%d %b')}" if event.start_date and event.end_date else "",
+                "is_today": is_today
+            })
+
+        on_duty_list = sorted(student_events.values(), key=lambda x: x.get('roll_no', ''))
+
+    return jsonify({"requests": leave_list, "on_duty_students": on_duty_list})
 
 @app.route('/api/staff/leave_action', methods=['POST'])
 @login_required
@@ -7477,13 +7635,20 @@ def get_notifications():
         if not user_id:
             return jsonify({"notifications": [], "unread": 0}), 200
         
-        # 1. Identify Target IDs (User + Linked Student if Parent)
+        # 1. Identify Target IDs (User + Linked Students if Parent)
         target_ids = [user_id]
-        
-        # Check if this user is a Parent
-        student = StudentProfile.query.filter_by(parent_user_id=user_id).first()
-        if student:
-            target_ids.append(student.student_id)
+
+        children = StudentProfile.query.filter_by(parent_user_id=user_id).all()
+        child_prefix_map = {}
+        for c in children:
+            try:
+                first_name = (c.full_name or '').split()[0]
+            except Exception:
+                first_name = ''
+            child_prefix_map[c.student_id] = first_name or (c.admission_number or 'Child')
+
+        if children:
+            target_ids.extend([c.student_id for c in children])
             
         # 2. Fetch Notifications for ALL target IDs
         # We fetch unread + recent read (limit 20)
@@ -7503,10 +7668,11 @@ def get_notifications():
             elif time_diff.seconds > 3600: time_ago = f"{time_diff.seconds//3600}h ago"
             else: time_ago = f"{time_diff.seconds//60}m ago"
             
-            # Add a visual indicator if it's for the student
+            # Add a visual indicator if it's for a child
             prefix = ""
-            if student and n.user_id == student.student_id:
-                prefix = f"[{student.full_name.split()[0]}] "
+            child_label = child_prefix_map.get(n.user_id)
+            if child_label:
+                prefix = f"[{child_label}] "
             
             data.append({
                 "id": n.id, 
@@ -7531,11 +7697,11 @@ def mark_notification_read():
             if not user_id:
                 return jsonify({"error": "user_id required"}), 400
 
-            # Parent users can see their linked student's notifications too; clear both.
+            # Parent users can see their linked students' notifications too; clear all.
             target_ids = [user_id]
-            student = StudentProfile.query.filter_by(parent_user_id=user_id).first()
-            if student:
-                target_ids.append(student.student_id)
+            children = StudentProfile.query.filter_by(parent_user_id=user_id).all()
+            if children:
+                target_ids.extend([c.student_id for c in children])
 
             Notification.query.filter(Notification.user_id.in_(target_ids), Notification.is_read == False).update({'is_read': True})
         else:
