@@ -51,10 +51,11 @@ fun StaffLeaveApprovalsScreen(
 
     // Data
     var leaveRequests by remember { mutableStateOf<List<LeaveRequest>>(emptyList()) }
+    var onDutyStudents by remember { mutableStateOf<List<OnDutyStudent>>(emptyList()) }
 
     // Filter state
     var selectedFilter by rememberSaveable { mutableStateOf("Pending") }
-    val filterOptions = listOf("All", "Pending", "Approved", "Rejected")
+    val filterOptions = listOf("All", "Pending", "Approved", "Rejected", "On Duty")
 
     // Dialog states
     var showActionDialog by rememberSaveable { mutableStateOf(false) }
@@ -63,7 +64,7 @@ fun StaffLeaveApprovalsScreen(
     var actionRemarks by rememberSaveable { mutableStateOf("") }
     var isProcessing by rememberSaveable { mutableStateOf(false) }
 
-    // Load leave requests
+    // Load leave requests and on-duty students
     fun loadLeaveRequests() {
         scope.launch {
             isLoading = true
@@ -71,14 +72,15 @@ fun StaffLeaveApprovalsScreen(
             try {
                 val token = AppPrefs.getAccessToken(context) ?: throw Exception("Not authenticated")
                 val user = AppPrefs.getUser(context) ?: throw Exception("User not found")
-                val requests = withContext(Dispatchers.IO) {
+                val data = withContext(Dispatchers.IO) {
                     ApiService.getLeaveRequests(
                         baseUrl = BuildConfig.API_BASE_URL,
                         accessToken = token,
                         userId = user.userId
                     )
                 }
-                leaveRequests = requests
+                leaveRequests = data.requests
+                onDutyStudents = data.onDutyStudents
             } catch (e: ApiException) {
                 errorMessage = e.message ?: "Failed to load leave requests"
             } catch (e: Exception) {
@@ -250,6 +252,40 @@ fun StaffLeaveApprovalsScreen(
                     }
                 }
 
+                // On Duty tab - show students on duty
+                selectedFilter == "On Duty" && onDutyStudents.isEmpty() -> {
+                    EmptyState(
+                        icon = Icons.Outlined.EventAvailable,
+                        title = "No Students On Duty",
+                        message = "No students are currently participating in events today",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                selectedFilter == "On Duty" -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // On duty summary
+                        item {
+                            OnDutySummary(count = onDutyStudents.size)
+                        }
+
+                        items(
+                            items = onDutyStudents,
+                            key = { it.studentId }
+                        ) { student ->
+                            OnDutyStudentCard(student = student)
+                        }
+
+                        item {
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+                    }
+                }
+
                 filteredRequests.isEmpty() -> {
                     EmptyState(
                         icon = Icons.Outlined.EventBusy,
@@ -275,7 +311,8 @@ fun StaffLeaveApprovalsScreen(
                             LeaveStatsSummary(
                                 pending = leaveRequests.count { it.status == LeaveStatus.PENDING },
                                 approved = leaveRequests.count { it.status == LeaveStatus.APPROVED },
-                                rejected = leaveRequests.count { it.status == LeaveStatus.REJECTED }
+                                rejected = leaveRequests.count { it.status == LeaveStatus.REJECTED },
+                                onDuty = onDutyStudents.size
                             )
                         }
 
@@ -433,7 +470,8 @@ fun StaffLeaveApprovalsScreen(
 private fun LeaveStatsSummary(
     pending: Int,
     approved: Int,
-    rejected: Int
+    rejected: Int,
+    onDuty: Int = 0
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -461,6 +499,11 @@ private fun LeaveStatsSummary(
                 label = "Rejected",
                 count = rejected,
                 color = StatusRed
+            )
+            StatItem(
+                label = "On Duty",
+                count = onDuty,
+                color = StatusBlue
             )
         }
     }
@@ -677,6 +720,213 @@ private fun LeaveRequestCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
+        }
+    }
+}
+
+/**
+ * On duty summary card for the On Duty tab.
+ */
+@Composable
+private fun OnDutySummary(count: Int) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Event,
+                contentDescription = null,
+                tint = StatusBlue,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = "$count student${if (count != 1) "s" else ""} with event participation",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Events marked 'Today' are currently active",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/**
+ * On duty student card showing student info and their events.
+ */
+@Composable
+private fun OnDutyStudentCard(student: OnDutyStudent) {
+    val isDark = isSystemInDarkTheme()
+    val bgAlpha = if (isDark) 0.2f else 0.1f
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header row with student info
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Avatar
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(StatusBlue.copy(alpha = bgAlpha)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = student.studentName.take(1).uppercase(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = StatusBlue
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = student.studentName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = student.rollNo,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // OD badge
+                Surface(
+                    color = StatusBlue.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = "OD",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = StatusBlue,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            // Events list
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                student.events.forEach { event ->
+                    // Highlight events happening today
+                    val eventBgColor = if (event.isToday)
+                        StatusBlue.copy(alpha = 0.1f)
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+
+                    Surface(
+                        color = eventBgColor,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = event.eventName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    // Show "Today" badge for active events
+                                    if (event.isToday) {
+                                        Surface(
+                                            color = StatusGreen.copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "Today",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = StatusGreen,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = event.role,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "•",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = event.dateRange,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Surface(
+                                color = secondaryAccent().copy(alpha = bgAlpha),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = event.status,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = secondaryAccent(),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

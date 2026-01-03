@@ -61,6 +61,7 @@ fun StaffDashboardScreen(
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var dashboardData by remember { mutableStateOf<StaffDashboardData?>(null) }
     var refreshTrigger by rememberSaveable { mutableStateOf(0) }
+    var unreadNotificationCount by rememberSaveable { mutableStateOf(0) }
 
     // Get current date
     val today = remember {
@@ -92,6 +93,17 @@ fun StaffDashboardScreen(
                 ApiService.getStaffDashboard(BuildConfig.API_BASE_URL, token, currentUser.userId)
             }
             dashboardData = data
+
+            // Fetch unread notification count
+            try {
+                val notifications = withContext(Dispatchers.IO) {
+                    ApiService.getNotifications(BuildConfig.API_BASE_URL, token)
+                }
+                unreadNotificationCount = notifications.count { !it.isRead }
+            } catch (_: Exception) {
+                // Best-effort, don't fail dashboard if notifications fail
+            }
+
             isLoading = false
         } catch (e: com.eduMatrix.ams.data.api.ApiException) {
             isLoading = false
@@ -143,8 +155,10 @@ fun StaffDashboardScreen(
                     IconButton(onClick = onNavigateToNotifications) {
                         BadgedBox(
                             badge = {
-                                // Show badge if there are unread notifications
-                                Badge { Text("3") }
+                                // Show badge only if there are unread notifications
+                                if (unreadNotificationCount > 0) {
+                                    Badge { Text(unreadNotificationCount.toString()) }
+                                }
                             }
                         ) {
                             Icon(

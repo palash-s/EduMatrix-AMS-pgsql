@@ -51,6 +51,7 @@ fun StudentDashboardScreen(
     onNavigateToTimetable: () -> Unit,
     onNavigateToResults: () -> Unit,
     onNavigateToFeedback: () -> Unit,
+    onNavigateToNotifications: () -> Unit,
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -67,6 +68,7 @@ fun StudentDashboardScreen(
     var currentTerm by remember { mutableStateOf<CurrentTerm?>(null) }
     var pendingFeedback by remember { mutableStateOf<FeedbackPendingList?>(null) }
     var refreshTrigger by rememberSaveable { mutableStateOf(0) }
+    var unreadNotificationCount by rememberSaveable { mutableStateOf(0) }
 
     // Dialogs
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
@@ -89,6 +91,16 @@ fun StudentDashboardScreen(
                 pendingFeedback = try {
                     ApiService.getPendingFeedback(BuildConfig.API_BASE_URL, token, user.userId)
                 } catch (e: Exception) { null }
+            }
+
+            // Fetch unread notification count
+            try {
+                val notifications = withContext(Dispatchers.IO) {
+                    ApiService.getNotifications(BuildConfig.API_BASE_URL, token)
+                }
+                unreadNotificationCount = notifications.count { !it.isRead }
+            } catch (_: Exception) {
+                // Best-effort, don't fail dashboard if notifications fail
             }
         } catch (e: Exception) {
             errorMessage = e.message ?: "Failed to load dashboard"
@@ -129,6 +141,20 @@ fun StudentDashboardScreen(
                             },
                             contentDescription = "Toggle theme"
                         )
+                    }
+                    IconButton(onClick = onNavigateToNotifications) {
+                        BadgedBox(
+                            badge = {
+                                if (unreadNotificationCount > 0) {
+                                    Badge { Text(unreadNotificationCount.toString()) }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Notifications,
+                                contentDescription = "Notifications"
+                            )
+                        }
                     }
                     IconButton(onClick = { showLogoutDialog = true }) {
                         Icon(Icons.Default.Logout, contentDescription = "Logout")

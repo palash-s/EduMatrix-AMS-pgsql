@@ -20,6 +20,7 @@ object ApiClient {
     data class TestPushResponse(
         val pushTokens: Int,
         val pushSuccess: Int,
+        val pushError: String? = null,
     )
 
     data class ApplyLeaveResponse(
@@ -200,6 +201,7 @@ object ApiClient {
             return TestPushResponse(
                 pushTokens = json.optInt("push_tokens", 0),
                 pushSuccess = json.optInt("push_success", 0),
+                pushError = json.optString("push_error", null).takeIf { !it.isNullOrBlank() },
             )
         }
     }

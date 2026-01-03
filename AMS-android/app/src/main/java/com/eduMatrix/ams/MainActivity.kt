@@ -1,9 +1,14 @@
 package com.eduMatrix.ams
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -11,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -19,6 +25,7 @@ import com.eduMatrix.ams.data.api.ApiService
 import com.eduMatrix.ams.data.models.UserRole
 import com.eduMatrix.ams.ui.auth.LoginScreen
 import com.eduMatrix.ams.ui.navigation.NavRoutes
+import com.eduMatrix.ams.ui.parent.ParentMainScreen
 import com.eduMatrix.ams.ui.staff.StaffMainScreen
 import com.eduMatrix.ams.ui.student.StudentMainScreen
 import com.eduMatrix.ams.ui.theme.AMSandroidTheme
@@ -37,15 +44,44 @@ import kotlinx.coroutines.withContext
  * - Role-based routing to appropriate portals
  */
 class MainActivity : ComponentActivity() {
+
+    // Permission request launcher for Android 13+ notification permission
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        Log.d("FCM", "Notification permission granted: $isGranted")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Initialize theme from saved preferences
         ThemeState.initialize(this)
+        // Create notification channel early (with proper HIGH importance)
+        MyFirebaseMessagingService.createNotificationChannel(this)
+        // Request notification permission on Android 13+
+        requestNotificationPermission()
         enableEdgeToEdge()
         setContent {
             val isDarkTheme = rememberIsDarkTheme()
             AMSandroidTheme(darkTheme = isDarkTheme) {
                 AppRoot()
+            }
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            when {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED -> {
+                    Log.d("FCM", "Notification permission already granted")
+                }
+                else -> {
+                    Log.d("FCM", "Requesting notification permission")
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
             }
         }
     }
@@ -155,11 +191,9 @@ fun AppRoot() {
             )
         }
 
-        // Parent main screen (placeholder)
+        // Parent main screen
         composable(NavRoutes.PARENT_MAIN) {
-            PlaceholderScreen(
-                title = "Parent Portal",
-                message = "Parent portal coming soon",
+            ParentMainScreen(
                 onLogout = {
                     AppPrefs.clearSession(context)
                     navController.navigate(NavRoutes.LOGIN) {

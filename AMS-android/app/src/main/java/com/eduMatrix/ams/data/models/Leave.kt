@@ -133,3 +133,33 @@ data class LeaveWorkflowEntry(
     val timestamp: String,
     val remarks: String?
 )
+
+/**
+ * Response containing leave requests and on-duty students
+ */
+data class LeaveApprovalsData(
+    val requests: List<LeaveRequest>,
+    val onDutyStudents: List<OnDutyStudent>
+)
+
+/**
+ * Student currently on duty (participating in events)
+ */
+data class OnDutyStudent(
+    val studentId: String,
+    val studentName: String,
+    val rollNo: String,
+    val events: List<OnDutyEvent>
+)
+
+/**
+ * Event info for on-duty student
+ */
+data class OnDutyEvent(
+    val eventId: Int,
+    val eventName: String,
+    val role: String,
+    val status: String,
+    val dateRange: String,
+    val isToday: Boolean = false  // True if event is active today
+)

@@ -24,6 +24,7 @@ import com.eduMatrix.ams.ui.staff.leaves.StaffLeaveApprovalsScreen
 import com.eduMatrix.ams.ui.staff.mentor.MentorDashboardScreen
 import com.eduMatrix.ams.ui.theme.accentPurple
 import androidx.compose.ui.unit.dp
+import com.eduMatrix.ams.ui.notifications.NotificationsScreen
 
 
 /**
@@ -276,29 +277,14 @@ private fun StaffBottomNavigation(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StaffNotificationsScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onLogout: (() -> Unit)? = null
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Notifications") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentAlignment = androidx.compose.ui.Alignment.Center
-        ) {
-            Text("Notifications Screen - Coming Soon")
-        }
-    }
+    NotificationsScreen(
+        title = "Notifications",
+        onBack = onBack,
+        onLogout = onLogout
+    )
 }
 
 // Note: ClassTeacherDashboardScreen moved to separate file

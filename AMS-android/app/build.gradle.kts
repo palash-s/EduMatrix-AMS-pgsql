@@ -61,6 +61,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
 
     implementation(platform(libs.firebase.bom))
+    implementation("com.google.firebase:firebase-common-ktx")
     implementation(libs.firebase.messaging)
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

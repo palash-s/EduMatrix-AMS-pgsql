@@ -17,6 +17,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.eduMatrix.ams.ui.theme.accentPurple
+import com.eduMatrix.ams.ui.notifications.NotificationsScreen
 
 /**
  * Navigation routes for student portal
@@ -27,6 +28,7 @@ object StudentNavRoutes {
     const val RESULTS = "student_results"
     const val LEAVES = "student_leaves"
     const val FEEDBACK = "student_feedback"
+    const val NOTIFICATIONS = "student_notifications"
 }
 
 /**
@@ -42,7 +44,7 @@ fun StudentMainScreen(
 ) {
     val navController = rememberNavController()
 
-    // Navigation items
+    // Navigation items (Alerts removed - now accessible via bell icon in top bar)
     val navItems = listOf(
         StudentNavItem(
             route = StudentNavRoutes.DASHBOARD,
@@ -116,6 +118,15 @@ fun StudentMainScreen(
                     onNavigateToFeedback = {
                         navController.navigate(StudentNavRoutes.FEEDBACK)
                     },
+                    onNavigateToNotifications = {
+                        navController.navigate(StudentNavRoutes.NOTIFICATIONS) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     onLogout = onLogout
                 )
             }
@@ -123,6 +134,14 @@ fun StudentMainScreen(
             // Timetable
             composable(StudentNavRoutes.TIMETABLE) {
                 StudentTimetableScreen()
+            }
+
+            // Notifications
+            composable(StudentNavRoutes.NOTIFICATIONS) {
+                NotificationsScreen(
+                    title = "Notifications",
+                    onLogout = onLogout
+                )
             }
 
             // Results

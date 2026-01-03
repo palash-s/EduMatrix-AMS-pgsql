@@ -38,11 +38,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.eduMatrix.ams.AppPrefs
 import com.eduMatrix.ams.BuildConfig
+import com.eduMatrix.ams.ApiClient
 import com.eduMatrix.ams.R
 import com.eduMatrix.ams.data.api.ApiException
 import com.eduMatrix.ams.data.api.ApiService
 import com.eduMatrix.ams.data.models.UserRole
 import com.eduMatrix.ams.ui.theme.*
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -197,11 +199,21 @@ fun LoginScreen(
                     .padding(horizontal = 16.dp, vertical = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // App title in purple section
+                // App logo and title in purple section
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // App icon
+                    Image(
+                        painter = painterResource(id = R.mipmap.ic_launcher),
+                        contentDescription = "EduMatrix Logo",
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "EduMatrix AMS",
                         style = MaterialTheme.typography.headlineMedium,
@@ -400,6 +412,34 @@ fun LoginScreen(
                                         AppPrefs.saveAccessToken(context, result.accessToken)
                                         AppPrefs.saveRefreshToken(context, result.refreshToken)
                                         AppPrefs.saveUser(context, result.user)
+
+                                        // Best-effort push registration so backend can send alerts to this device.
+                                        try {
+                                            val deviceIdNow = AppPrefs.getDeviceId(context)
+                                            FirebaseMessaging.getInstance().token
+                                                .addOnSuccessListener { fcmToken ->
+                                                    if (!fcmToken.isNullOrBlank()) {
+                                                        scope.launch {
+                                                            try {
+                                                                withContext(Dispatchers.IO) {
+                                                                    ApiClient.registerPush(
+                                                                        baseUrl = BuildConfig.API_BASE_URL,
+                                                                        accessToken = result.accessToken,
+                                                                        deviceId = deviceIdNow,
+                                                                        fcmToken = fcmToken
+                                                                    )
+                                                                }
+                                                                AppPrefs.saveFcmToken(context, fcmToken)
+                                                            } catch (_: Exception) {
+                                                                // Best-effort, don't show error to user
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                .addOnFailureListener { /* Best-effort, ignore failures */ }
+                                        } catch (_: Exception) {
+                                            // FCM not available, continue without push
+                                        }
 
                                         isLoading = false
 
