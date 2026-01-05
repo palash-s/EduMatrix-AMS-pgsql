@@ -108,8 +108,9 @@ object NavRoutes {
 
     /**
      * Create route for marking attendance with schedule ID and date.
+     * scheduleId can be an integer (regular schedule) or "extra_X" for extra sessions.
      */
-    fun staffMarkAttendance(scheduleId: Int, date: String): String {
+    fun staffMarkAttendance(scheduleId: String, date: String): String {
         return "staff_mark_attendance/$scheduleId/$date"
     }
 

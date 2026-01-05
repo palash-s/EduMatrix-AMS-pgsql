@@ -219,10 +219,28 @@ class EventParticipation(db.Model):
 # ==========================================
 # 6. OPERATIONS
 # ==========================================
+
+# Extra Session - One-time classes scheduled outside regular timetable
+class ExtraSession(db.Model):
+    __tablename__ = 'extra_session'
+    id = db.Column(db.Integer, primary_key=True)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=False)
+    teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=False)
+    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    topic = db.Column(db.String(255), nullable=True)
+    meeting_link = db.Column(db.String(500), nullable=True)
+    status = db.Column(db.String(20), default='Scheduled')  # Scheduled, Conducted, Cancelled
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
 class SessionLog(db.Model):
     __tablename__ = 'session_log'
     session_id = db.Column(db.Integer, primary_key=True)
-    schedule_id = db.Column(db.Integer, db.ForeignKey('weekly_schedule.schedule_id'), nullable=False)
+    # Either schedule_id OR extra_session_id must be set (one of them)
+    schedule_id = db.Column(db.Integer, db.ForeignKey('weekly_schedule.schedule_id'), nullable=True)
+    extra_session_id = db.Column(db.Integer, db.ForeignKey('extra_session.id'), nullable=True)
     session_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(20), default='Conducted')
     actual_teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)

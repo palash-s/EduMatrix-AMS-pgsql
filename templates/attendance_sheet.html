@@ -53,8 +53,8 @@
             </div>
         </div>
 
-        <!-- LESSON LOG INPUT -->
-        <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-20 shadow-sm">
+        <!-- LESSON LOG INPUT (hidden for extra sessions) -->
+        <div id="lesson-tracking-section" class="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-20 shadow-sm">
             <h3 class="text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-2">
                 <i data-lucide="book-open" class="w-4 h-4"></i> Lesson Tracking
             </h3>
@@ -132,18 +132,23 @@
                     btn.classList.remove('bg-mit-purple');
                 }
 
-                // Load Topics
-                const topicSelect = document.getElementById('topic-select');
-                try {
-                    const syllRes = await fetch(`/api/academic/get_syllabus?subject_id=${data.subject_id}`);
-                    const syllData = await syllRes.json();
-                    if(syllData.syllabus) {
-                        topicSelect.innerHTML = '<option value="">-- Select Topic Covered --</option>' + 
-                        syllData.syllabus.filter(t => t.status === 'Pending').map(t => 
-                            `<option value="${t.id}">Unit ${t.unit}: ${t.topic}</option>`
-                        ).join('');
-                    }
-                } catch(e) { console.error('Failed to load topics:', e); }
+                // Load Topics (skip for extra sessions - no lesson plans)
+                const lessonSection = document.getElementById('lesson-tracking-section');
+                if (data.is_extra_session) {
+                    lessonSection.style.display = 'none';
+                } else {
+                    const topicSelect = document.getElementById('topic-select');
+                    try {
+                        const syllRes = await fetch(`/api/academic/get_syllabus?subject_id=${data.subject_id}`);
+                        const syllData = await syllRes.json();
+                        if(syllData.syllabus) {
+                            topicSelect.innerHTML = '<option value="">-- Select Topic Covered --</option>' +
+                            syllData.syllabus.filter(t => t.status === 'Pending').map(t =>
+                                `<option value="${t.id}">Unit ${t.unit}: ${t.topic}</option>`
+                            ).join('');
+                        }
+                    } catch(e) { console.error('Failed to load topics:', e); }
+                }
 
             } catch (e) {
                 console.error("Attendance Load Error:", e);

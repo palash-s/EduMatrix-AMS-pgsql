@@ -545,6 +545,92 @@
     <!-- Parent Tooltip -->
     <div id="parent-tooltip" class="hidden absolute z-[9999] w-64 bg-white rounded-xl shadow-2xl border border-blue-100 p-4 pointer-events-none tooltip-enter"></div>
 
+    <!-- Extra Session Modal -->
+    <div id="extra-session-modal" class="hidden fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div class="flex justify-between items-center p-5 border-b bg-gradient-to-r from-orange-500 to-amber-500 rounded-t-xl">
+                <div>
+                    <h3 class="font-bold text-lg text-white">Schedule Extra Class</h3>
+                    <p class="text-xs text-white/80">One-time session for additional teaching</p>
+                </div>
+                <button onclick="closeExtraSessionModal()" class="p-1 hover:bg-white/20 rounded-full text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <div class="p-5 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Class</label>
+                        <select id="es-section" onchange="filterESSubjects()" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none">
+                            <option value="">Select Class</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Subject</label>
+                        <select id="es-subject" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none">
+                            <option value="">Select Subject</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Date</label>
+                        <input type="date" id="es-date" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Start</label>
+                        <input type="time" id="es-start-time" value="17:00" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">End</label>
+                        <input type="time" id="es-end-time" value="18:00" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none">
+                    </div>
+                </div>
+
+                <p id="es-time-hint" class="text-xs text-amber-600 hidden"><i data-lucide="alert-circle" class="w-3 h-3 inline"></i> Weekday sessions must start after 5:00 PM</p>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Topic</label>
+                    <input type="text" id="es-topic" placeholder="e.g. Revision for Unit Test" class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Meeting Link (Google Meet / Zoom)</label>
+                    <input type="url" id="es-meeting-link" placeholder="https://meet.google.com/..." class="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none">
+                </div>
+
+                <button onclick="submitExtraSession()" class="w-full py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold rounded-lg hover:from-orange-600 hover:to-amber-600 shadow-md transition-all mt-2 flex items-center justify-center gap-2">
+                    <i data-lucide="calendar-plus" class="w-4 h-4"></i> Schedule Extra Class
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Extra Sessions List Modal -->
+    <div id="extra-sessions-list-modal" class="hidden fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+            <div class="flex justify-between items-center p-5 border-b bg-gradient-to-r from-orange-500 to-amber-500 rounded-t-xl">
+                <div>
+                    <h3 class="font-bold text-lg text-white">My Extra Sessions</h3>
+                    <p class="text-xs text-white/80">All scheduled one-time classes</p>
+                </div>
+                <button onclick="closeExtraSessionsListModal()" class="p-1 hover:bg-white/20 rounded-full text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5">
+                <div id="extra-sessions-list-container" class="space-y-3">
+                    <p class="text-gray-400 text-center py-8">Loading...</p>
+                </div>
+            </div>
+
+            <div class="p-4 border-t bg-gray-50 rounded-b-xl">
+                <button onclick="openExtraSessionModal()" class="w-full py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold rounded-lg hover:from-orange-600 hover:to-amber-600 shadow-md flex items-center justify-center gap-2">
+                    <i data-lucide="plus" class="w-4 h-4"></i> Schedule New Extra Class
+                </button>
+            </div>
+        </div>
+    </div>
+
     <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
 
     <script>
@@ -937,6 +1023,20 @@
                     </div>
                 </div>`;
             }
+
+            // --- Extra Sessions Widget ---
+            const extraCount = (data.widgets.extra_sessions || []).length;
+            const todayExtra = (data.widgets.extra_sessions || []).filter(es => es.date_iso === amsFormatDateISO(new Date())).length;
+            roleHTML += `
+            <div onclick="openExtraSessionsListModal()" class="bg-gradient-to-br from-orange-500 to-amber-500 p-5 rounded-xl shadow-lg text-white cursor-pointer hover:scale-[1.02] transition-transform relative overflow-hidden">
+                <div class="absolute right-0 top-0 p-3 opacity-20"><i data-lucide="calendar-plus" class="w-12 h-12"></i></div>
+                <h3 class="font-bold text-sm flex items-center gap-2"><i data-lucide="calendar-clock" class="w-4 h-4"></i> Extra Sessions</h3>
+                <p class="text-[10px] text-white/80 mt-1">Schedule one-time classes</p>
+                <div class="flex gap-2 mt-2">
+                    ${todayExtra > 0 ? `<span class="text-[10px] bg-white/20 px-2 py-1 rounded-full">${todayExtra} Today</span>` : ''}
+                    ${extraCount > 0 ? `<span class="text-[10px] bg-white/20 px-2 py-1 rounded-full">${extraCount} Upcoming</span>` : '<span class="text-[10px] bg-white/20 px-2 py-1 rounded-full">+ New</span>'}
+                </div>
+            </div>`;
 
             widgetCol.innerHTML = roleHTML;
             lucide.createIcons();
@@ -1637,7 +1737,214 @@
                 if(res.ok) loadCounselingHistory(studentId); else showToast("Failed", "error");
             });
         }
-        
+
+        // ==========================================
+        // EXTRA SESSION FUNCTIONS
+        // ==========================================
+        let esAllocations = { sections: [], subjects: [], section_subjects: [] };
+
+        async function loadExtraSessionAllocations() {
+            try {
+                const res = await fetch(`/api/staff/extra_sessions/allocations?user_id=${userId}`);
+                if (res.ok) {
+                    esAllocations = await res.json();
+                    populateESSections();
+                }
+            } catch (e) { console.error('Failed to load ES allocations', e); }
+        }
+
+        function populateESSections() {
+            const sel = document.getElementById('es-section');
+            sel.innerHTML = '<option value="">Select Class</option>' +
+                esAllocations.sections.map(s => `<option value="${s.section_id}">${s.name}</option>`).join('');
+        }
+
+        function filterESSubjects() {
+            const sectionId = parseInt(document.getElementById('es-section').value);
+            const subSel = document.getElementById('es-subject');
+
+            if (!sectionId) {
+                subSel.innerHTML = '<option value="">Select Subject</option>';
+                return;
+            }
+
+            const validSubjects = esAllocations.section_subjects
+                .filter(ss => ss.section_id === sectionId)
+                .map(ss => ss.subject_id);
+
+            const filteredSubjects = esAllocations.subjects.filter(s => validSubjects.includes(s.subject_id));
+            subSel.innerHTML = '<option value="">Select Subject</option>' +
+                filteredSubjects.map(s => `<option value="${s.subject_id}">${s.name}</option>`).join('');
+        }
+
+        function openExtraSessionModal() {
+            document.getElementById('extra-sessions-list-modal').classList.add('hidden');
+            document.getElementById('extra-session-modal').classList.remove('hidden');
+            // Set min date to today
+            document.getElementById('es-date').min = amsFormatDateISO(new Date());
+            document.getElementById('es-date').value = '';
+            document.getElementById('es-section').value = '';
+            document.getElementById('es-subject').innerHTML = '<option value="">Select Subject</option>';
+            document.getElementById('es-topic').value = '';
+            document.getElementById('es-meeting-link').value = '';
+            document.getElementById('es-time-hint').classList.add('hidden');
+            loadExtraSessionAllocations();
+            lucide.createIcons();
+        }
+
+        function closeExtraSessionModal() {
+            document.getElementById('extra-session-modal').classList.add('hidden');
+            amsMarkModalClosed();
+        }
+
+        // Show hint when date changes to a weekday
+        document.addEventListener('DOMContentLoaded', () => {
+            const dateInput = document.getElementById('es-date');
+            if (dateInput) {
+                dateInput.addEventListener('change', function() {
+                    const d = new Date(this.value);
+                    const dayOfWeek = d.getDay();
+                    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                    document.getElementById('es-time-hint').classList.toggle('hidden', isWeekend);
+                });
+            }
+        });
+
+        async function submitExtraSession() {
+            const section = document.getElementById('es-section').value;
+            const subject = document.getElementById('es-subject').value;
+            const date = document.getElementById('es-date').value;
+            const startTime = document.getElementById('es-start-time').value;
+            const endTime = document.getElementById('es-end-time').value;
+            const topic = document.getElementById('es-topic').value;
+            const meetingLink = document.getElementById('es-meeting-link').value;
+
+            if (!section || !subject || !date || !startTime || !endTime) {
+                showToast('Please fill all required fields', 'error');
+                return;
+            }
+
+            let success = false;
+            try {
+                const res = await fetch('/api/staff/extra_sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        section_id: parseInt(section),
+                        subject_id: parseInt(subject),
+                        date: date,
+                        start_time: startTime,
+                        end_time: endTime,
+                        topic: topic,
+                        meeting_link: meetingLink
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    showToast('Extra session scheduled! Students will be notified.');
+                    closeExtraSessionModal();
+                    success = true;
+                } else {
+                    showToast(data.error || 'Failed to create session', 'error');
+                }
+            } catch (e) {
+                showToast('Error creating session', 'error');
+            }
+
+            // Refresh dashboard separately to avoid error toast on success
+            if (success) {
+                try { await loadDashboard(); } catch (e) { console.error('Dashboard refresh error', e); }
+            }
+        }
+
+        async function openExtraSessionsListModal() {
+            document.getElementById('extra-sessions-list-modal').classList.remove('hidden');
+            await loadExtraSessionsList();
+            lucide.createIcons();
+        }
+
+        function closeExtraSessionsListModal() {
+            document.getElementById('extra-sessions-list-modal').classList.add('hidden');
+            amsMarkModalClosed();
+        }
+
+        async function loadExtraSessionsList() {
+            const container = document.getElementById('extra-sessions-list-container');
+            container.innerHTML = '<p class="text-gray-400 text-center py-8">Loading...</p>';
+
+            try {
+                const res = await fetch(`/api/staff/extra_sessions?user_id=${userId}`);
+                const data = await res.json();
+
+                if (!data.extra_sessions || data.extra_sessions.length === 0) {
+                    container.innerHTML = '<div class="text-center py-10"><i data-lucide="calendar-x2" class="w-12 h-12 text-gray-300 mx-auto mb-3"></i><p class="text-gray-400">No extra sessions scheduled</p></div>';
+                    lucide.createIcons();
+                    return;
+                }
+
+                container.innerHTML = data.extra_sessions.map(es => {
+                    const isPast = new Date(es.date) < new Date().setHours(0,0,0,0);
+                    const statusBadge = es.attendance_marked
+                        ? '<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Conducted</span>'
+                        : (isPast ? '<span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Pending</span>'
+                            : '<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Scheduled</span>');
+
+                    const dateObj = new Date(es.date);
+                    const dateDisplay = dateObj.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+
+                    return `
+                        <div class="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors border border-gray-100">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="font-bold text-gray-800">${es.subject_name}</span>
+                                        ${statusBadge}
+                                    </div>
+                                    <p class="text-sm text-gray-500">${es.section_name}</p>
+                                    <p class="text-xs text-gray-400 mt-1">
+                                        <i data-lucide="calendar" class="w-3 h-3 inline"></i> ${dateDisplay} &bull;
+                                        <i data-lucide="clock" class="w-3 h-3 inline"></i> ${es.start_time} - ${es.end_time}
+                                    </p>
+                                    ${es.topic ? `<p class="text-xs text-purple-600 mt-1"><i data-lucide="book-open" class="w-3 h-3 inline"></i> ${es.topic}</p>` : ''}
+                                    ${es.meeting_link ? `<a href="${es.meeting_link}" target="_blank" class="text-xs text-blue-600 mt-1 inline-flex items-center gap-1 hover:underline"><i data-lucide="video" class="w-3 h-3"></i> Join Meeting</a>` : ''}
+                                </div>
+                                ${!es.attendance_marked && !isPast ? `<button onclick="cancelExtraSession(${es.id})" class="text-red-400 hover:text-red-600 p-1" title="Cancel"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                lucide.createIcons();
+            } catch (e) {
+                container.innerHTML = '<p class="text-red-400 text-center py-8">Failed to load sessions</p>';
+            }
+        }
+
+        async function cancelExtraSession(sessionId) {
+            showConfirm('Cancel Extra Session', 'Are you sure you want to cancel this extra session? Students will be notified.', async () => {
+                let success = false;
+                try {
+                    const res = await fetch(`/api/staff/extra_sessions/${sessionId}?user_id=${userId}`, { method: 'DELETE' });
+                    if (res.ok) {
+                        showToast('Extra session cancelled');
+                        success = true;
+                    } else {
+                        const data = await res.json();
+                        showToast(data.error || 'Failed to cancel', 'error');
+                    }
+                } catch (e) {
+                    showToast('Error cancelling session', 'error');
+                }
+
+                // Refresh separately to avoid error toast on success
+                if (success) {
+                    try { await loadExtraSessionsList(); } catch (e) { }
+                    try { await loadDashboard(); } catch (e) { }
+                }
+            });
+        }
+
         async function logout() { 
             try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } 
             catch (e) { /* ignore */ } 

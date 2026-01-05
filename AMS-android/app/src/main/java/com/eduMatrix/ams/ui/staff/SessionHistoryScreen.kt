@@ -33,7 +33,7 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionHistoryScreen(
-    onViewSession: (scheduleId: Int, date: String) -> Unit
+    onViewSession: (scheduleId: String, date: String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -193,7 +193,7 @@ fun SessionHistoryScreen(
                         items(sessions) { session ->
                             SessionHistoryCard(
                                 session = session,
-                                onClick = { onViewSession(session.scheduleId, session.dateIso) }
+                                onClick = { onViewSession(session.scheduleId.toString(), session.dateIso) }
                             )
                         }
                     }

@@ -17,7 +17,24 @@ data class StudentDashboardData(
     val detention: DetentionInfo?,
     val meeting: UpcomingMeetingInfo?,
     val results: List<CAResult>,
-    val termGrant: TermGrantInfo?
+    val termGrant: TermGrantInfo?,
+    val extraSessions: List<StudentExtraSession> = emptyList()
+)
+
+/**
+ * Extra session for student view (upcoming extra classes)
+ */
+data class StudentExtraSession(
+    val id: Int,
+    val subject: String,
+    val teacher: String,
+    val date: String,           // Display format: 04 Jan
+    val dateIso: String,        // ISO format: 2026-01-04
+    val day: String,            // Saturday
+    val time: String,           // Combined: "05:00 PM - 06:00 PM"
+    val topic: String? = null,
+    val meetingLink: String? = null,
+    val isToday: Boolean = false
 )
 
 /**

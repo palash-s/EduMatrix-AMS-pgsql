@@ -153,7 +153,7 @@ fun StaffMainScreen(
 
             // Mark attendance screen
             composable(NavRoutes.STAFF_MARK_ATTENDANCE) { backStackEntry ->
-                val scheduleId = backStackEntry.arguments?.getString("scheduleId")?.toIntOrNull() ?: 0
+                val scheduleId = backStackEntry.arguments?.getString("scheduleId") ?: ""
                 val date = backStackEntry.arguments?.getString("date") ?: ""
                 StaffMarkAttendanceScreen(
                     scheduleId = scheduleId,

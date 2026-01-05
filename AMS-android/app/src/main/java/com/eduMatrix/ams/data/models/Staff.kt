@@ -41,7 +41,8 @@ data class ScheduledClass(
     val roomNumber: String,
     val roomType: String, // Classroom, Lab
     val isCompleted: Boolean = false,
-    val sessionId: Int? = null // If attendance already marked
+    val sessionId: Int? = null, // If attendance already marked
+    val adjustment: AdjustmentInfo? = null // Adjustment info if session is swapped
 )
 
 /**
@@ -147,7 +148,7 @@ data class TopicForSelection(
  * Attendance submission request
  */
 data class AttendanceSubmission(
-    val scheduleId: Int,
+    val scheduleId: String,  // Can be integer or "extra_X" for extra sessions
     val conductedDate: String,
     val topicId: Int?,
     val attendance: List<StudentAttendanceRecord>
@@ -398,6 +399,62 @@ data class StudentForEvent(
     val name: String,
     val rollNumber: String,
     val admissionNumber: String
+)
+
+// ========================================
+// EXTRA SESSION MODELS
+// ========================================
+
+/**
+ * Extra session (one-time class scheduled outside regular timetable)
+ */
+data class ExtraSession(
+    val id: Int,
+    val subjectId: Int,
+    val subjectName: String,
+    val sectionId: Int,
+    val sectionName: String,
+    val teacherId: String? = null,
+    val teacherName: String? = null,
+    val date: String,           // ISO format: 2026-01-04
+    val dateDisplay: String,    // Display format: 04 Jan
+    val day: String,            // Saturday
+    val startTime: String,      // 17:00 or 05:00 PM
+    val endTime: String,        // 18:00 or 06:00 PM
+    val time: String,           // Combined: "05:00 PM - 06:00 PM"
+    val topic: String? = null,
+    val meetingLink: String? = null,
+    val status: String = "Scheduled",
+    val attendanceMarked: Boolean = false,
+    val isToday: Boolean = false
+)
+
+/**
+ * Extra session creation request
+ */
+data class ExtraSessionCreateRequest(
+    val subjectId: Int,
+    val sectionId: Int,
+    val date: String,       // ISO format
+    val startTime: String,  // HH:mm format
+    val endTime: String,    // HH:mm format
+    val topic: String? = null,
+    val meetingLink: String? = null
+)
+
+/**
+ * Section with subjects for extra session creation
+ */
+data class ExtraSessionAllocation(
+    val sectionId: Int,
+    val sectionName: String,
+    val subjects: List<AllocationSubject>
+)
+
+data class AllocationSubject(
+    val subjectId: Int,
+    val subjectName: String,
+    val subjectCode: String
 )
 
 // ========================================

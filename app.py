@@ -34,8 +34,8 @@ from sql_connection import (
     FeedbackQuestion, LessonLog, TeachingPlan, db, UserMaster, Department, Subject, ClassSection,
     StaffProfile, ParentProfile, StudentProfile, WeeklySchedule,
     EventMaster, EventParticipation, SubjectAllocation, StudentElective,
-    SessionLog, AttendanceTransaction, LeaveApplication, 
-    LeaveWorkflowLog, DetentionRecord, SystemLog, MentorBatch, ElectiveOffering, 
+    ExtraSession, SessionLog, AttendanceTransaction, LeaveApplication,
+    LeaveWorkflowLog, DetentionRecord, SystemLog, MentorBatch, ElectiveOffering,
     RoomMaster, MentorLog, MentorMeeting, MeetingAttendance, MeetingIssue, Notification, get_db_uri,CAMarks, TermGrantRecord,
     FeedbackCycle, FeedbackResponse, StudentFeedbackStatus, SystemConfig, ArchivedAllocation, ArchivedSchedule
 
@@ -2104,6 +2104,279 @@ def api_v1_parent_child_results(child_id: str):
         return jsonify({"error": "Invalid child_id"}), 404
 
     return jsonify(_get_student_results_payload(child.student_id)), 200
+
+
+# ==========================================
+# MOBILE API v1: EXTRA SESSIONS
+# ==========================================
+@app.route('/api/v1/extra_sessions', methods=['GET'])
+def api_v1_extra_sessions_list():
+    """Get extra sessions for the authenticated user (staff sees their own, students see their section's)."""
+    try:
+        user = _require_mobile_auth()
+    except PermissionError:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    role = (user.user_type or '').lower()
+    today = datetime.now().date()
+    result = []
+
+    if role == 'staff':
+        # Staff sees their own extra sessions
+        sessions = (db.session.query(ExtraSession, Subject, ClassSection)
+                    .join(Subject, ExtraSession.subject_id == Subject.subject_id)
+                    .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
+                    .filter(ExtraSession.teacher_id == user.user_id)
+                    .filter(ExtraSession.status != 'Cancelled')
+                    .filter(ExtraSession.date >= today)
+                    .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
+                    .all())
+
+        for es, subj, sec in sessions:
+            session_log = SessionLog.query.filter_by(extra_session_id=es.id).first()
+            result.append({
+                "id": es.id,
+                "subject_id": es.subject_id,
+                "subject_name": subj.name,
+                "section_id": es.section_id,
+                "section_name": f"{sec.class_level}-{sec.name}",
+                "date": es.date.isoformat(),
+                "start_time": es.start_time.strftime('%H:%M'),
+                "end_time": es.end_time.strftime('%H:%M'),
+                "topic": es.topic,
+                "meeting_link": es.meeting_link,
+                "status": es.status,
+                "attendance_marked": session_log is not None,
+                "is_today": es.date == today
+            })
+
+    elif role == 'student':
+        # Student sees extra sessions for their section (filtered by elective if applicable)
+        student = StudentProfile.query.filter_by(student_id=user.user_id).first()
+        if student and student.current_section_id:
+            sessions = (db.session.query(ExtraSession, Subject, ClassSection, StaffProfile)
+                        .join(Subject, ExtraSession.subject_id == Subject.subject_id)
+                        .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
+                        .join(StaffProfile, ExtraSession.teacher_id == StaffProfile.staff_id)
+                        .filter(ExtraSession.section_id == student.current_section_id)
+                        .filter(ExtraSession.status != 'Cancelled')
+                        .filter(ExtraSession.date >= today)
+                        .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
+                        .all())
+
+            for es, subj, sec, teacher in sessions:
+                # Filter by elective: only show if student has approved selection
+                if is_elective_type(subj.subject_type):
+                    approved = StudentElective.query.filter_by(
+                        student_id=student.student_id,
+                        subject_id=subj.subject_id,
+                        status='Approved'
+                    ).first()
+                    if not approved:
+                        continue  # Skip - student hasn't opted for this elective
+
+                result.append({
+                    "id": es.id,
+                    "subject_name": subj.name,
+                    "section_name": f"{sec.class_level}-{sec.name}",
+                    "teacher_name": teacher.full_name,
+                    "date": es.date.isoformat(),
+                    "start_time": es.start_time.strftime('%H:%M'),
+                    "end_time": es.end_time.strftime('%H:%M'),
+                    "topic": es.topic,
+                    "meeting_link": es.meeting_link,
+                    "status": es.status,
+                    "is_today": es.date == today
+                })
+
+    elif role == 'parent':
+        # Parent sees extra sessions for all their children (filtered by elective if applicable)
+        children = StudentProfile.query.filter_by(parent_user_id=user.user_id).all()
+        for child in children:
+            if not child.current_section_id:
+                continue  # Skip children without assigned section
+
+            sessions = (db.session.query(ExtraSession, Subject, ClassSection, StaffProfile)
+                        .join(Subject, ExtraSession.subject_id == Subject.subject_id)
+                        .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
+                        .join(StaffProfile, ExtraSession.teacher_id == StaffProfile.staff_id)
+                        .filter(ExtraSession.section_id == child.current_section_id)
+                        .filter(ExtraSession.status != 'Cancelled')
+                        .filter(ExtraSession.date >= today)
+                        .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
+                        .all())
+
+            for es, subj, sec, teacher in sessions:
+                # Filter by elective: only show if child has approved selection
+                if is_elective_type(subj.subject_type):
+                    approved = StudentElective.query.filter_by(
+                        student_id=child.student_id,
+                        subject_id=subj.subject_id,
+                        status='Approved'
+                    ).first()
+                    if not approved:
+                        continue  # Skip - child hasn't opted for this elective
+
+                result.append({
+                    "id": es.id,
+                    "child_name": child.full_name,
+                    "child_id": child.student_id,
+                    "subject_name": subj.name,
+                    "section_name": f"{sec.class_level}-{sec.name}",
+                    "teacher_name": teacher.full_name,
+                    "date": es.date.isoformat(),
+                    "start_time": es.start_time.strftime('%H:%M'),
+                    "end_time": es.end_time.strftime('%H:%M'),
+                    "topic": es.topic,
+                    "meeting_link": es.meeting_link,
+                    "status": es.status,
+                    "is_today": es.date == today
+                })
+
+    return jsonify({"extra_sessions": result}), 200
+
+
+@app.route('/api/v1/extra_sessions', methods=['POST'])
+def api_v1_extra_sessions_create():
+    """Create a new extra session (staff only)."""
+    try:
+        user = _require_mobile_auth()
+        _require_role(user, {'staff'})
+    except PermissionError:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.json or {}
+    subject_id = data.get('subject_id')
+    section_id = data.get('section_id')
+    date_str = data.get('date')
+    start_time_str = data.get('start_time')
+    end_time_str = data.get('end_time')
+    topic = data.get('topic', '').strip()
+    meeting_link = data.get('meeting_link', '').strip()
+
+    if not all([subject_id, section_id, date_str, start_time_str, end_time_str]):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    try:
+        from datetime import time as dt_time
+        session_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        start_time = datetime.strptime(start_time_str, '%H:%M').time()
+        end_time = datetime.strptime(end_time_str, '%H:%M').time()
+    except ValueError:
+        return jsonify({"error": "Invalid date/time format"}), 400
+
+    # Validation: Date not in past
+    if session_date < datetime.now().date():
+        return jsonify({"error": "Cannot schedule sessions in the past"}), 400
+
+    # Validation: Weekday must be after 17:00
+    from datetime import time as dt_time
+    day_of_week = session_date.weekday()
+    is_weekend = day_of_week >= 5
+
+    if not is_weekend and start_time < dt_time(17, 0):
+        return jsonify({"error": "Weekday extra sessions must start after 5:00 PM"}), 400
+
+    # Validation: Check section conflict
+    conflicting = ExtraSession.query.filter(
+        ExtraSession.section_id == section_id,
+        ExtraSession.date == session_date,
+        ExtraSession.status != 'Cancelled',
+        db.or_(
+            db.and_(ExtraSession.start_time <= start_time, ExtraSession.end_time > start_time),
+            db.and_(ExtraSession.start_time < end_time, ExtraSession.end_time >= end_time),
+            db.and_(ExtraSession.start_time >= start_time, ExtraSession.end_time <= end_time)
+        )
+    ).first()
+
+    if conflicting:
+        return jsonify({"error": "This class already has an extra session scheduled at this time"}), 400
+
+    extra_session = ExtraSession(
+        subject_id=subject_id,
+        teacher_id=user.user_id,
+        section_id=section_id,
+        date=session_date,
+        start_time=start_time,
+        end_time=end_time,
+        topic=topic if topic else None,
+        meeting_link=meeting_link if meeting_link else None,
+        status='Scheduled'
+    )
+    db.session.add(extra_session)
+    db.session.commit()
+
+    # Send notification to students (filter by elective if applicable)
+    subject = Subject.query.get(subject_id)
+    if is_elective_type(subject.subject_type):
+        # Only notify students with approved elective selection
+        students = (db.session.query(StudentProfile)
+                    .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
+                    .filter(StudentProfile.current_section_id == section_id)
+                    .filter(StudentElective.subject_id == subject_id)
+                    .filter(StudentElective.status == 'Approved')
+                    .all())
+    else:
+        students = StudentProfile.query.filter_by(current_section_id=section_id).all()
+
+    for student in students:
+        send_notification(
+            student.student_id,
+            f"Extra Class: {subject.name}",
+            f"Extra class scheduled on {session_date.strftime('%d %b')} at {start_time.strftime('%I:%M %p')}. Topic: {topic or 'TBA'}",
+            type='info'
+        )
+
+    return jsonify({"message": "Extra session created", "id": extra_session.id}), 201
+
+
+@app.route('/api/v1/extra_sessions/<int:session_id>', methods=['DELETE'])
+def api_v1_extra_sessions_cancel(session_id):
+    """Cancel an extra session (staff only)."""
+    try:
+        user = _require_mobile_auth()
+        _require_role(user, {'staff'})
+    except PermissionError:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    extra_session = ExtraSession.query.get(session_id)
+    if not extra_session:
+        return jsonify({"error": "Extra session not found"}), 404
+
+    if extra_session.teacher_id != user.user_id:
+        return jsonify({"error": "Not authorized to cancel this session"}), 403
+
+    session_log = SessionLog.query.filter_by(extra_session_id=session_id).first()
+    if session_log:
+        return jsonify({"error": "Cannot cancel session after attendance is marked"}), 400
+
+    extra_session.status = 'Cancelled'
+    db.session.commit()
+
+    # Notify students (filter by elective if applicable)
+    subject = Subject.query.get(extra_session.subject_id)
+    if is_elective_type(subject.subject_type):
+        # Only notify students with approved elective selection
+        students = (db.session.query(StudentProfile)
+                    .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
+                    .filter(StudentProfile.current_section_id == extra_session.section_id)
+                    .filter(StudentElective.subject_id == extra_session.subject_id)
+                    .filter(StudentElective.status == 'Approved')
+                    .all())
+    else:
+        students = StudentProfile.query.filter_by(current_section_id=extra_session.section_id).all()
+
+    for student in students:
+        send_notification(
+            student.student_id,
+            f"Extra Class Cancelled: {subject.name}",
+            f"The extra class scheduled on {extra_session.date.strftime('%d %b')} at {extra_session.start_time.strftime('%I:%M %p')} has been cancelled.",
+            type='warning'
+        )
+
+    return jsonify({"message": "Extra session cancelled"}), 200
+
+
 # ==========================================
 # API: STAFF DASHBOARD
 # ==========================================
@@ -2554,33 +2827,85 @@ def staff_dashboard():
         except Exception:
             adjustment_requests = []
 
+        # --- 9. EXTRA SESSIONS (One-time classes) ---
+        extra_sessions_list = []
+        try:
+            extra_sessions = (db.session.query(ExtraSession, Subject, ClassSection)
+                              .join(Subject, ExtraSession.subject_id == Subject.subject_id)
+                              .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
+                              .filter(ExtraSession.teacher_id == staff.staff_id)
+                              .filter(ExtraSession.status != 'Cancelled')
+                              .filter(ExtraSession.date >= today_date)
+                              .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
+                              .all())
+
+            for es, subj, sec in extra_sessions:
+                session_log = SessionLog.query.filter_by(extra_session_id=es.id).first()
+                start_float = es.start_time.hour + (es.start_time.minute / 60.0)
+                end_float = es.end_time.hour + (es.end_time.minute / 60.0)
+                days_from_today = (es.date - today_date).days
+                sort_key = days_from_today * 10000 + int(es.start_time.strftime('%H%M'))
+
+                es_data = {
+                    "id": f"extra_{es.id}",
+                    "extra_session_id": es.id,
+                    "time": f"{es.start_time.strftime('%I:%M %p')} - {es.end_time.strftime('%I:%M %p')}",
+                    "class": f"{sec.class_level}-{sec.name}",
+                    "subject": subj.name,
+                    "day": es.date.strftime('%A'),
+                    "date_iso": es.date.strftime('%Y-%m-%d'),
+                    "date_display": es.date.strftime('%d %b'),
+                    "type": "Extra",
+                    "topic": es.topic,
+                    "meeting_link": es.meeting_link,
+                    "sort_key": sort_key,
+                    "start_float": start_float,
+                    "duration_float": end_float - start_float,
+                    "status": "Done" if session_log else "Pending",
+                    "is_extra_session": True,
+                    "section_id": sec.section_id
+                }
+
+                if es.date == today_date:
+                    today_schedule.append(es_data)
+                else:
+                    upcoming_schedule.append(es_data)
+                extra_sessions_list.append(es_data)
+
+            # Re-sort after adding extra sessions
+            today_schedule.sort(key=lambda x: x['sort_key'])
+            upcoming_schedule.sort(key=lambda x: x['sort_key'])
+        except Exception as ex:
+            print(f"Error loading extra sessions: {ex}")
+
         return jsonify({
-            "profile": { 
-                "name": staff.full_name, 
-                "code": staff.employee_code, 
-                "dept": dept_managed.name if is_hod else "Faculty", 
-                "stats": { "weekly_classes": weekly_load, "avg_attendance": f"{avg_attendance}%" } 
+            "profile": {
+                "name": staff.full_name,
+                "code": staff.employee_code,
+                "dept": dept_managed.name if is_hod else "Faculty",
+                "stats": { "weekly_classes": weekly_load, "avg_attendance": f"{avg_attendance}%" }
             },
-            "roles": { 
-                "is_hod": is_hod, 
-                "is_class_teacher": is_class_teacher, 
-                "is_coordinator": is_coordinator, 
-                "is_amc_member": is_amc_member, 
-                "is_amc_head": is_amc_head, 
-                "is_mentor": is_mentor 
+            "roles": {
+                "is_hod": is_hod,
+                "is_class_teacher": is_class_teacher,
+                "is_coordinator": is_coordinator,
+                "is_amc_member": is_amc_member,
+                "is_amc_head": is_amc_head,
+                "is_mentor": is_mentor
             },
-            "widgets": { 
-                "today_schedule": today_schedule, 
-                "upcoming_schedule": upcoming_schedule, 
-                "history_schedule": history_list, 
-                "my_subjects": my_subjects_list, 
-                "pending_leaves": pending_leaves, 
-                "class_teacher_data": class_details, 
-                "mentee_data": {"count": mentee_count}, 
+            "widgets": {
+                "today_schedule": today_schedule,
+                "upcoming_schedule": upcoming_schedule,
+                "history_schedule": history_list,
+                "my_subjects": my_subjects_list,
+                "pending_leaves": pending_leaves,
+                "class_teacher_data": class_details,
+                "mentee_data": {"count": mentee_count},
                 "my_events": [],
                 "detention_review_count": detention_review_count,
                 "adjustment_requests": adjustment_requests,
-                "can_assign_detention": can_assign_detention
+                "can_assign_detention": can_assign_detention,
+                "extra_sessions": extra_sessions_list
             }
         })
     except Exception as e:
@@ -3660,24 +3985,79 @@ def get_attendance_sheet():
         date_str = request.args.get('date')
         if date_str: target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         else: target_date = date.today()
-        
-        slot = WeeklySchedule.query.get(schedule_id)
-        if not slot: return jsonify({"error": "Invalid Slot ID"}), 404
-        subject = Subject.query.get(slot.subject_id)
-        section = ClassSection.query.get(slot.section_id)
-        
-        # 1. Fetch Students (Batch or Class)
-        students = []
-        if slot.target_batch:
-            target_batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
-            if target_batch_obj: students = StudentProfile.query.filter_by(current_section_id=section.section_id, mentor_batch_id=target_batch_obj.batch_id).all()
-        else: 
-            students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
-        
-        # 2. Check Existing Session (Locked State)
-        existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=target_date).first()
-        is_locked = True if existing_session else False
-        saved_status_map = {t.student_id: t.status for t in AttendanceTransaction.query.filter_by(session_id=existing_session.session_id).all()} if existing_session else {}
+
+        # Check if this is an extra session (ID starts with "extra_")
+        is_extra_session = schedule_id and schedule_id.startswith('extra_')
+
+        if is_extra_session:
+            # Handle Extra Session
+            extra_session_id = int(schedule_id.replace('extra_', ''))
+            extra_session = ExtraSession.query.get(extra_session_id)
+            if not extra_session: return jsonify({"error": "Invalid Extra Session ID"}), 404
+
+            subject = Subject.query.get(extra_session.subject_id)
+            section = ClassSection.query.get(extra_session.section_id)
+
+            # Fetch students - apply elective filter if subject is elective type
+            if is_elective_type(subject.subject_type):
+                # Only students with approved elective selection for this subject
+                students = (db.session.query(StudentProfile)
+                            .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
+                            .filter(StudentProfile.current_section_id == section.section_id)
+                            .filter(StudentElective.subject_id == subject.subject_id)
+                            .filter(StudentElective.status == 'Approved')
+                            .order_by(StudentProfile.admission_number).all())
+            else:
+                # Core subject = all students in section
+                students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
+
+            # Check existing session log for extra session
+            existing_session = SessionLog.query.filter_by(extra_session_id=extra_session_id).first()
+            is_locked = True if existing_session else False
+            saved_status_map = {t.student_id: t.status for t in AttendanceTransaction.query.filter_by(session_id=existing_session.session_id).all()} if existing_session else {}
+
+            # Store for later use in response
+            slot = None
+            time_str = f"{extra_session.start_time.strftime('%I:%M %p')} - {extra_session.end_time.strftime('%I:%M %p')}"
+            display_class_name = f"{section.class_level}-{section.name}"
+            target_date = extra_session.date  # Use the extra session's date
+        else:
+            # Handle Regular Weekly Schedule
+            slot = WeeklySchedule.query.get(schedule_id)
+            if not slot: return jsonify({"error": "Invalid Slot ID"}), 404
+            subject = Subject.query.get(slot.subject_id)
+            section = ClassSection.query.get(slot.section_id)
+
+            # 1. Fetch Students (Batch, Elective, or Class)
+            students = []
+            if is_elective_type(subject.subject_type):
+                # Elective subject = only students with approved selection
+                base_query = (db.session.query(StudentProfile)
+                              .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
+                              .filter(StudentProfile.current_section_id == section.section_id)
+                              .filter(StudentElective.subject_id == subject.subject_id)
+                              .filter(StudentElective.status == 'Approved'))
+                if slot.target_batch:
+                    target_batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
+                    if target_batch_obj:
+                        base_query = base_query.filter(StudentProfile.mentor_batch_id == target_batch_obj.batch_id)
+                students = base_query.order_by(StudentProfile.admission_number).all()
+            elif slot.target_batch:
+                # Batch-specific (lab sessions)
+                target_batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
+                if target_batch_obj: students = StudentProfile.query.filter_by(current_section_id=section.section_id, mentor_batch_id=target_batch_obj.batch_id).all()
+            else:
+                # Core subject = all students in section
+                students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
+
+            # 2. Check Existing Session (Locked State)
+            existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=target_date).first()
+            is_locked = True if existing_session else False
+            saved_status_map = {t.student_id: t.status for t in AttendanceTransaction.query.filter_by(session_id=existing_session.session_id).all()} if existing_session else {}
+
+            time_str = f"{slot.start_time.strftime('%I:%M %p')} - {slot.end_time.strftime('%I:%M %p')}"
+            display_class_name = f"{section.class_level}-{section.name}"
+            if slot.target_batch: display_class_name += f" ({slot.target_batch})"
 
         # 3. Pre-fetch Approved Leaves & Events for this Date
         # Optimization: Fetch all approved leaves for this section on this date
@@ -3751,15 +4131,12 @@ def get_attendance_sheet():
             })
         
         student_list.sort(key=lambda x: x['name'])
-        
-        display_class_name = f"{section.class_level}-{section.name}"
-        if slot.target_batch: display_class_name += f" ({slot.target_batch})"
-        time_str = f"{slot.start_time.strftime('%I:%M %p')} - {slot.end_time.strftime('%I:%M %p')}"
-        
-        return jsonify({ 
-            "subject_name": subject.name, "class_name": display_class_name, 
-            "time": time_str, "date_display": target_date.strftime('%d %b %Y'), 
-            "is_locked": is_locked, "students": student_list, "subject_id": subject.subject_id 
+
+        return jsonify({
+            "subject_name": subject.name, "class_name": display_class_name,
+            "time": time_str, "date_display": target_date.strftime('%d %b %Y'),
+            "is_locked": is_locked, "students": student_list, "subject_id": subject.subject_id,
+            "is_extra_session": is_extra_session
         })
 
     except Exception as e:
@@ -3781,47 +4158,79 @@ def submit_attendance():
         # 1. Lesson Data (NEW)
         topic_id = data.get('topic_id') # Optional
 
-        existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=txn_date).first()
-        if existing_session: return jsonify({"error": "Attendance locked."}), 403
-        slot = WeeklySchedule.query.get(schedule_id)
+        # Check if this is an extra session (ID starts with "extra_")
+        is_extra_session = schedule_id and str(schedule_id).startswith('extra_')
 
-        # Determine who is allowed to submit attendance for this schedule/date.
-        # - Default: scheduled teacher can submit.
-        # - If there's an approved mutual swap for this schedule/date, only the swapped-in teacher can submit.
-        allowed_teacher_id = slot.teacher_id if slot else None
-        try:
-            approved_swap = (
-                LoadAdjustment.query
-                .filter(LoadAdjustment.status == 'Approved')
-                .filter(
-                    ((LoadAdjustment.req_schedule_id == schedule_id) & (LoadAdjustment.req_date == txn_date)) |
-                    ((LoadAdjustment.adj_schedule_id == schedule_id) & (LoadAdjustment.adj_date == txn_date))
-                )
-                .order_by(LoadAdjustment.created_at.desc())
-                .first()
+        if is_extra_session:
+            # Handle Extra Session
+            extra_session_id = int(str(schedule_id).replace('extra_', ''))
+            extra_session = ExtraSession.query.get(extra_session_id)
+            if not extra_session:
+                return jsonify({"error": "Invalid Extra Session"}), 404
+
+            # Check if already marked
+            existing_session = SessionLog.query.filter_by(extra_session_id=extra_session_id).first()
+            if existing_session:
+                return jsonify({"error": "Attendance locked."}), 403
+
+            # For extra sessions, only the teacher who created it can mark attendance
+            if extra_session.teacher_id != submitted_by:
+                return jsonify({"error": "Not allowed to submit attendance for this session."}), 403
+
+            # Create session log for extra session
+            session = SessionLog(
+                extra_session_id=extra_session_id,
+                session_date=extra_session.date,
+                status="Conducted",
+                actual_teacher_id=submitted_by
             )
-            if approved_swap:
-                if approved_swap.req_schedule_id == schedule_id and approved_swap.req_date == txn_date:
-                    allowed_teacher_id = approved_swap.adjuster_id
-                elif approved_swap.adj_schedule_id == schedule_id and approved_swap.adj_date == txn_date:
-                    allowed_teacher_id = approved_swap.requester_id
-        except Exception:
-            pass
+            db.session.add(session)
+            db.session.flush()
 
-        actual_teacher_id = submitted_by or allowed_teacher_id
-        if allowed_teacher_id and actual_teacher_id != allowed_teacher_id:
-            return jsonify({"error": "Not allowed to submit attendance for this session."}), 403
+        else:
+            # Handle Regular Weekly Schedule
+            existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=txn_date).first()
+            if existing_session: return jsonify({"error": "Attendance locked."}), 403
+            slot = WeeklySchedule.query.get(schedule_id)
 
-        session = SessionLog(schedule_id=schedule_id, session_date=txn_date, status="Conducted", actual_teacher_id=actual_teacher_id)
-        db.session.add(session); db.session.flush()
+            # Determine who is allowed to submit attendance for this schedule/date.
+            # - Default: scheduled teacher can submit.
+            # - If there's an approved mutual swap for this schedule/date, only the swapped-in teacher can submit.
+            allowed_teacher_id = slot.teacher_id if slot else None
+            try:
+                approved_swap = (
+                    LoadAdjustment.query
+                    .filter(LoadAdjustment.status == 'Approved')
+                    .filter(
+                        ((LoadAdjustment.req_schedule_id == schedule_id) & (LoadAdjustment.req_date == txn_date)) |
+                        ((LoadAdjustment.adj_schedule_id == schedule_id) & (LoadAdjustment.adj_date == txn_date))
+                    )
+                    .order_by(LoadAdjustment.created_at.desc())
+                    .first()
+                )
+                if approved_swap:
+                    if approved_swap.req_schedule_id == schedule_id and approved_swap.req_date == txn_date:
+                        allowed_teacher_id = approved_swap.adjuster_id
+                    elif approved_swap.adj_schedule_id == schedule_id and approved_swap.adj_date == txn_date:
+                        allowed_teacher_id = approved_swap.requester_id
+            except Exception:
+                pass
+
+            actual_teacher_id = submitted_by or allowed_teacher_id
+            if allowed_teacher_id and actual_teacher_id != allowed_teacher_id:
+                return jsonify({"error": "Not allowed to submit attendance for this session."}), 403
+
+            session = SessionLog(schedule_id=schedule_id, session_date=txn_date, status="Conducted", actual_teacher_id=actual_teacher_id)
+            db.session.add(session)
+            db.session.flush()
 
         for s in data.get('students'):
             final_status = "OnDuty" if s['is_on_duty'] else s['status']
             new_txn = AttendanceTransaction(session_id=session.session_id, student_id=s['student_id'], status=final_status)
             db.session.add(new_txn)
 
-        # 5. Save Lesson Log (NEW)
-        if topic_id:
+        # 5. Save Lesson Log (NEW) - only for regular sessions with topic
+        if topic_id and not is_extra_session:
             db.session.add(LessonLog(session_id=session.session_id, plan_id=topic_id, remarks="Conducted"))
 
         db.session.commit()
@@ -3868,6 +4277,337 @@ def get_full_session_history():
 
         return jsonify({"history": history_list})
     except Exception as e: return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# API: EXTRA SESSIONS (One-time classes)
+# ==========================================
+@app.route('/api/staff/extra_sessions', methods=['GET'])
+@login_required
+def get_extra_sessions():
+    """Get extra sessions for the logged-in teacher."""
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({"error": "user_id required"}), 400
+
+        sessions = (db.session.query(ExtraSession, Subject, ClassSection)
+                    .join(Subject, ExtraSession.subject_id == Subject.subject_id)
+                    .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
+                    .filter(ExtraSession.teacher_id == user_id)
+                    .filter(ExtraSession.status != 'Cancelled')
+                    .order_by(ExtraSession.date.desc(), ExtraSession.start_time.asc())
+                    .all())
+
+        result = []
+        for es, subj, sec in sessions:
+            # Check if attendance has been marked
+            session_log = SessionLog.query.filter_by(extra_session_id=es.id).first()
+            result.append({
+                "id": es.id,
+                "subject_id": es.subject_id,
+                "subject_name": subj.name,
+                "section_id": es.section_id,
+                "section_name": f"{sec.class_level}-{sec.name}",
+                "date": es.date.isoformat(),
+                "start_time": es.start_time.strftime('%H:%M'),
+                "end_time": es.end_time.strftime('%H:%M'),
+                "topic": es.topic,
+                "meeting_link": es.meeting_link,
+                "status": es.status,
+                "attendance_marked": session_log is not None
+            })
+
+        return jsonify({"extra_sessions": result}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/staff/extra_sessions/allocations', methods=['GET'])
+@login_required
+def get_extra_session_allocations():
+    """Get teacher's class/subject allocations for creating extra sessions."""
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({"error": "user_id required"}), 400
+
+        # Get unique section-subject combinations from weekly schedule
+        allocations = (db.session.query(WeeklySchedule, Subject, ClassSection)
+                       .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
+                       .join(ClassSection, WeeklySchedule.section_id == ClassSection.section_id)
+                       .filter(WeeklySchedule.teacher_id == user_id)
+                       .distinct(WeeklySchedule.section_id, WeeklySchedule.subject_id)
+                       .all())
+
+        sections = {}
+        subjects = {}
+        section_subjects = []
+
+        for ws, subj, sec in allocations:
+            sec_key = sec.section_id
+            subj_key = subj.subject_id
+
+            if sec_key not in sections:
+                sections[sec_key] = {
+                    "section_id": sec.section_id,
+                    "name": f"{sec.class_level}-{sec.name}"
+                }
+            if subj_key not in subjects:
+                subjects[subj_key] = {
+                    "subject_id": subj.subject_id,
+                    "name": subj.name
+                }
+
+            section_subjects.append({
+                "section_id": sec.section_id,
+                "subject_id": subj.subject_id
+            })
+
+        return jsonify({
+            "sections": list(sections.values()),
+            "subjects": list(subjects.values()),
+            "section_subjects": section_subjects
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/staff/extra_sessions', methods=['POST'])
+@login_required
+def create_extra_session():
+    """Create a new extra session with validation."""
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id')
+        subject_id = data.get('subject_id')
+        section_id = data.get('section_id')
+        date_str = data.get('date')
+        start_time_str = data.get('start_time')
+        end_time_str = data.get('end_time')
+        topic = data.get('topic', '').strip()
+        meeting_link = data.get('meeting_link', '').strip()
+
+        # Validate required fields
+        if not all([user_id, subject_id, section_id, date_str, start_time_str, end_time_str]):
+            return jsonify({"error": "Missing required fields"}), 400
+
+        # Parse date and time
+        from datetime import datetime, time as dt_time
+        session_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        start_time = datetime.strptime(start_time_str, '%H:%M').time()
+        end_time = datetime.strptime(end_time_str, '%H:%M').time()
+
+        # Validation 1: Check if date is in the past
+        if session_date < datetime.now().date():
+            return jsonify({"error": "Cannot schedule sessions in the past"}), 400
+
+        # Validation 2: Weekday must be after 17:00
+        day_of_week = session_date.weekday()  # 0=Monday, 6=Sunday
+        is_weekend = day_of_week >= 5  # Saturday or Sunday
+
+        if not is_weekend and start_time < dt_time(17, 0):
+            return jsonify({"error": "Weekday extra sessions must start after 5:00 PM"}), 400
+
+        # Validation 3: Check for section conflict (same section, overlapping time)
+        conflicting = ExtraSession.query.filter(
+            ExtraSession.section_id == section_id,
+            ExtraSession.date == session_date,
+            ExtraSession.status != 'Cancelled',
+            db.or_(
+                db.and_(ExtraSession.start_time <= start_time, ExtraSession.end_time > start_time),
+                db.and_(ExtraSession.start_time < end_time, ExtraSession.end_time >= end_time),
+                db.and_(ExtraSession.start_time >= start_time, ExtraSession.end_time <= end_time)
+            )
+        ).first()
+
+        if conflicting:
+            return jsonify({"error": "This class already has an extra session scheduled at this time"}), 400
+
+        # Create the extra session
+        extra_session = ExtraSession(
+            subject_id=subject_id,
+            teacher_id=user_id,
+            section_id=section_id,
+            date=session_date,
+            start_time=start_time,
+            end_time=end_time,
+            topic=topic if topic else None,
+            meeting_link=meeting_link if meeting_link else None,
+            status='Scheduled'
+        )
+        db.session.add(extra_session)
+        db.session.commit()
+
+        # Send notification to students (filter by elective if applicable)
+        section = ClassSection.query.get(section_id)
+        subject = Subject.query.get(subject_id)
+        teacher = StaffProfile.query.get(user_id)
+
+        if is_elective_type(subject.subject_type):
+            # Only notify students with approved elective selection
+            students = (db.session.query(StudentProfile)
+                        .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
+                        .filter(StudentProfile.current_section_id == section_id)
+                        .filter(StudentElective.subject_id == subject_id)
+                        .filter(StudentElective.status == 'Approved')
+                        .all())
+        else:
+            students = StudentProfile.query.filter_by(current_section_id=section_id).all()
+
+        for student in students:
+            send_notification(
+                student.student_id,
+                f"Extra Class: {subject.name}",
+                f"Extra class scheduled on {session_date.strftime('%d %b')} at {start_time.strftime('%I:%M %p')}. Topic: {topic or 'TBA'}",
+                type='info'
+            )
+
+        return jsonify({
+            "message": "Extra session created successfully",
+            "id": extra_session.id
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/staff/extra_sessions/<int:session_id>', methods=['PUT'])
+@login_required
+def update_extra_session(session_id):
+    """Update an extra session."""
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id')
+
+        extra_session = ExtraSession.query.get(session_id)
+        if not extra_session:
+            return jsonify({"error": "Extra session not found"}), 404
+
+        if extra_session.teacher_id != user_id:
+            return jsonify({"error": "Not authorized to modify this session"}), 403
+
+        # Check if attendance already marked
+        session_log = SessionLog.query.filter_by(extra_session_id=session_id).first()
+        if session_log:
+            return jsonify({"error": "Cannot modify session after attendance is marked"}), 400
+
+        # Update fields
+        if 'topic' in data:
+            extra_session.topic = data['topic'].strip() or None
+        if 'meeting_link' in data:
+            extra_session.meeting_link = data['meeting_link'].strip() or None
+
+        db.session.commit()
+        return jsonify({"message": "Extra session updated"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/staff/extra_sessions/<int:session_id>', methods=['DELETE'])
+@login_required
+def cancel_extra_session(session_id):
+    """Cancel an extra session."""
+    try:
+        user_id = request.args.get('user_id')
+
+        extra_session = ExtraSession.query.get(session_id)
+        if not extra_session:
+            return jsonify({"error": "Extra session not found"}), 404
+
+        if extra_session.teacher_id != user_id:
+            return jsonify({"error": "Not authorized to cancel this session"}), 403
+
+        # Check if attendance already marked
+        session_log = SessionLog.query.filter_by(extra_session_id=session_id).first()
+        if session_log:
+            return jsonify({"error": "Cannot cancel session after attendance is marked"}), 400
+
+        extra_session.status = 'Cancelled'
+        db.session.commit()
+
+        # Notify students (filter by elective if applicable)
+        section = ClassSection.query.get(extra_session.section_id)
+        subject = Subject.query.get(extra_session.subject_id)
+
+        if is_elective_type(subject.subject_type):
+            # Only notify students with approved elective selection
+            students = (db.session.query(StudentProfile)
+                        .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
+                        .filter(StudentProfile.current_section_id == extra_session.section_id)
+                        .filter(StudentElective.subject_id == extra_session.subject_id)
+                        .filter(StudentElective.status == 'Approved')
+                        .all())
+        else:
+            students = StudentProfile.query.filter_by(current_section_id=extra_session.section_id).all()
+
+        for student in students:
+            send_notification(
+                student.student_id,
+                f"Extra Class Cancelled: {subject.name}",
+                f"The extra class scheduled on {extra_session.date.strftime('%d %b')} at {extra_session.start_time.strftime('%I:%M %p')} has been cancelled.",
+                type='warning'
+            )
+
+        return jsonify({"message": "Extra session cancelled"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/staff/extra_sessions/<int:session_id>/mark_attendance', methods=['POST'])
+@login_required
+def mark_extra_session_attendance(session_id):
+    """Mark attendance for an extra session - creates session log and attendance records."""
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id')
+        attendance_data = data.get('attendance', [])
+
+        extra_session = ExtraSession.query.get(session_id)
+        if not extra_session:
+            return jsonify({"error": "Extra session not found"}), 404
+
+        if extra_session.teacher_id != user_id:
+            return jsonify({"error": "Not authorized"}), 403
+
+        # Check if already marked
+        existing_log = SessionLog.query.filter_by(extra_session_id=session_id).first()
+        if existing_log:
+            return jsonify({"error": "Attendance already marked for this session"}), 400
+
+        # Create session log
+        session_log = SessionLog(
+            extra_session_id=session_id,
+            session_date=extra_session.date,
+            status='Conducted',
+            actual_teacher_id=user_id
+        )
+        db.session.add(session_log)
+        db.session.flush()
+
+        # Create attendance transactions
+        for att in attendance_data:
+            student_id = att.get('student_id')
+            status = att.get('status', 'Absent')
+            if student_id:
+                txn = AttendanceTransaction(
+                    session_id=session_log.session_id,
+                    student_id=student_id,
+                    status=status
+                )
+                db.session.add(txn)
+
+        # Update extra session status
+        extra_session.status = 'Conducted'
+        db.session.commit()
+
+        return jsonify({"message": "Attendance marked successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
 
 # ==========================================
 # API: LEAVE & STUDENT
@@ -4188,7 +4928,7 @@ def student_dashboard():
         # --- 8. TERM GRANT STATUS (NEW) ---
         term_grant = TermGrantRecord.query.filter_by(student_id=user_id).first()
         grant_data = None
-        
+
         # Only show if the record exists (AMC has generated it)
         if term_grant:
             grant_data = {
@@ -4198,22 +4938,62 @@ def student_dashboard():
                 "ca_avg": term_grant.avg_ca_score
             }
 
-        return jsonify({ 
-            "profile": { "name": student.full_name, "roll": student.admission_number, "class": f"{section.class_level}-{section.name}" }, 
-            "stats": { 
-                "percentage": overall_percentage, 
-                "total_lectures": grand_total_conducted, 
-                "attended": grand_total_attended, 
-                "is_defaulter": overall_percentage < 75 
-            }, 
-            "subject_wise": sub_perf, 
-            "recent_activity": activity, 
-            "events": event_history, 
-            "mentor": mentor_info, 
-            "detention": detention_data, 
+        # --- 9. EXTRA SESSIONS (One-time classes) ---
+        extra_sessions_list = []
+        today_date = datetime.now().date()
+        try:
+            extra_sessions = (db.session.query(ExtraSession, Subject, StaffProfile)
+                              .join(Subject, ExtraSession.subject_id == Subject.subject_id)
+                              .join(StaffProfile, ExtraSession.teacher_id == StaffProfile.staff_id)
+                              .filter(ExtraSession.section_id == section.section_id)
+                              .filter(ExtraSession.status != 'Cancelled')
+                              .filter(ExtraSession.date >= today_date)
+                              .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
+                              .all())
+
+            for es, subj, teacher in extra_sessions:
+                # Filter by elective: only show if student has approved selection for elective subjects
+                if is_elective_type(subj.subject_type):
+                    approved = StudentElective.query.filter_by(
+                        student_id=student.student_id,
+                        subject_id=subj.subject_id,
+                        status='Approved'
+                    ).first()
+                    if not approved:
+                        continue  # Skip this extra session - student hasn't opted for this elective
+
+                extra_sessions_list.append({
+                    "id": es.id,
+                    "subject": subj.name,
+                    "teacher": teacher.full_name,
+                    "date": es.date.strftime('%d %b'),
+                    "date_iso": es.date.isoformat(),
+                    "day": es.date.strftime('%A'),
+                    "time": f"{es.start_time.strftime('%I:%M %p')} - {es.end_time.strftime('%I:%M %p')}",
+                    "topic": es.topic,
+                    "meeting_link": es.meeting_link,
+                    "is_today": es.date == today_date
+                })
+        except Exception as ex:
+            print(f"Error loading extra sessions for student: {ex}")
+
+        return jsonify({
+            "profile": { "name": student.full_name, "roll": student.admission_number, "class": f"{section.class_level}-{section.name}" },
+            "stats": {
+                "percentage": overall_percentage,
+                "total_lectures": grand_total_conducted,
+                "attended": grand_total_attended,
+                "is_defaulter": overall_percentage < 75
+            },
+            "subject_wise": sub_perf,
+            "recent_activity": activity,
+            "events": event_history,
+            "mentor": mentor_info,
+            "detention": detention_data,
             "meeting": upcoming_meeting,
             "results": results_data,
-            "term_grant": grant_data # <--- NEW FIELD
+            "term_grant": grant_data,
+            "extra_sessions": extra_sessions_list
         })
 
     except Exception as e:

@@ -45,7 +45,7 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpcomingScheduleScreen(
-    onMarkAttendance: (scheduleId: Int, date: String) -> Unit
+    onMarkAttendance: (scheduleId: String, date: String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -186,7 +186,7 @@ fun UpcomingScheduleScreen(
                             ScheduleClassCard(
                                 classItem = classItem,
                                 isToday = true,
-                                onMarkAttendance = { onMarkAttendance(classItem.scheduleId, classItem.dateIso) },
+                                onMarkAttendance = { onMarkAttendance(classItem.scheduleId.toString(), classItem.dateIso) },
                                 onAdjust = {
                                     selectedClassForAdjustment = classItem
                                     showAdjustmentModal = true
@@ -509,7 +509,16 @@ private fun ScheduleClassCard(
                     }
                 } else {
                     // Mark Attendance button for today's classes
-                    if (isToday && onMarkAttendance != null && classItem.status != "Done" && !isPendingAdjustment) {
+                    // Don't show if:
+                    // - Session is adjusted out (approved, kind=out, role=requester) - someone else is covering
+                    // - Session has pending adjustment
+                    val isAdjustedOut = isApprovedAdjustment && adjustment?.kind == "out" && isRequester
+                    val canMarkAttendance = isToday &&
+                                            onMarkAttendance != null &&
+                                            classItem.status != "Done" &&
+                                            !isPendingAdjustment &&
+                                            !isAdjustedOut
+                    if (canMarkAttendance) {
                         Button(
                             onClick = onMarkAttendance,
                             colors = ButtonDefaults.buttonColors(containerColor = accentPurple())

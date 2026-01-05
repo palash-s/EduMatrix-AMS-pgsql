@@ -102,6 +102,7 @@
                 <!-- Dynamic Containers -->
                 <div id="elective-container"></div>
                 <div id="mentor-container"></div>
+                <div id="extra-sessions-container"></div>
                 <!-- Event History -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
                     <h3 class="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2"><i data-lucide="award" class="w-4 h-4 text-yellow-500"></i> Event History</h3>
@@ -331,7 +332,42 @@
                 }
             }
             mentorContainer.innerHTML = mentorHTML;
-            
+
+            // Extra Sessions (One-time classes)
+            const esContainer = document.getElementById('extra-sessions-container');
+            if (data.extra_sessions && data.extra_sessions.length > 0) {
+                esContainer.innerHTML = `
+                <div class="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl shadow-sm border border-orange-200 p-4 mb-4">
+                    <h3 class="text-xs font-bold text-orange-700 uppercase mb-3 flex items-center gap-2">
+                        <i data-lucide="calendar-plus" class="w-4 h-4"></i> Upcoming Extra Classes
+                    </h3>
+                    <div class="space-y-2">
+                        ${data.extra_sessions.map(es => `
+                            <div class="bg-white rounded-lg p-3 border border-orange-100 ${es.is_today ? 'ring-2 ring-orange-400' : ''}">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-bold text-gray-800 text-sm">${es.subject}</span>
+                                            ${es.is_today ? '<span class="text-[10px] bg-orange-500 text-white px-2 py-0.5 rounded-full animate-pulse">TODAY</span>' : ''}
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-0.5">by ${es.teacher}</p>
+                                        <p class="text-xs text-gray-400 mt-1">
+                                            <i data-lucide="calendar" class="w-3 h-3 inline"></i> ${es.day}, ${es.date} &bull;
+                                            <i data-lucide="clock" class="w-3 h-3 inline"></i> ${es.time}
+                                        </p>
+                                        ${es.topic ? `<p class="text-xs text-purple-600 mt-1"><i data-lucide="book-open" class="w-3 h-3 inline"></i> ${es.topic}</p>` : ''}
+                                    </div>
+                                    ${es.meeting_link ? `<a href="${es.meeting_link}" target="_blank" class="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center gap-1 shadow-sm"><i data-lucide="video" class="w-3 h-3"></i> Join</a>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+                lucide.createIcons();
+            } else {
+                esContainer.innerHTML = '';
+            }
+
             // Detention (Same as before)
             detentionData = data.detention;
             const dCard = document.getElementById('detention-alert-card');

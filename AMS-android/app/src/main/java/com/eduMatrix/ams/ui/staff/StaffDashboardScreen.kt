@@ -4,8 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -39,7 +41,7 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StaffDashboardScreen(
-    onMarkAttendance: (scheduleId: Int, date: String) -> Unit,
+    onMarkAttendance: (scheduleId: String, date: String) -> Unit,
     onNavigateToLeaves: () -> Unit,
     onNavigateToMentees: () -> Unit,
     onNavigateToClassTeacher: () -> Unit,
@@ -60,8 +62,13 @@ fun StaffDashboardScreen(
     var isLoading by rememberSaveable { mutableStateOf(true) }
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var dashboardData by remember { mutableStateOf<StaffDashboardData?>(null) }
+    var extraSessions by remember { mutableStateOf<List<ExtraSession>>(emptyList()) }
     var refreshTrigger by rememberSaveable { mutableStateOf(0) }
     var unreadNotificationCount by rememberSaveable { mutableStateOf(0) }
+
+    // Extra session dialog state
+    var showExtraSessionDialog by rememberSaveable { mutableStateOf(false) }
+    var extraSessionAllocations by remember { mutableStateOf<List<ExtraSessionAllocation>>(emptyList()) }
 
     // Get current date
     val today = remember {
@@ -94,6 +101,15 @@ fun StaffDashboardScreen(
             }
             dashboardData = data
 
+            // Fetch extra sessions
+            try {
+                extraSessions = withContext(Dispatchers.IO) {
+                    ApiService.getExtraSessions(BuildConfig.API_BASE_URL, token, currentUser.userId)
+                }
+            } catch (_: Exception) {
+                // Best-effort, don't fail dashboard if extra sessions fail
+            }
+
             // Fetch unread notification count
             try {
                 val notifications = withContext(Dispatchers.IO) {
@@ -119,6 +135,10 @@ fun StaffDashboardScreen(
             errorMessage = e.message ?: "Failed to load dashboard"
         }
     }
+
+    // Extra session creation state
+    var isCreatingExtraSession by rememberSaveable { mutableStateOf(false) }
+    var extraSessionError by rememberSaveable { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -178,6 +198,38 @@ fun StaffDashboardScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
+        },
+        floatingActionButton = {
+            if (dashboardData != null) {
+                FloatingActionButton(
+                    onClick = {
+                        // Load allocations before showing dialog
+                        scope.launch {
+                            try {
+                                val token = AppPrefs.getAccessToken(context) ?: return@launch
+                                val currentUser = AppPrefs.getUser(context) ?: return@launch
+                                extraSessionAllocations = withContext(Dispatchers.IO) {
+                                    ApiService.getExtraSessionAllocations(
+                                        BuildConfig.API_BASE_URL,
+                                        token,
+                                        currentUser.userId
+                                    )
+                                }
+                                showExtraSessionDialog = true
+                            } catch (e: Exception) {
+                                extraSessionError = "Failed to load allocations: ${e.message}"
+                            }
+                        }
+                    },
+                    containerColor = primaryAccent()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Schedule Extra Class",
+                        tint = Color.White
+                    )
+                }
+            }
         }
     ) { paddingValues ->
         Box(
@@ -410,6 +462,15 @@ fun StaffDashboardScreen(
                             }
                         } else {
                             items(data.todaySchedule.take(5)) { session ->
+                                // Check if session is adjusted out (someone else is covering)
+                                val adjustment = session.adjustment
+                                val isAdjustedOut = adjustment != null &&
+                                        adjustment.status == "Approved" &&
+                                        adjustment.kind == "out" &&
+                                        adjustment.role == "requester"
+                                val isPendingAdjustment = adjustment != null && adjustment.status == "Pending"
+                                val canMark = !session.isCompleted && !isAdjustedOut && !isPendingAdjustment
+
                                 SessionCard(
                                     startTime = session.startTime,
                                     endTime = session.endTime,
@@ -418,9 +479,44 @@ fun StaffDashboardScreen(
                                     roomNumber = session.roomNumber,
                                     sessionType = session.subject.sessionType,
                                     isCompleted = session.isCompleted,
-                                    onMarkAttendance = if (!session.isCompleted) {
-                                        { onMarkAttendance(session.scheduleId, today) }
+                                    isAdjusted = isAdjustedOut,
+                                    onMarkAttendance = if (canMark) {
+                                        { onMarkAttendance(session.scheduleId.toString(), today) }
                                     } else null
+                                )
+                            }
+                        }
+
+                        // Today's Extra Sessions
+                        val todayExtraSessions = extraSessions.filter { it.date == today && it.status == "Scheduled" }
+                        if (todayExtraSessions.isNotEmpty()) {
+                            item {
+                                SectionHeader(title = "Extra Classes Today")
+                            }
+
+                            items(todayExtraSessions) { session ->
+                                ExtraSessionCard(
+                                    session = session,
+                                    onMarkAttendance = if (!session.attendanceMarked) {
+                                        { onMarkAttendance("extra_${session.id}", today) }
+                                    } else null,
+                                    onCancel = null // Can't cancel from dashboard for simplicity
+                                )
+                            }
+                        }
+
+                        // Upcoming Extra Sessions (next few days) - only show future dates
+                        val upcomingExtraSessions = extraSessions.filter { it.date > today && it.status == "Scheduled" }.take(3)
+                        if (upcomingExtraSessions.isNotEmpty()) {
+                            item {
+                                SectionHeader(title = "Upcoming Extra Classes")
+                            }
+
+                            items(upcomingExtraSessions) { session ->
+                                ExtraSessionCard(
+                                    session = session,
+                                    onMarkAttendance = null,
+                                    onCancel = null
                                 )
                             }
                         }
@@ -505,6 +601,53 @@ fun StaffDashboardScreen(
             }
         )
     }
+
+    // Extra session creation dialog
+    if (showExtraSessionDialog) {
+        ExtraSessionCreateDialog(
+            allocations = extraSessionAllocations,
+            isLoading = isCreatingExtraSession,
+            error = extraSessionError,
+            onDismiss = {
+                showExtraSessionDialog = false
+                extraSessionError = null
+            },
+            onCreate = { request ->
+                scope.launch {
+                    isCreatingExtraSession = true
+                    extraSessionError = null
+                    try {
+                        val token = AppPrefs.getAccessToken(context) ?: throw Exception("Not authenticated")
+                        val currentUser = AppPrefs.getUser(context) ?: throw Exception("User not found")
+                        withContext(Dispatchers.IO) {
+                            ApiService.createExtraSession(
+                                BuildConfig.API_BASE_URL,
+                                token,
+                                currentUser.userId,
+                                request
+                            )
+                        }
+                        showExtraSessionDialog = false
+                        refreshTrigger++ // Refresh dashboard to show new session
+                    } catch (e: Exception) {
+                        extraSessionError = e.message ?: "Failed to create extra session"
+                    } finally {
+                        isCreatingExtraSession = false
+                    }
+                }
+            }
+        )
+    }
+
+    // Show error snackbar for allocation loading error
+    extraSessionError?.let { error ->
+        if (!showExtraSessionDialog) {
+            LaunchedEffect(error) {
+                kotlinx.coroutines.delay(3000)
+                extraSessionError = null
+            }
+        }
+    }
 }
 
 /**
@@ -588,4 +731,486 @@ private fun RoleCard(
             )
         }
     }
+}
+
+/**
+ * Card displaying an extra session (one-time class) for staff.
+ */
+@Composable
+private fun ExtraSessionCard(
+    session: ExtraSession,
+    onMarkAttendance: (() -> Unit)?,
+    onCancel: (() -> Unit)?
+) {
+    val isToday = session.date == SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isToday) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Time badge
+            Column(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = session.startTime.take(5),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Text(
+                    text = session.endTime.take(5),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                )
+            }
+
+            // Info column
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = session.subjectName,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    // Extra session badge
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.tertiary
+                    ) {
+                        Text(
+                            text = "EXTRA",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = session.sectionName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (!isToday) {
+                    Text(
+                        text = session.dateDisplay,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                session.topic?.let { topic ->
+                    Text(
+                        text = "Topic: $topic",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            // Action button
+            if (session.attendanceMarked) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Completed",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
+            } else if (onMarkAttendance != null && isToday) {
+                FilledTonalButton(
+                    onClick = onMarkAttendance,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text("Mark", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Dialog for creating a new extra session (one-time class).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExtraSessionCreateDialog(
+    allocations: List<ExtraSessionAllocation>,
+    isLoading: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onCreate: (ExtraSessionCreateRequest) -> Unit
+) {
+    // Form state
+    var selectedSection by remember { mutableStateOf<ExtraSessionAllocation?>(null) }
+    var selectedSubject by remember { mutableStateOf<AllocationSubject?>(null) }
+    var selectedDate by remember { mutableStateOf("") }
+    var startTime by remember { mutableStateOf("") }
+    var endTime by remember { mutableStateOf("") }
+    var topic by remember { mutableStateOf("") }
+    var meetingLink by remember { mutableStateOf("") }
+
+    // Dropdown state
+    var sectionExpanded by remember { mutableStateOf(false) }
+    var subjectExpanded by remember { mutableStateOf(false) }
+
+    // Date/time picker state
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showStartTimePicker by remember { mutableStateOf(false) }
+    var showEndTimePicker by remember { mutableStateOf(false) }
+
+    // Get today's date for min date validation
+    val today = remember {
+        Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+
+    // Validation
+    val isValid = selectedSection != null &&
+            selectedSubject != null &&
+            selectedDate.isNotBlank() &&
+            startTime.isNotBlank() &&
+            endTime.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = { if (!isLoading) onDismiss() },
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Event,
+                    contentDescription = null,
+                    tint = primaryAccent()
+                )
+                Text("Schedule Extra Class")
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Section dropdown
+                ExposedDropdownMenuBox(
+                    expanded = sectionExpanded,
+                    onExpandedChange = { if (!isLoading) sectionExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedSection?.sectionName ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Class/Section *") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sectionExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        enabled = !isLoading
+                    )
+                    ExposedDropdownMenu(
+                        expanded = sectionExpanded,
+                        onDismissRequest = { sectionExpanded = false }
+                    ) {
+                        allocations.forEach { allocation ->
+                            DropdownMenuItem(
+                                text = { Text(allocation.sectionName) },
+                                onClick = {
+                                    selectedSection = allocation
+                                    selectedSubject = null // Reset subject when section changes
+                                    sectionExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Subject dropdown
+                ExposedDropdownMenuBox(
+                    expanded = subjectExpanded,
+                    onExpandedChange = { if (!isLoading && selectedSection != null) subjectExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedSubject?.let { "${it.subjectName} (${it.subjectCode})" } ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Subject *") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        enabled = !isLoading && selectedSection != null
+                    )
+                    ExposedDropdownMenu(
+                        expanded = subjectExpanded,
+                        onDismissRequest = { subjectExpanded = false }
+                    ) {
+                        selectedSection?.subjects?.forEach { subject ->
+                            DropdownMenuItem(
+                                text = { Text("${subject.subjectName} (${subject.subjectCode})") },
+                                onClick = {
+                                    selectedSubject = subject
+                                    subjectExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Date field
+                OutlinedTextField(
+                    value = selectedDate,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Date *") },
+                    trailingIcon = {
+                        IconButton(onClick = { if (!isLoading) showDatePicker = true }) {
+                            Icon(Icons.Default.CalendarToday, contentDescription = "Select date")
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    enabled = !isLoading
+                )
+
+                // Time fields row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = startTime,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Start *") },
+                        trailingIcon = {
+                            IconButton(onClick = { if (!isLoading) showStartTimePicker = true }) {
+                                Icon(Icons.Default.Schedule, contentDescription = "Select start time")
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = !isLoading
+                    )
+                    OutlinedTextField(
+                        value = endTime,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("End *") },
+                        trailingIcon = {
+                            IconButton(onClick = { if (!isLoading) showEndTimePicker = true }) {
+                                Icon(Icons.Default.Schedule, contentDescription = "Select end time")
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = !isLoading
+                    )
+                }
+
+                // Topic field
+                OutlinedTextField(
+                    value = topic,
+                    onValueChange = { topic = it },
+                    label = { Text("Topic (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !isLoading
+                )
+
+                // Meeting link field
+                OutlinedTextField(
+                    value = meetingLink,
+                    onValueChange = { meetingLink = it },
+                    label = { Text("Meeting Link (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !isLoading
+                )
+
+                // Error message
+                error?.let {
+                    Text(
+                        text = it,
+                        color = StatusRed,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isValid) {
+                        onCreate(
+                            ExtraSessionCreateRequest(
+                                subjectId = selectedSubject!!.subjectId,
+                                sectionId = selectedSection!!.sectionId,
+                                date = selectedDate,
+                                startTime = startTime,
+                                endTime = endTime,
+                                topic = topic.ifBlank { null },
+                                meetingLink = meetingLink.ifBlank { null }
+                            )
+                        )
+                    }
+                },
+                enabled = isValid && !isLoading,
+                colors = ButtonDefaults.buttonColors(containerColor = primaryAccent())
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Schedule")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isLoading
+            ) {
+                Text("Cancel")
+            }
+        }
+    )
+
+    // Date picker dialog
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = System.currentTimeMillis(),
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    return utcTimeMillis >= today
+                }
+            }
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                            selectedDate = sdf.format(Date(millis))
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    // Start time picker dialog
+    if (showStartTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = 9,
+            initialMinute = 0
+        )
+        TimePickerDialog(
+            onDismiss = { showStartTimePicker = false },
+            onConfirm = {
+                startTime = String.format("%02d:%02d", timePickerState.hour, timePickerState.minute)
+                showStartTimePicker = false
+            }
+        ) {
+            TimePicker(state = timePickerState)
+        }
+    }
+
+    // End time picker dialog
+    if (showEndTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = 10,
+            initialMinute = 0
+        )
+        TimePickerDialog(
+            onDismiss = { showEndTimePicker = false },
+            onConfirm = {
+                endTime = String.format("%02d:%02d", timePickerState.hour, timePickerState.minute)
+                showEndTimePicker = false
+            }
+        ) {
+            TimePicker(state = timePickerState)
+        }
+    }
+}
+
+/**
+ * Custom dialog wrapper for TimePicker.
+ */
+@Composable
+private fun TimePickerDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select Time") },
+        text = {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                content()
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

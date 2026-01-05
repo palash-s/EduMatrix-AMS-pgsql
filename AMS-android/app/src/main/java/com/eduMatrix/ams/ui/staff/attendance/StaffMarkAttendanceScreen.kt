@@ -38,11 +38,12 @@ import kotlinx.coroutines.withContext
 /**
  * Attendance marking screen for staff.
  * Allows marking present/absent for each student in a scheduled session.
+ * scheduleId can be an integer string or "extra_X" for extra sessions.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StaffMarkAttendanceScreen(
-    scheduleId: Int,
+    scheduleId: String,
     date: String,
     onBack: () -> Unit,
     onSuccess: () -> Unit

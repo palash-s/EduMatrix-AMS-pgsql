@@ -327,12 +327,14 @@ fun SessionCard(
     roomNumber: String,
     sessionType: String,
     isCompleted: Boolean = false,
+    isAdjusted: Boolean = false,
     modifier: Modifier = Modifier,
     onMarkAttendance: (() -> Unit)? = null
 ) {
-    val accentColor = when (sessionType.lowercase()) {
-        "practical", "lab" -> MitOrange
-        "tutorial" -> accentTeal()
+    val accentColor = when {
+        isAdjusted -> Color(0xFF9E9E9E) // Grey for adjusted
+        sessionType.lowercase() in listOf("practical", "lab") -> MitOrange
+        sessionType.lowercase() == "tutorial" -> accentTeal()
         else -> accentPurple()
     }
 
@@ -371,17 +373,32 @@ fun SessionCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (isCompleted) {
-                        Surface(
-                            color = StatusGreenLight,
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = "Done",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = StatusGreen,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
+                    when {
+                        isCompleted -> {
+                            Surface(
+                                color = StatusGreenLight,
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "Done",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = StatusGreen,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        isAdjusted -> {
+                            Surface(
+                                color = Color(0xFFE0E0E0),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "Adjusted",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF616161),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
                 }

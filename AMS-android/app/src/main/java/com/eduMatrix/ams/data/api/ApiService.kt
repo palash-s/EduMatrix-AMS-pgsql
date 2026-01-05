@@ -213,7 +213,7 @@ object ApiService {
             )
 
             // Parse today's schedule from widgets
-            // Backend returns: { "id", "time", "class", "subject", "day", "status", "type", "batch" }
+            // Backend returns: { "id", "time", "class", "subject", "day", "status", "type", "batch", "adjustment"? }
             val scheduleElement = widgetsJson.get("today_schedule")
             val scheduleArr = if (scheduleElement != null && scheduleElement.isJsonArray)
                 scheduleElement.asJsonArray else null
@@ -228,6 +228,35 @@ object ApiService {
                     val classParts = className.split("-")
                     val classLevel = classParts.getOrNull(0) ?: ""
                     val sectionName = classParts.getOrNull(1) ?: ""
+
+                    // Parse adjustment info if present
+                    val adjElement = s.get("adjustment")
+                    val adjustment = if (adjElement != null && adjElement.isJsonObject) {
+                        val adj = adjElement.asJsonObject
+                        val swapElement = adj.get("swap")
+                        val swap = if (swapElement != null && swapElement.isJsonObject) {
+                            val sw = swapElement.asJsonObject
+                            SwapSlotInfo(
+                                scheduleId = sw.get("schedule_id").safeInt() ?: 0,
+                                day = sw.get("day").safeString() ?: "",
+                                time = sw.get("time").safeString() ?: "",
+                                subject = sw.get("subject").safeString() ?: "",
+                                className = sw.get("class_name").safeString() ?: "",
+                                dateIso = sw.get("date_iso").safeString() ?: "",
+                                dateDisplay = sw.get("date_display").safeString() ?: ""
+                            )
+                        } else null
+                        AdjustmentInfo(
+                            id = adj.get("id").safeInt() ?: 0,
+                            status = adj.get("status").safeString() ?: "",
+                            role = adj.get("role").safeString() ?: "",
+                            kind = adj.get("kind").safeString() ?: "",
+                            partnerId = adj.get("partner_id").safeString() ?: "",
+                            partnerName = adj.get("partner_name").safeString() ?: "",
+                            partnerCode = adj.get("partner_code").safeString() ?: "",
+                            swap = swap
+                        )
+                    } else null
 
                     ScheduledClass(
                         scheduleId = s.get("id").safeInt() ?: 0,
@@ -248,7 +277,8 @@ object ApiService {
                         roomNumber = "",
                         roomType = "Classroom",
                         isCompleted = s.get("status").safeString() == "Done",
-                        sessionId = null
+                        sessionId = null,
+                        adjustment = adjustment
                     )
                 } catch (e: Exception) {
                     null  // Skip malformed entries
@@ -356,11 +386,12 @@ object ApiService {
     /**
      * Get attendance sheet for marking attendance.
      * Backend returns: { subject_name, class_name, time, date_display, is_locked, students[], subject_id }
+     * scheduleId can be an integer string or "extra_X" for extra sessions.
      */
     fun getAttendanceSheet(
         baseUrl: String,
         accessToken: String,
-        scheduleId: Int,
+        scheduleId: String,
         date: String
     ): AttendanceSheet {
         val request = Request.Builder()
@@ -410,8 +441,14 @@ object ApiService {
             )
 
             // Build schedule info
+            // Parse scheduleId - for extra sessions "extra_X" extract the number, for regular schedules parse as int
+            val parsedScheduleId = if (scheduleId.startsWith("extra_")) {
+                scheduleId.removePrefix("extra_").toIntOrNull() ?: 0
+            } else {
+                scheduleId.toIntOrNull() ?: 0
+            }
             val scheduleInfo = ScheduledClass(
-                scheduleId = scheduleId,
+                scheduleId = parsedScheduleId,
                 dayOfWeek = "",
                 startTime = startTime,
                 endTime = endTime,
@@ -2040,6 +2077,23 @@ object ApiService {
                 )
             } else null
 
+            // Parse extra sessions (upcoming extra classes)
+            val extraSessions = json.getAsJsonArray("extra_sessions")?.map { elem ->
+                val es = elem.asJsonObject
+                StudentExtraSession(
+                    id = es.get("id").safeInt() ?: 0,
+                    subject = es.get("subject").safeString() ?: "",
+                    teacher = es.get("teacher").safeString() ?: "",
+                    date = es.get("date").safeString() ?: "",
+                    dateIso = es.get("date_iso").safeString() ?: "",
+                    day = es.get("day").safeString() ?: "",
+                    time = es.get("time").safeString() ?: "",
+                    topic = es.get("topic").safeString(),
+                    meetingLink = es.get("meeting_link").safeString(),
+                    isToday = es.get("is_today").safeBool() ?: false
+                )
+            } ?: emptyList()
+
             return StudentDashboardData(
                 profile = profile,
                 stats = stats,
@@ -2050,7 +2104,8 @@ object ApiService {
                 detention = detention,
                 meeting = meeting,
                 results = results,
-                termGrant = termGrant
+                termGrant = termGrant,
+                extraSessions = extraSessions
             )
         }
     }
@@ -2516,6 +2571,156 @@ object ApiService {
                 results = results,
                 termGrant = termGrant
             )
+        }
+    }
+
+    // ========================================
+    // EXTRA SESSION APIs
+    // ========================================
+
+    /**
+     * Get extra sessions for staff (their own sessions)
+     */
+    fun getExtraSessions(baseUrl: String, accessToken: String, userId: String): List<ExtraSession> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/extra_sessions?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load extra sessions: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            return json.getAsJsonArray("extra_sessions")?.map { elem ->
+                val es = elem.asJsonObject
+                ExtraSession(
+                    id = es.get("id").safeInt() ?: 0,
+                    subjectId = es.get("subject_id").safeInt() ?: 0,
+                    subjectName = es.get("subject_name").safeString() ?: "",
+                    sectionId = es.get("section_id").safeInt() ?: 0,
+                    sectionName = es.get("section_name").safeString() ?: "",
+                    date = es.get("date").safeString() ?: "",
+                    dateDisplay = es.get("date").safeString()?.let {
+                        try {
+                            val parts = it.split("-")
+                            "${parts[2]} ${getMonthShort(parts[1].toInt())}"
+                        } catch (e: Exception) { it }
+                    } ?: "",
+                    day = "",
+                    startTime = es.get("start_time").safeString() ?: "",
+                    endTime = es.get("end_time").safeString() ?: "",
+                    time = "${es.get("start_time").safeString() ?: ""} - ${es.get("end_time").safeString() ?: ""}",
+                    topic = es.get("topic").safeString(),
+                    meetingLink = es.get("meeting_link").safeString(),
+                    status = es.get("status").safeString() ?: "Scheduled",
+                    attendanceMarked = es.get("attendance_marked").safeBool() ?: false
+                )
+            } ?: emptyList()
+        }
+    }
+
+    /**
+     * Get allocations (sections/subjects) for creating extra sessions
+     */
+    fun getExtraSessionAllocations(baseUrl: String, accessToken: String, userId: String): List<ExtraSessionAllocation> {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/extra_sessions/allocations?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load allocations: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            return json.getAsJsonArray("allocations")?.map { elem ->
+                val alloc = elem.asJsonObject
+                val subjects = alloc.getAsJsonArray("subjects")?.map { subj ->
+                    val s = subj.asJsonObject
+                    AllocationSubject(
+                        subjectId = s.get("subject_id").safeInt() ?: 0,
+                        subjectName = s.get("subject_name").safeString() ?: "",
+                        subjectCode = s.get("subject_code").safeString() ?: ""
+                    )
+                } ?: emptyList()
+
+                ExtraSessionAllocation(
+                    sectionId = alloc.get("section_id").safeInt() ?: 0,
+                    sectionName = alloc.get("section_name").safeString() ?: "",
+                    subjects = subjects
+                )
+            } ?: emptyList()
+        }
+    }
+
+    /**
+     * Create a new extra session
+     */
+    fun createExtraSession(
+        baseUrl: String,
+        accessToken: String,
+        userId: String,
+        request: ExtraSessionCreateRequest
+    ): Int {
+        val payload = JsonObject().apply {
+            addProperty("user_id", userId)
+            addProperty("subject_id", request.subjectId)
+            addProperty("section_id", request.sectionId)
+            addProperty("date", request.date)
+            addProperty("start_time", request.startTime)
+            addProperty("end_time", request.endTime)
+            request.topic?.let { addProperty("topic", it) }
+            request.meetingLink?.let { addProperty("meeting_link", it) }
+        }
+
+        val httpRequest = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/extra_sessions")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(httpRequest).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException(parseError(body), response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            return json.get("id").safeInt() ?: 0
+        }
+    }
+
+    /**
+     * Cancel an extra session
+     */
+    fun cancelExtraSession(baseUrl: String, accessToken: String, userId: String, sessionId: Int) {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/staff/extra_sessions/$sessionId?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .delete()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException(parseError(body), response.code)
+            }
+        }
+    }
+
+    private fun getMonthShort(month: Int): String {
+        return when (month) {
+            1 -> "Jan"; 2 -> "Feb"; 3 -> "Mar"; 4 -> "Apr"
+            5 -> "May"; 6 -> "Jun"; 7 -> "Jul"; 8 -> "Aug"
+            9 -> "Sep"; 10 -> "Oct"; 11 -> "Nov"; 12 -> "Dec"
+            else -> ""
         }
     }
 
