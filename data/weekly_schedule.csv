@@ -1,6 +1,6 @@
 Day,Start Time,End Time,Subject Code,Employee Code,Class Level,Section Name,Session Type,Batch,Room Number
-Monday,9:00,11:00,21BTIT701,1020022,LY,CORE,Lecture,,
-Monday,11:10,13:00,21BTIT702,1020446,LY,CORE,Lecture,,
+Monday,9:00,10:00,21BTIT701,1020022,TY,CORE,Lecture,,
+Monday,10:10,12:00,21BTIT702,1020446,TY,DA,Lab,DA1,
 Monday,14:00,15:00,21BTIT711,1020381,LY,CORE,Practical,Batch A,
 Monday,14:00,15:00,21BTIT711,1020381,LY,CORE,Practical,Batch B,
 Monday,15:00,17:00,21BTIT712,1020446,LY,CORE,Practical,Batch A,

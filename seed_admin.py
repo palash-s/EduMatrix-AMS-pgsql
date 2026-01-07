@@ -16,7 +16,7 @@ with app.app_context():
             user_id=new_uuid, 
             username=admin_email, 
             password_hash=generate_password_hash("Admin@123"), 
-            user_type="Admin", 
+            user_type="SuperAdmin", 
             is_active=True
         )
         db.session.add(admin_user)
@@ -30,6 +30,6 @@ with app.app_context():
         )
         db.session.add(admin_profile)
         db.session.commit()
-        print(f"Super Admin Created! Login: {admin_email} / Admin@123")
+        print(f"SuperAdmin Created! Login: {admin_email} / Admin@123")
     else:
         print("Admin already exists")

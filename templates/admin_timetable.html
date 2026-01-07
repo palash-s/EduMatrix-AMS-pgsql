@@ -43,6 +43,72 @@
              </div>
         </div>
 
+        <!-- VERSION MANAGER WIDGET -->
+        <div id="version-manager" class="bg-white p-6 rounded-xl shadow border border-gray-200 mb-8 hidden">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h3 class="font-bold text-lg text-gray-800 flex items-center gap-2">
+                        <i data-lucide="git-branch" class="w-5 h-5 text-purple-600"></i>
+                        Timetable Version Manager
+                    </h3>
+                    <p class="text-sm text-gray-500" id="version-status-text">Select a class to manage versions</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="cloneActiveToDraft()" id="btn-clone" class="bg-blue-600 text-white px-3 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:opacity-50 flex gap-2 items-center" disabled>
+                        <i data-lucide="copy" class="w-4 h-4"></i> Clone to Draft
+                    </button>
+                    <button onclick="publishDraft()" id="btn-publish" class="bg-green-600 text-white px-3 py-2 rounded-lg font-bold text-sm hover:bg-green-700 disabled:opacity-50 flex gap-2 items-center" disabled>
+                        <i data-lucide="upload-cloud" class="w-4 h-4"></i> Publish Draft
+                    </button>
+                </div>
+            </div>
+
+            <!-- Version Cards -->
+            <div id="version-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="text-center text-gray-400 py-8 col-span-3">
+                    <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+                    <p class="text-sm">No versions found</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- DRAFT PREVIEW MODAL -->
+        <div id="draft-preview-modal" class="fixed inset-0 z-50 hidden">
+            <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="closeDraftPreview()"></div>
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-5xl bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+                <div class="px-6 py-4 border-b bg-purple-50 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-bold text-lg text-purple-900">Schedule Preview</h3>
+                        <p class="text-sm text-purple-600" id="preview-version-label">Version 2 - Draft</p>
+                    </div>
+                    <button onclick="closeDraftPreview()" class="p-2 hover:bg-purple-100 rounded-full">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div class="flex-1 overflow-auto p-4">
+                    <div id="preview-timetable-grid" class="overflow-x-auto">
+                        <table class="w-full text-sm text-left border-collapse table-fixed">
+                            <thead class="bg-gray-50 text-gray-500 font-bold uppercase text-xs">
+                                <tr>
+                                    <th class="p-3 border w-24 text-center bg-gray-100">Time</th>
+                                    <th class="p-3 border w-1/5 text-center">Monday</th>
+                                    <th class="p-3 border w-1/5 text-center">Tuesday</th>
+                                    <th class="p-3 border w-1/5 text-center">Wednesday</th>
+                                    <th class="p-3 border w-1/5 text-center">Thursday</th>
+                                    <th class="p-3 border w-1/5 text-center">Friday</th>
+                                </tr>
+                            </thead>
+                            <tbody id="preview-timetable-body" class="divide-y divide-gray-100">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3" id="preview-actions">
+                    <button onclick="closeDraftPreview()" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100">Close</button>
+                </div>
+            </div>
+        </div>
+
         <!-- 1. COURSE STRUCTURE TABLE (Main Static View) -->
         <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden mb-8">
             <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
@@ -72,10 +138,14 @@
         
         <!-- 2. GENERATED TIMETABLE GRID (Dynamic View) -->
         <div id="timetable-grid-container" class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden hidden">
-            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
+            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
                 <h3 class="font-bold text-gray-700 flex items-center gap-2">
                     <i data-lucide="calendar" class="w-4 h-4 text-purple-600"></i> Generated Weekly Timetable
+                    <span id="timetable-version-badge" class="hidden text-xs font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700"></span>
                 </h3>
+                <button onclick="downloadTimetablePDF()" class="bg-purple-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-purple-700 flex items-center gap-2" id="print-timetable-btn">
+                    <i data-lucide="printer" class="w-4 h-4"></i> Print Timetable
+                </button>
             </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm text-left border-collapse table-fixed">
@@ -99,11 +169,18 @@
         <div id="log-console" class="mt-6 p-4 bg-gray-900 text-green-400 font-mono text-xs rounded-xl h-48 overflow-y-auto hidden shadow-inner border border-gray-700"></div>
     </div>
 
+    <!-- Hidden logo for PDF generation -->
+    <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
+
     {% include '_toast_modal.html' %}
 
     <script>
         lucide.createIcons();
-        
+
+        // --- VERSION MANAGEMENT STATE ---
+        let currentVersions = [];
+        let selectedVersionId = null;
+
         // --- TIME SLOTS CONFIG (Used for Grid Rendering) ---
         const timeSlots = [
             { start: "08:45 AM", end: "09:40 AM", label: "08:45 - 09:40" },
@@ -176,12 +253,14 @@
                 // 3. Check for existing schedule and load if found
                 const scheduleRes = await fetch(`/api/admin/get_class_schedule?section_id=${sectionId}`);
                 const scheduleData = await scheduleRes.json();
-                
+
                 if (scheduleData.schedule && scheduleData.schedule.length > 0) {
                     document.getElementById('timetable-grid-container').classList.remove('hidden');
                     renderTimetableGrid(scheduleData.schedule);
                 }
 
+                // 4. Load version manager
+                await loadVersions();
 
             } catch(e) { console.error(e); showToast("Failed to load course structure.", "error"); }
         }
@@ -226,9 +305,10 @@
 
         async function generate() {
             return showConfirm(
-                "Confirm Action",
-                "This action will DELETE and overwrite the existing schedule slots. Continue?",
+                "Generate Draft Timetable",
+                "This will create a new DRAFT schedule. You can preview and publish it from the Version Manager. Continue?",
                 async () => {
+                    const sectionId = document.getElementById('view-class').value;
                     const btn = document.querySelector('button[onclick="generate()"]');
                     btn.disabled = true; btn.innerHTML = `<i data-lucide="loader-2" class="animate-spin"></i> Processing...`;
                     const logs = document.getElementById('log-console');
@@ -236,16 +316,19 @@
                     logs.innerHTML = "> Initializing Scheduling Engine...\n";
 
                     try {
-                        const res = await fetch('/api/admin/generate_timetable', { method: 'POST' });
+                        const res = await fetch('/api/admin/generate_timetable', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ section_id: sectionId ? parseInt(sectionId) : null })
+                        });
                         const data = await res.json();
 
                         if(res.ok) {
-                            logs.innerHTML += data.logs.join('\n') + "\n> GENERATION COMPLETE.\n";
-                            showToast("Timetable Generated Successfully!");
+                            logs.innerHTML += data.logs.join('\n') + "\n> GENERATION COMPLETE (DRAFT CREATED).\n";
+                            showToast("Draft timetable generated! Use Version Manager to preview and publish.");
 
-                            // Show and load the new grid
-                            document.getElementById('timetable-grid-container').classList.remove('hidden');
-                            loadView();
+                            // Reload versions to show new draft
+                            await loadVersions();
                         } else {
                             logs.innerHTML += `\n> ERROR: ${data.error}`;
                             showToast("Generation failed", "error");
@@ -379,6 +462,563 @@
                     doc.save(`Course_Structure_${selectedClass}.pdf`);
                 },
                 "Timetable"
+            );
+        }
+
+        // Store active version info for PDF
+        let activeVersionInfo = null;
+
+        async function downloadTimetablePDF() {
+            const activeVersion = currentVersions.find(v => v.status === 'Active');
+            if (!activeVersion) {
+                showToast('No active timetable version to print', 'error');
+                return;
+            }
+
+            return showConfirm(
+                "Print Timetable",
+                "Download the active timetable as PDF?",
+                async () => {
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF('l', 'mm', 'a4'); // Landscape for timetable
+                    const selectedClass = document.getElementById('view-class').options[document.getElementById('view-class').selectedIndex].text;
+
+                    async function amsEnsureCurrentTermInfo() {
+                        if (window.__amsCurrentTermInfo) return window.__amsCurrentTermInfo;
+                        try {
+                            const res = await fetch('/api/current_term');
+                            const data = await res.json();
+                            if (res.ok) {
+                                window.__amsCurrentTermInfo = data;
+                                return data;
+                            }
+                        } catch (_) {}
+                        return null;
+                    }
+
+                    function amsGetAcademicTermLine() {
+                        const info = window.__amsCurrentTermInfo;
+                        if (info && info.academic_year && info.semester) {
+                            return `Academic Year: ${info.academic_year} | ${info.semester}`;
+                        }
+                        if (info && info.current_term) return `Academic Term: ${info.current_term}`;
+                        return '';
+                    }
+
+                    function amsDrawPdfHeader(doc, title, subLines, metaLine) {
+                        const margin = 14;
+                        const pageW = doc.internal.pageSize.getWidth();
+                        const logoImg = document.getElementById('mit-logo-img');
+
+                        let logoH = 20;
+                        let logoW = 20;
+                        if (logoImg && logoImg.naturalWidth && logoImg.naturalHeight) {
+                            logoW = logoH * (logoImg.naturalWidth / logoImg.naturalHeight);
+                        }
+                        const logoX = pageW - margin - logoW;
+                        const logoY = 10;
+
+                        const leftX = margin;
+                        const maxW = Math.max(60, logoX - leftX - 6);
+
+                        let y = 16;
+                        doc.setTextColor(0, 0, 0);
+
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(14);
+                        const uniLines = doc.splitTextToSize('MIT Art, Design and Technology University, Pune', maxW);
+                        doc.text(uniLines, leftX, y);
+                        y += uniLines.length * 6;
+
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(10);
+                        (subLines || []).forEach((line) => {
+                            const parts = doc.splitTextToSize(String(line || ''), maxW);
+                            doc.text(parts, leftX, y);
+                            y += parts.length * 5;
+                        });
+
+                        if (title) {
+                            doc.setFont('helvetica', 'bold');
+                            doc.setFontSize(11);
+                            const tLines = doc.splitTextToSize(String(title), maxW);
+                            doc.text(tLines, leftX, y);
+                            y += tLines.length * 5;
+                        }
+
+                        if (metaLine) {
+                            doc.setFont('helvetica', 'normal');
+                            doc.setFontSize(9);
+                            const mLines = doc.splitTextToSize(String(metaLine), maxW);
+                            doc.text(mLines, leftX, y);
+                            y += mLines.length * 4.5;
+                        }
+
+                        if (logoImg && logoImg.src) {
+                            doc.addImage(logoImg, 'PNG', logoX, logoY, logoW, logoH);
+                        }
+
+                        const headerBottom = Math.max(y + 2, logoY + logoH + 2);
+                        doc.setDrawColor(191, 157, 85);
+                        doc.setLineWidth(0.6);
+                        doc.line(margin, headerBottom, pageW - margin, headerBottom);
+                        return headerBottom + 6;
+                    }
+
+                    await amsEnsureCurrentTermInfo();
+                    const termLine = amsGetAcademicTermLine();
+
+                    // Format published date
+                    const publishedDate = activeVersion.published_at
+                        ? new Date(activeVersion.published_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                        : 'N/A';
+                    const versionLabel = activeVersion.version_label || `Version ${activeVersion.version_number}`;
+
+                    const metaBits = [
+                        `Class: ${selectedClass}`,
+                        `Version: ${versionLabel} (v${activeVersion.version_number})`,
+                        `Published: ${publishedDate}`,
+                        termLine
+                    ].filter(Boolean);
+
+                    const startY = amsDrawPdfHeader(
+                        doc,
+                        'Weekly Timetable',
+                        [],
+                        metaBits.join(' | ')
+                    );
+
+                    // Build timetable data for PDF
+                    const sectionId = document.getElementById('view-class').value;
+                    const scheduleRes = await fetch(`/api/admin/get_class_schedule?section_id=${sectionId}`);
+                    const scheduleData = await scheduleRes.json();
+
+                    if (!scheduleData.schedule || scheduleData.schedule.length === 0) {
+                        doc.setFontSize(12);
+                        doc.text('No schedule data available', 14, startY + 10);
+                        doc.save(`Timetable_${selectedClass}.pdf`);
+                        return;
+                    }
+
+                    // Build table data
+                    const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                    const slotTimes = [
+                        { start: "08:45 AM", end: "09:40 AM", label: "08:45 - 09:40" },
+                        { start: "09:40 AM", end: "10:35 AM", label: "09:40 - 10:35" },
+                        { start: "10:50 AM", end: "11:45 AM", label: "10:50 - 11:45" },
+                        { start: "11:45 AM", end: "12:40 PM", label: "11:45 - 12:40" },
+                        { start: "01:40 PM", end: "02:35 PM", label: "01:40 - 02:35" },
+                        { start: "02:35 PM", end: "03:30 PM", label: "02:35 - 03:30" },
+                        { start: "03:45 PM", end: "04:40 PM", label: "03:45 - 04:40" },
+                        { start: "04:40 PM", end: "05:35 PM", label: "04:40 - 05:35" }
+                    ];
+
+                    // Create a lookup map for schedule slots
+                    const slotMap = {};
+                    scheduleData.schedule.forEach(slot => {
+                        const key = `${slot.day}-${slot.start_time}`;
+                        if (!slotMap[key]) slotMap[key] = [];
+                        slotMap[key].push(slot);
+                    });
+
+                    // Build table rows
+                    const tableHead = [['Time', ...daysOrder]];
+                    const tableBody = slotTimes.map(timeSlot => {
+                        const row = [timeSlot.label];
+                        daysOrder.forEach(day => {
+                            const key = `${day}-${timeSlot.start}`;
+                            const slots = slotMap[key] || [];
+                            if (slots.length === 0) {
+                                row.push('-');
+                            } else {
+                                const cellContent = slots.map(s => {
+                                    let text = `${s.subject}\n${s.teacher}`;
+                                    if (s.batch) text += `\n[${s.batch}]`;
+                                    return text;
+                                }).join('\n---\n');
+                                row.push(cellContent);
+                            }
+                        });
+                        return row;
+                    });
+
+                    doc.autoTable({
+                        head: tableHead,
+                        body: tableBody,
+                        startY,
+                        theme: 'grid',
+                        headStyles: { fillColor: [72, 22, 109], textColor: 255, fontSize: 8, fontStyle: 'bold', halign: 'center' },
+                        styles: { fontSize: 7, cellPadding: 2, halign: 'center', valign: 'middle', overflow: 'linebreak' },
+                        columnStyles: {
+                            0: { cellWidth: 25, fontStyle: 'bold', fillColor: [248, 250, 252] }
+                        },
+                        alternateRowStyles: { fillColor: [250, 250, 255] },
+                        margin: { left: 14, right: 14 }
+                    });
+
+                    // Add footer with generation timestamp
+                    const pageH = doc.internal.pageSize.getHeight();
+                    doc.setFontSize(7);
+                    doc.setTextColor(128, 128, 128);
+                    doc.text(`Generated on: ${new Date().toLocaleString('en-IN')}`, 14, pageH - 10);
+                    doc.text(`EduMatrix AMS - Timetable Management System`, doc.internal.pageSize.getWidth() - 14, pageH - 10, { align: 'right' });
+
+                    doc.save(`Timetable_${selectedClass}_v${activeVersion.version_number}.pdf`);
+                    showToast('Timetable PDF downloaded successfully');
+                },
+                "Timetable"
+            );
+        }
+
+        // ==========================================
+        // VERSION MANAGEMENT FUNCTIONS
+        // ==========================================
+
+        async function loadVersions() {
+            const sectionId = document.getElementById('view-class').value;
+            const versionManager = document.getElementById('version-manager');
+            const versionBadge = document.getElementById('timetable-version-badge');
+
+            if (!sectionId) {
+                versionManager.classList.add('hidden');
+                if (versionBadge) versionBadge.classList.add('hidden');
+                return;
+            }
+
+            versionManager.classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/admin/timetable_versions?section_id=${sectionId}`);
+                const data = await res.json();
+                currentVersions = data.versions || [];
+
+                renderVersionCards(data);
+                updateVersionButtons(data);
+                updateTimetableVersionBadge(data);
+                lucide.createIcons();
+            } catch (e) {
+                console.error('Failed to load versions:', e);
+                showToast('Failed to load versions', 'error');
+            }
+        }
+
+        function updateTimetableVersionBadge(data) {
+            const badge = document.getElementById('timetable-version-badge');
+            if (!badge) return;
+
+            const activeVersion = (data.versions || []).find(v => v.status === 'Active');
+            if (activeVersion) {
+                const publishedDate = activeVersion.published_at
+                    ? new Date(activeVersion.published_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+                    : '';
+                badge.textContent = `v${activeVersion.version_number}${publishedDate ? ` (${publishedDate})` : ''}`;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function renderVersionCards(data) {
+            const container = document.getElementById('version-cards');
+
+            if (!data.versions || data.versions.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-gray-400 py-8 col-span-3">
+                        <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+                        <p class="text-sm">No timetable versions yet. Upload CSV or Auto-Generate to create a draft.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Sort: Draft first, then Active, then Archived (by date desc)
+            const sorted = [...data.versions].sort((a, b) => {
+                const order = { 'Draft': 0, 'Active': 1, 'Archived': 2 };
+                return order[a.status] - order[b.status];
+            });
+
+            container.innerHTML = sorted.map(v => {
+                const statusColors = {
+                    'Draft': 'bg-yellow-50 border-yellow-200 text-yellow-800',
+                    'Active': 'bg-green-50 border-green-200 text-green-800',
+                    'Archived': 'bg-gray-50 border-gray-200 text-gray-600'
+                };
+                const statusIcons = {
+                    'Draft': 'edit-3',
+                    'Active': 'check-circle',
+                    'Archived': 'archive'
+                };
+
+                return `
+                    <div class="border ${statusColors[v.status]} rounded-xl p-4 relative ${v.status === 'Draft' ? 'ring-2 ring-yellow-300' : ''}">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <span class="text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                                    <i data-lucide="${statusIcons[v.status]}" class="w-3 h-3"></i>
+                                    ${v.status}
+                                </span>
+                                <h4 class="font-bold text-gray-800 mt-1">Version ${v.version_number}</h4>
+                            </div>
+                            <span class="text-xs font-mono bg-white/50 px-2 py-1 rounded">${v.slot_count} slots</span>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-2">${v.version_label || 'No label'}</p>
+                        <p class="text-xs text-gray-500 mb-3">
+                            ${v.source_type === 'csv_upload' ? 'CSV Upload' : v.source_type === 'auto_generate' ? 'Auto-Generated' : v.source_type === 'clone' ? 'Cloned' : v.source_type === 'migration' ? 'Legacy' : 'Manual'}
+                            ${v.created_at ? ' • ' + new Date(v.created_at).toLocaleDateString() : ''}
+                        </p>
+                        <div class="flex gap-2">
+                            <button onclick="previewVersion(${v.version_id}, '${v.status}')" class="flex-1 text-xs px-3 py-1.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 font-bold">
+                                <i data-lucide="eye" class="w-3 h-3 inline mr-1"></i> Preview
+                            </button>
+                            ${v.status === 'Draft' ? `
+                                <button onclick="deleteDraftVersion(${v.version_id})" class="text-xs px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 rounded-lg hover:bg-red-100 font-bold">
+                                    <i data-lucide="trash-2" class="w-3 h-3 inline"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateVersionButtons(data) {
+            const btnClone = document.getElementById('btn-clone');
+            const btnPublish = document.getElementById('btn-publish');
+
+            btnClone.disabled = !data.has_active || data.has_draft;
+            btnPublish.disabled = !data.has_draft;
+
+            const statusText = document.getElementById('version-status-text');
+            if (data.has_draft) {
+                statusText.innerText = 'Draft available for preview and publishing';
+            } else if (data.has_active) {
+                statusText.innerText = 'Active version in use. Clone to create a new draft.';
+            } else {
+                statusText.innerText = 'No versions found. Upload or generate to create one.';
+            }
+        }
+
+        async function cloneActiveToDraft() {
+            const sectionId = document.getElementById('view-class').value;
+
+            return showPrompt(
+                "Clone Active Version",
+                "Enter a label for the new draft version:",
+                async (label) => {
+                    try {
+                        const res = await fetch('/api/admin/timetable_versions/clone', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ section_id: parseInt(sectionId), label: label || `Adjustment ${new Date().toLocaleDateString()}` })
+                        });
+
+                        if (res.ok) {
+                            showToast('Draft created successfully');
+                            loadVersions();
+                        } else {
+                            const data = await res.json();
+                            showToast(data.error || 'Failed to clone', 'error');
+                        }
+                    } catch (e) {
+                        showToast('Network error', 'error');
+                    }
+                },
+                "Version Manager",
+                `Adjustment ${new Date().toLocaleDateString()}`
+            );
+        }
+
+        async function previewVersion(versionId, status) {
+            selectedVersionId = versionId;
+
+            try {
+                const res = await fetch(`/api/admin/timetable_versions/${versionId}`);
+                const data = await res.json();
+
+                document.getElementById('preview-version-label').innerText =
+                    `Version ${data.version.version_number} - ${data.version.status}`;
+
+                renderPreviewGrid(data.schedule);
+
+                // Show/hide action buttons based on status
+                const actionsDiv = document.getElementById('preview-actions');
+                if (status === 'Draft') {
+                    actionsDiv.innerHTML = `
+                        <button onclick="closeDraftPreview()" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100">Cancel</button>
+                        <button onclick="deleteDraftFromPreview()" class="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold text-sm hover:bg-red-200 flex items-center gap-2">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i> Delete Draft
+                        </button>
+                        <button onclick="publishFromPreview()" class="px-4 py-2 bg-green-600 text-white rounded-lg font-bold text-sm hover:bg-green-700 flex items-center gap-2">
+                            <i data-lucide="check-circle" class="w-4 h-4"></i> Publish & Activate
+                        </button>
+                    `;
+                } else {
+                    actionsDiv.innerHTML = `
+                        <button onclick="closeDraftPreview()" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100">Close</button>
+                    `;
+                }
+                lucide.createIcons();
+
+                document.getElementById('draft-preview-modal').classList.remove('hidden');
+            } catch (e) {
+                showToast('Failed to load preview', 'error');
+            }
+        }
+
+        function renderPreviewGrid(schedule) {
+            const tbody = document.getElementById('preview-timetable-body');
+            tbody.innerHTML = timeSlots.map(slot => {
+                if (slot.type === 'break') return `<tr><td colspan="6" class="break-row">${slot.label}</td></tr>`;
+                const cells = days.map(day => `<td class="p-1 border align-top h-20 relative bg-white" id="preview-${day}-${slot.start}"></td>`).join('');
+                return `<tr><td class="p-2 border-r font-mono text-xs font-bold text-gray-500 bg-gray-50 text-center align-middle">${slot.label}</td>${cells}</tr>`;
+            }).join('');
+
+            schedule.forEach(slot => {
+                const cellId = `preview-${slot.day}-${slot.start_time}`;
+                const cell = document.getElementById(cellId);
+
+                if (cell) {
+                    let bgColor = "bg-blue-50 border-blue-200 text-blue-800";
+                    if (slot.type === 'Practical') {
+                        bgColor = "bg-green-50 border-green-200 text-green-800";
+                    } else if (slot.type === 'Tutorial') {
+                        bgColor = "bg-amber-50 border-amber-200 text-amber-800";
+                    }
+
+                    const batchBadge = slot.batch ? `<span class="text-[8px] font-bold uppercase bg-white/80 px-1 rounded">${slot.batch}</span>` : '';
+
+                    const cardHTML = `
+                    <div class="p-1.5 rounded border ${bgColor} mb-1 text-[10px]">
+                        <div class="font-bold truncate">${slot.subject}</div>
+                        <div class="opacity-70 truncate">${slot.teacher}</div>
+                        <div class="flex justify-between mt-1">
+                            <span class="font-mono opacity-60">${slot.code}</span>
+                            ${batchBadge}
+                        </div>
+                    </div>`;
+
+                    cell.innerHTML += cardHTML;
+                }
+            });
+        }
+
+        function closeDraftPreview() {
+            document.getElementById('draft-preview-modal').classList.add('hidden');
+            selectedVersionId = null;
+        }
+
+        async function publishDraft() {
+            const draft = currentVersions.find(v => v.status === 'Draft');
+            if (!draft) return;
+
+            return showConfirm(
+                "Publish Timetable",
+                "This will activate the draft and archive the current active version. Students and staff will be notified. Continue?",
+                async () => {
+                    try {
+                        const res = await fetch('/api/admin/timetable_versions/publish', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ version_id: draft.version_id })
+                        });
+
+                        if (res.ok) {
+                            showToast('Timetable published successfully!');
+                            loadVersions();
+                            loadView(); // Refresh main grid
+                        } else {
+                            const data = await res.json();
+                            showToast(data.error || 'Publish failed', 'error');
+                        }
+                    } catch (e) {
+                        showToast('Network error', 'error');
+                    }
+                },
+                "Version Manager"
+            );
+        }
+
+        async function publishFromPreview() {
+            if (!selectedVersionId) return;
+
+            return showConfirm(
+                "Publish Timetable",
+                "This will activate the draft and archive the current active version. Students and staff will be notified. Continue?",
+                async () => {
+                    try {
+                        const res = await fetch('/api/admin/timetable_versions/publish', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ version_id: selectedVersionId })
+                        });
+
+                        if (res.ok) {
+                            showToast('Timetable published successfully!');
+                            closeDraftPreview();
+                            loadVersions();
+                            loadView();
+                        } else {
+                            const data = await res.json();
+                            showToast(data.error || 'Publish failed', 'error');
+                        }
+                    } catch (e) {
+                        showToast('Network error', 'error');
+                    }
+                },
+                "Version Manager"
+            );
+        }
+
+        async function deleteDraftVersion(versionId) {
+            return showConfirm(
+                "Delete Draft",
+                "Are you sure you want to delete this draft version? This cannot be undone.",
+                async () => {
+                    try {
+                        const res = await fetch(`/api/admin/timetable_versions/${versionId}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (res.ok) {
+                            showToast('Draft deleted');
+                            loadVersions();
+                        } else {
+                            const data = await res.json();
+                            showToast(data.error || 'Delete failed', 'error');
+                        }
+                    } catch (e) {
+                        showToast('Network error', 'error');
+                    }
+                },
+                "Version Manager"
+            );
+        }
+
+        async function deleteDraftFromPreview() {
+            if (!selectedVersionId) return;
+
+            return showConfirm(
+                "Delete Draft",
+                "Are you sure you want to delete this draft version? This cannot be undone.",
+                async () => {
+                    try {
+                        const res = await fetch(`/api/admin/timetable_versions/${selectedVersionId}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (res.ok) {
+                            showToast('Draft deleted');
+                            closeDraftPreview();
+                            loadVersions();
+                        } else {
+                            const data = await res.json();
+                            showToast(data.error || 'Delete failed', 'error');
+                        }
+                    } catch (e) {
+                        showToast('Network error', 'error');
+                    }
+                },
+                "Version Manager"
             );
         }
     </script>

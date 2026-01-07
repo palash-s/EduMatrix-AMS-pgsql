@@ -1,9 +1,9 @@
-Section Name,Class Level
-DA,LY
-CORE,LY
-SMAD,LY
-DA,TY
-CORE,TY
-SMAD,TY
-DA,SY
-SMAD,SY
+specialization code,Section Name,Class Level
+DA,DA,LY
+CORE,CORE,LY
+SMAD,SMAD,LY
+DA,DA,TY
+CORE,CORE,TY
+SMAD,SMAD,TY
+DA,DA,SY
+SMAD,SMAD,SY

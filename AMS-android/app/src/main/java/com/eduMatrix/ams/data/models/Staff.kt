@@ -150,7 +150,7 @@ data class TopicForSelection(
 data class AttendanceSubmission(
     val scheduleId: String,  // Can be integer or "extra_X" for extra sessions
     val conductedDate: String,
-    val topicId: Int?,
+    val topicIds: List<Int>? = null,  // Multi-select topics (max 3)
     val attendance: List<StudentAttendanceRecord>
 )
 

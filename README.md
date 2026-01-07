@@ -26,7 +26,32 @@ EduMatrix AMS is a comprehensive Academic Management System that digitizes the e
 - **6,500+ Students**
 - **2,000+ Parents**
 - **250+ Faculty Members**
-- **Multi-department Support**
+- **Multi-department Support with Data Isolation**
+
+---
+
+## 🆕 Recent Updates (January 2026)
+
+### Department-Wise Data Isolation
+- **SuperAdmin Role**: New top-level administrator who can onboard departments via hierarchy CSV
+- **Department Admins**: Scoped access to only their department's data (students, staff, classes, events, activity logs)
+- **Flexible Department Matching**: Supports abbreviations in uploads (IT → Information Technology, CSE → Computer Science)
+
+### New Modules & Endpoints
+| Module | Description |
+|--------|-------------|
+| **Feedback System** | Student-to-faculty anonymous feedback with cycle management |
+| **System Config** | Academic term management and semester rollover |
+| **HOD Analytics** | Feedback analysis and syllabus status tracking |
+| **Lesson Planning** | Teaching plan creation with syllabus uploads |
+| **Term Grant** | Automated promotion eligibility calculation |
+| **Admin Events** | Full CRUD for event management with coordinator assignment |
+| **Activity Logging** | Department-scoped audit logs with IST timestamps |
+
+### Security Improvements
+- Alphanumeric password generation for better compatibility
+- Copy-to-clipboard functionality for password resets
+- Department-scoped activity logging
 
 ---
 
@@ -99,11 +124,29 @@ EduMatrix AMS is a comprehensive Academic Management System that digitizes the e
 
 ### 2. 🏛️ Admin Console
 
+#### SuperAdmin & Department Hierarchy
+| Role | Access Level | Description |
+|------|-------------|-------------|
+| **SuperAdmin** | Global | Can onboard departments, create department admins |
+| **Department Admin** | Scoped | Only sees/manages their department's data |
+
+**Hierarchy Onboarding via CSV:**
+```
+Department Name,Specialization,HOD Name,HOD Email,HOD Employee Code
+Information Technology,Core,Dr. Sharma,sharma@edu.in,EMP001
+Computer Science,Core,Dr. Patel,patel@edu.in,EMP002
+```
+
+**Department Isolation Features:**
+- Activity logs filtered by department
+- Upload routes scoped to admin's department
+- Flexible name matching (IT → Information Technology)
+
 #### Dashboard Analytics
 - Real-time student/staff counts
 - Attendance rate monitoring
 - Student distribution charts (by year/department)
-- System activity log
+- System activity log (department-scoped for admins)
 
 #### User Management
 | Feature | Endpoint | Description |
@@ -117,6 +160,7 @@ EduMatrix AMS is a comprehensive Academic Management System that digitizes the e
 #### Bulk Data Uploads
 | Upload Type | Template Available | Description |
 |-------------|-------------------|-------------|
+| Hierarchy CSV | ✅ | Department onboarding (SuperAdmin only) |
 | Departments & Subjects | ✅ | Master data with L-T-P credits |
 | Class Sections | ✅ | Year-wise sections (FY-A, SY-B, etc.) |
 | Staff Master | ✅ | Faculty with departments |
@@ -283,6 +327,11 @@ Semester-based window system for B.Tech 8-semester workflows:
 - Participant management
 - Attendance tracking
 
+**Admin Event APIs:**
+- `GET /api/admin/events` - List all events with coordinators
+- `POST /api/admin/save_event` - Create/update event
+- `POST /api/admin/delete_event` - Delete event
+
 ---
 
 ### 9. 📊 Governance Dashboards
@@ -318,6 +367,14 @@ Semester-based window system for B.Tech 8-semester workflows:
 - `FeedbackResponse` - Individual ratings
 - `StudentFeedbackStatus` - Tracks completion (anonymized)
 
+**Feedback APIs:**
+- `GET /api/feedback/active_cycle` - Get current active cycle
+- `GET /api/feedback/questions` - Get question bank
+- `GET /api/feedback/pending_list` - Student's pending feedback
+- `POST /api/feedback/submit` - Submit feedback (anonymous)
+- `POST /api/admin/create_feedback_cycle` - Create new cycle
+- `GET /api/admin/feedback_status` - Submission stats by class
+
 ---
 
 ### 11. 📅 Term Grant & Promotions
@@ -332,6 +389,11 @@ Semester-based window system for B.Tech 8-semester workflows:
 - ✅ **Granted** - Meets all criteria
 - ⚠️ **Provisional** - Conditional promotion
 - ❌ **Detained** - Must repeat
+
+**Term Grant APIs:**
+- `POST /api/amc/generate_term_grant` - Generate eligibility records
+- `GET /api/amc/term_grant_list` - Get term grant list by section
+- `POST /api/amc/update_grant_status` - Update individual status
 
 ---
 

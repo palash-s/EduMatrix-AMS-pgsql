@@ -4,6 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 
 from sqlalchemy import MetaData
 from sqlalchemy.engine.url import URL
+from sqlalchemy.orm import deferred
 
 convention = {
     "ix": 'ix_%(column_0_label)s',
@@ -64,6 +65,10 @@ class UserMaster(db.Model):
     # Security: Force password change on first login for bulk-uploaded accounts
     must_change_password = db.Column(db.Boolean, default=False)
 
+    # First-login onboarding (SuperAdmin): redirect to hierarchy setup until completed.
+    # Deferred so older DBs (without the column yet) won't crash on SELECT.
+    onboarding_completed = deferred(db.Column(db.Boolean, default=False))
+
 # ==========================================
 # 2. PROFILES
 # ==========================================
@@ -77,6 +82,9 @@ class StaffProfile(db.Model):
     email_contact = db.Column(db.String(100))
     primary_department_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'))
 
+    # Legacy/Admin scope (exists in initial migration)
+    admin_access_dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=True)
+
     # Designation
     designation = db.Column(db.String(50))
     
@@ -89,10 +97,50 @@ class StaffProfile(db.Model):
 class Department(db.Model):
     __tablename__ = 'department'
     dept_id = db.Column(db.Integer, primary_key=True)
+    # Legacy: Department belongs to a School (initial schema)
+    school_id = db.Column(db.Integer, db.ForeignKey('school.id'), nullable=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
+    # NEW (Hierarchy Overlay): optional link to Program
+    program_id = db.Column(db.Integer, db.ForeignKey('program.id'), nullable=True)
+
+    # NEW (Hierarchy Overlay): admin for this department
+    dept_admin_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
     
     # --- FIX: usage of use_alter=True handles the circular dependency ---
     hod_staff_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id', use_alter=True), nullable=True)
+
+
+# ==========================================
+# 3A. ACADEMIC HIERARCHY (NEW - OVERLAY)
+# ==========================================
+class School(db.Model):
+    __tablename__ = 'school'
+    id = db.Column(db.Integer, primary_key=True)
+    # Keep consistent with initial migration (length 255, no enforced unique here)
+    name = db.Column(db.String(255), nullable=False)
+
+
+class Program(db.Model):
+    __tablename__ = 'program'
+    id = db.Column(db.Integer, primary_key=True)
+    # Legacy (initial schema)
+    dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    level = db.Column(db.String(50), nullable=False)
+    # NEW (Hierarchy Overlay): Program belongs to a School
+    school_id = db.Column(db.Integer, db.ForeignKey('school.id'), nullable=True)
+
+
+class Specialization(db.Model):
+    __tablename__ = 'specialization'
+    # Legacy (initial schema)
+    id = db.Column(db.Integer, primary_key=True)
+    program_id = db.Column(db.Integer, db.ForeignKey('program.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    code = db.Column(db.String(50), nullable=False)
+    # NEW (Hierarchy Overlay): Specialization belongs to a Department
+    dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=True)
+    hod_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
 
 # class Department(db.Model):
 #     __tablename__ = 'department'
@@ -145,6 +193,8 @@ class ClassSection(db.Model):
     section_id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(20), nullable=False)
     class_level = db.Column(db.String(50), nullable=False)
+    # NEW (Hierarchy Overlay): optional link to Specialization
+    spec_id = db.Column(db.Integer, db.ForeignKey('specialization.id'), nullable=True)
     class_teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
 
 class SubjectAllocation(db.Model):
@@ -171,6 +221,38 @@ class StudentElective(db.Model):
     window_id = db.Column(db.Integer, db.ForeignKey('elective_window.id'), nullable=True)
     status = db.Column(db.String(20), default='Pending') # 'Pending', 'Approved', 'Rejected'
 
+class TimetableVersion(db.Model):
+    """Versioning for timetable/schedule - allows Draft vs Active vs Archived per section"""
+    __tablename__ = 'timetable_version'
+    version_id = db.Column(db.Integer, primary_key=True)
+    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=False)
+
+    # Version identification
+    version_number = db.Column(db.Integer, nullable=False, default=1)
+    version_label = db.Column(db.String(50))  # e.g., "2025-26 Sem1 Initial", "Mid-Term Adjustment"
+
+    # Status: 'Draft', 'Active', 'Archived'
+    status = db.Column(db.String(20), nullable=False, default='Draft')
+
+    # Metadata
+    created_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    published_at = db.Column(db.DateTime, nullable=True)  # When Draft -> Active
+    archived_at = db.Column(db.DateTime, nullable=True)   # When Active -> Archived
+
+    # Source tracking (for audit)
+    source_type = db.Column(db.String(20))  # 'csv_upload', 'auto_generate', 'clone', 'manual', 'migration'
+    cloned_from_version_id = db.Column(db.Integer, db.ForeignKey('timetable_version.version_id'), nullable=True)
+
+    # Notes
+    notes = db.Column(db.Text, nullable=True)
+
+    # Index for efficient lookups
+    __table_args__ = (
+        db.Index('ix_timetable_version_section_status', 'section_id', 'status'),
+    )
+
+
 class WeeklySchedule(db.Model):
     __tablename__ = 'weekly_schedule'
     schedule_id = db.Column(db.Integer, primary_key=True)
@@ -183,6 +265,9 @@ class WeeklySchedule(db.Model):
     session_type = db.Column(db.String(20), default='Lecture') # Lecture, Practical, Tutorial
     target_batch = db.Column(db.String(20), nullable=True)
     room_id = db.Column(db.Integer, db.ForeignKey('room_master.room_id'), nullable=True)
+
+    # Link to timetable version (nullable for migration compatibility)
+    version_id = db.Column(db.Integer, db.ForeignKey('timetable_version.version_id'), nullable=True, index=True)
 
 # ==========================================
 # 4. MENTOR MANAGEMENT (NEW)
@@ -219,28 +304,10 @@ class EventParticipation(db.Model):
 # ==========================================
 # 6. OPERATIONS
 # ==========================================
-
-# Extra Session - One-time classes scheduled outside regular timetable
-class ExtraSession(db.Model):
-    __tablename__ = 'extra_session'
-    id = db.Column(db.Integer, primary_key=True)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=False)
-    teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=False)
-    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=False)
-    date = db.Column(db.Date, nullable=False)
-    start_time = db.Column(db.Time, nullable=False)
-    end_time = db.Column(db.Time, nullable=False)
-    topic = db.Column(db.String(255), nullable=True)
-    meeting_link = db.Column(db.String(500), nullable=True)
-    status = db.Column(db.String(20), default='Scheduled')  # Scheduled, Conducted, Cancelled
-    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
-
 class SessionLog(db.Model):
     __tablename__ = 'session_log'
     session_id = db.Column(db.Integer, primary_key=True)
-    # Either schedule_id OR extra_session_id must be set (one of them)
-    schedule_id = db.Column(db.Integer, db.ForeignKey('weekly_schedule.schedule_id'), nullable=True)
-    extra_session_id = db.Column(db.Integer, db.ForeignKey('extra_session.id'), nullable=True)
+    schedule_id = db.Column(db.Integer, db.ForeignKey('weekly_schedule.schedule_id'), nullable=False)
     session_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(20), default='Conducted')
     actual_teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
@@ -289,6 +356,8 @@ class SystemLog(db.Model):
     action_type = db.Column(db.String(50), nullable=False)
     description = db.Column(db.String(255), nullable=False)
     performed_by = db.Column(db.String(100))
+    # Department scope for filtering (NULL = global/SuperAdmin action)
+    dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=True)
 
 
 # ==========================================
@@ -616,3 +685,32 @@ class ArchivedSchedule(db.Model):
     time_slot = db.Column(db.String(50))
     subject = db.Column(db.String(100))
     teacher = db.Column(db.String(100))
+
+
+# ==========================================
+# 15. EXTRA SESSIONS (ONE-TIME CLASSES)
+# ==========================================
+class ExtraSession(db.Model):
+    """Extra session - one-time class scheduled outside regular timetable"""
+    __tablename__ = 'extra_session'
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Link to subject and section
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=False)
+    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=False)
+    teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=False)
+
+    # Schedule
+    date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+
+    # Optional details
+    topic = db.Column(db.String(255), nullable=True)
+    meeting_link = db.Column(db.String(255), nullable=True)
+
+    # Status: Scheduled, Completed, Cancelled
+    status = db.Column(db.String(20), default='Scheduled')
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())

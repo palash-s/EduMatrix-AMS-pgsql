@@ -29,7 +29,7 @@
                         window.location.replace('/change-password');
                         return;
                     }
-                    const paths = { 'Staff': '/staff/dashboard', 'Student': '/student/dashboard', 'Admin': '/admin/dashboard', 'Parent': '/parent/dashboard' };
+                    const paths = { 'Staff': '/staff/dashboard', 'Student': '/student/dashboard', 'Admin': '/admin/dashboard', 'SuperAdmin': '/superadmin/dashboard', 'Parent': '/parent/dashboard' };
                     if (data.role && paths[data.role]) {
                         window.location.replace(paths[data.role]);
                     }

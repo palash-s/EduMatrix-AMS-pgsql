@@ -153,8 +153,49 @@
         lucide.createIcons();
         let facultyData = [];
         let sidebarVisible = false; // For mobile
+        let meInfo = null;
 
-        document.addEventListener('DOMContentLoaded', loadFaculty);
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadMe();
+            applyDeptScopeToAddModal();
+            await loadFaculty();
+        });
+
+        async function loadMe() {
+            try {
+                const res = await fetch('/api/me');
+                if (!res.ok) return;
+                meInfo = await res.json();
+            } catch (e) {
+                meInfo = null;
+            }
+        }
+
+        function applyDeptScopeToAddModal() {
+            const deptSelect = document.getElementById('new-dept');
+            if (!deptSelect) return;
+
+            const isSuper = Boolean(meInfo && meInfo.is_super_admin);
+            const deptName = meInfo && meInfo.admin_dept_name;
+
+            // Department Admin: lock to their department (backend enforces too).
+            if (!isSuper && deptName) {
+                deptSelect.innerHTML = `<option value="${escapeHtml(deptName)}">${escapeHtml(deptName)}</option>`;
+                deptSelect.value = deptName;
+                deptSelect.disabled = true;
+                deptSelect.classList.add('bg-gray-100', 'text-gray-500', 'cursor-not-allowed');
+                deptSelect.classList.remove('bg-white');
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
 
         async function loadFaculty() {
             try {
@@ -275,7 +316,10 @@
                }, "Faculty Directory");
            }
 
-        function openAddModal() { document.getElementById('add-modal').classList.remove('hidden'); }
+        function openAddModal() {
+            applyDeptScopeToAddModal();
+            document.getElementById('add-modal').classList.remove('hidden');
+        }
 
         // --- SIDEBAR TOGGLE ---
         function toggleSidebar() {

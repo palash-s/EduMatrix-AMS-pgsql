@@ -56,7 +56,7 @@
             <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
                 <div class="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center mb-4 text-blue-700"><i data-lucide="layout-grid" class="w-5 h-5"></i></div>
                 <h3 class="font-bold text-gray-900">1. Class Sections</h3>
-                <p class="text-xs text-gray-400 mt-1 mb-4">Physical divisions (e.g. SY-A).</p>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Section Name should be specialization code (e.g. DA, CORE). Batches (DA1/DA2) are created later in Mentor allocation.</p>
                 <a href="/api/admin/import_templates/master_class" class="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-blue-900 mb-3">
                     <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
                 </a>
@@ -84,7 +84,7 @@
             <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
                 <div class="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center mb-4 text-green-700"><i data-lucide="users" class="w-5 h-5"></i></div>
                 <h3 class="font-bold text-gray-900">3. Students</h3>
-                <p class="text-xs text-gray-400 mt-1 mb-4">Creates Student & Parent logins.</p>
+                <p class="text-xs text-gray-400 mt-1 mb-4">Creates Student & Parent logins. Section Name must match Class Sections (use DA/CORE, not DA1/DA2).</p>
                 <a href="/api/admin/import_templates/students" class="inline-flex items-center gap-1 text-[11px] font-bold text-green-700 hover:text-green-900 mb-3">
                     <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
                 </a>
@@ -142,7 +142,7 @@
             <div class="bg-white p-6 rounded-xl border-2 border-dashed border-purple-200 hover:border-purple-400 transition-colors shadow-sm">
                 <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mb-4 text-purple-800"><i data-lucide="book-open-check" class="w-5 h-5"></i></div>
                 <h3 class="font-bold text-gray-900">6. Faculty Subject Allocation</h3>
-                <p class="text-xs text-gray-400 mt-1 mb-2">Assign faculty to subjects (requires structure first). Required: Course Code, Section, Class Level, SEM.</p>
+                <p class="text-xs text-gray-400 mt-1 mb-2">Assign faculty to subjects (requires structure first). Section = specialization code (DA/CORE). Required: Course Code, Section, Class Level, SEM.</p>
                 <a href="/api/admin/import_templates/subject_allocation" class="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 hover:text-purple-900 mb-3">
                     <i data-lucide="download" class="w-3 h-3"></i> Download CSV template
                 </a>
@@ -218,7 +218,16 @@
         //     input.value = ""; 
         // }
 
-        function showStatus(success, msg, errors=[]) {
+        function escapeHtml(value) {
+            return String(value)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        function showStatus(success, msg, errors = [], details = []) {
             const modal = document.getElementById('status-modal');
             const icon = document.getElementById('status-icon');
             const title = document.getElementById('status-title');
@@ -234,10 +243,41 @@
                 
                 // Show errors if partial success
                 if (errors && errors.length > 0) {
-                    let errorHtml = `<div class="mt-4 text-left max-h-48 overflow-y-auto bg-red-50 p-3 rounded text-xs text-red-600 border border-red-100 space-y-1">`;
-                    errors.forEach(e => errorHtml += `<p>• ${e}</p>`);
-                    errorHtml += `</div>`;
-                    text.innerHTML = `<strong>${msg}</strong>` + errorHtml;
+                    // If backend sends structured row errors (objects), render a table.
+                    const isObjectErrors = errors.some(e => e && typeof e === 'object');
+                    if (isObjectErrors) {
+                        let rows = '';
+                        errors.forEach(e => {
+                            rows += `
+                                <tr class="border-t border-gray-100">
+                                    <td class="px-3 py-2 font-mono text-[11px] text-gray-700">${escapeHtml(e.admission_number ?? '')}</td>
+                                    <td class="px-3 py-2 text-[11px] text-gray-700">${escapeHtml(e.class_level ?? '')}</td>
+                                    <td class="px-3 py-2 text-[11px] text-gray-700">${escapeHtml(e.section ?? e.section_name ?? '')}</td>
+                                    <td class="px-3 py-2 text-[11px] text-red-700">${escapeHtml(e.error ?? JSON.stringify(e))}</td>
+                                </tr>`;
+                        });
+
+                        text.innerHTML = `
+                            <div class="text-sm text-gray-700"><strong>${escapeHtml(msg)}</strong></div>
+                            <div class="mt-4 max-h-56 overflow-auto border border-gray-200 rounded-lg">
+                                <table class="min-w-full text-left">
+                                    <thead class="bg-gray-50 text-[11px] uppercase text-gray-500">
+                                        <tr>
+                                            <th class="px-3 py-2 font-bold">Admission</th>
+                                            <th class="px-3 py-2 font-bold">Class</th>
+                                            <th class="px-3 py-2 font-bold">Section</th>
+                                            <th class="px-3 py-2 font-bold">Issue</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white">${rows}</tbody>
+                                </table>
+                            </div>`;
+                    } else {
+                        let errorHtml = `<div class="mt-4 text-left max-h-48 overflow-y-auto bg-red-50 p-3 rounded text-xs text-red-600 border border-red-100 space-y-1">`;
+                        errors.forEach(e => errorHtml += `<p>• ${escapeHtml(e)}</p>`);
+                        errorHtml += `</div>`;
+                        text.innerHTML = `<strong>${escapeHtml(msg)}</strong>` + errorHtml;
+                    }
                 } else {
                     text.innerText = msg;
                 }
@@ -246,7 +286,40 @@
                 icon.innerHTML = '<i data-lucide="x" class="w-6 h-6"></i>';
                 title.innerText = "Upload Failed";
                 title.className = "font-bold text-lg mb-2 text-red-700";
-                text.innerText = msg;
+
+                                // If backend provides row-level details, render them for quick debugging.
+                                if (details && details.length > 0) {
+                                        let rows = '';
+                                        details.forEach(d => {
+                                                rows += `
+                                                    <tr class="border-t border-gray-100">
+                                                        <td class="px-3 py-2 font-mono text-xs text-gray-700">${escapeHtml(d.row ?? '')}</td>
+                                                        <td class="px-3 py-2 text-xs text-gray-700">${escapeHtml(d.class_level ?? '')}</td>
+                                                        <td class="px-3 py-2 text-xs text-gray-700">${escapeHtml(d.section_name ?? '')}</td>
+                                                        <td class="px-3 py-2 font-mono text-xs text-gray-700">${escapeHtml(d.inferred_spec_code ?? '')}</td>
+                                                    </tr>`;
+                                        });
+
+                                        const hint = details[0].hint ? `<div class="mt-3 text-xs text-gray-600">${escapeHtml(details[0].hint)}</div>` : '';
+                                        text.innerHTML = `
+                                            <div class="text-sm text-gray-700"><strong>${escapeHtml(msg)}</strong></div>
+                                            ${hint}
+                                            <div class="mt-4 max-h-56 overflow-auto border border-gray-200 rounded-lg">
+                                                <table class="min-w-full text-left text-sm">
+                                                    <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+                                                        <tr>
+                                                            <th class="px-3 py-2 font-bold">Row</th>
+                                                            <th class="px-3 py-2 font-bold">Class Level</th>
+                                                            <th class="px-3 py-2 font-bold">Section Name</th>
+                                                            <th class="px-3 py-2 font-bold">Inferred Spec</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody class="bg-white">${rows}</tbody>
+                                                </table>
+                                            </div>`;
+                                } else {
+                                        text.innerText = msg;
+                                }
             }
             lucide.createIcons();
         }
@@ -266,8 +339,11 @@
             try {
                 const res = await fetch(apiUrl, { method: 'POST', body: formData });
                 const data = await res.json();
-                // Pass data.errors to showStatus
-                showStatus(res.ok, res.ok ? data.message : (data.error || "Upload failed"), data.errors);
+                // Backward compatible: some endpoints return data.errors, others return data.details
+                const details = data.details || [];
+                const errors = data.errors || [];
+                const extra = (res.ok && (data.updated || 0) > 0) ? ` Updated existing: ${data.updated}.` : '';
+                showStatus(res.ok, res.ok ? ((data.message || 'Upload complete') + extra) : (data.error || "Upload failed"), errors, details);
             } catch (e) {
                 showStatus(false, "Network Error");
             }
