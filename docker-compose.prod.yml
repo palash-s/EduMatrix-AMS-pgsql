@@ -25,18 +25,32 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-school_system}
       SECRET_KEY: ${SECRET_KEY}
       FLASK_ENV: production
+      SESSION_COOKIE_SECURE: "true"
     networks:
       - ams_network
 
   nginx:
     image: nginx:alpine
     restart: always
-    ports:
-      - "80:80"
+    # No ports exposed to host - Cloudflare Tunnel handles ingress
+    # ports:
+    #   - "80:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - web
+    networks:
+      - ams_network
+
+  # Cloudflare Tunnel - Secure ingress without exposing ports
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - nginx
     networks:
       - ams_network
 
