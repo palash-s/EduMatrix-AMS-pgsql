@@ -619,7 +619,7 @@ def _ensure_student_in_scope(student_id):
     return None
 
 PRESENT_STATUSES = ['Present', 'OnDuty', 'OD', 'ML', 'CL']
-FIXED_DEPT_NAME = os.environ.get('APP_DEPARTMENT_NAME', 'Department of Information Technology')
+# FIXED_DEPT_NAME removed - departments are now dynamic via hierarchy setup
 
 
 # ==========================================
@@ -1775,14 +1775,12 @@ def api_current_term():
     })
 
 def get_current_dept():
-    """Ensures the Single Department exists and returns it."""
-    dept = Department.query.filter_by(name=FIXED_DEPT_NAME).first()
-    if not dept:
-        dept = Department(name=FIXED_DEPT_NAME)
-        db.session.add(dept)
-        db.session.flush() # Get ID
-        print(f"Initialized Department: {FIXED_DEPT_NAME}")
-    return dept
+    """Returns the first available department or None if no departments exist.
+    
+    NOTE: Departments must be created via hierarchy setup (SuperAdmin).
+    This function no longer auto-creates departments.
+    """
+    return Department.query.first()
 
 def is_elective_type(type_str):
     if not type_str: return False
@@ -12166,7 +12164,7 @@ def get_ca_sheet():
             if t: teacher_name = t.full_name
             
         # 3. Fetch Dept
-        dept_name = "Department of Information Technology"
+        dept_name = "Unknown Department"
         if subject.dept_id:
             d = db.session.get(Department, subject.dept_id)
             if d: dept_name = d.name
@@ -13120,8 +13118,7 @@ def get_hod_feedback_analysis():
         
         # 1. Identify HOD's Department
         dept = Department.query.filter_by(hod_staff_id=user_id).first()
-        if not dept:
-            dept = Department.query.filter_by(name=FIXED_DEPT_NAME).first()
+        # No fallback to hardcoded department - HOD must be assigned
             
         if not dept: return jsonify({"error": "Unauthorized / No Dept Found"}), 403
 
@@ -13377,17 +13374,15 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         
-        # --- SEED DATA: CREATE SUPER ADMIN & IT DEPARTMENT ---
+        # --- SEED DATA: CREATE SUPER ADMIN (No departments - must set up hierarchy first) ---
         admin_email = "admin@mituniversity.edu.in"
         if not UserMaster.query.filter_by(username=admin_email).first():
             print("Creating System Environment...")
             new_uuid = str(uuid.uuid4())
             
-            # Create IT Department (Required for many features)
-            if not Department.query.filter_by(name="Department of Information Technology").first():
-                db.session.add(Department(name="Department of Information Technology"))
+            # NOTE: No department created here - SuperAdmin must set up hierarchy via CSV upload
             
-            admin_user = UserMaster(user_id=new_uuid, username=admin_email, password_hash=generate_password_hash("Admin@123"), user_type='Admin', is_active=True)
+            admin_user = UserMaster(user_id=new_uuid, username=admin_email, password_hash=generate_password_hash("Admin@123"), user_type='SuperAdmin', is_active=True)
             db.session.add(admin_user)
             
             admin_profile = StaffProfile(staff_id=new_uuid, full_name="System Administrator", employee_code="ADMIN001", email_contact=admin_email)
