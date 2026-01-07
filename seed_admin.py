@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""Seed the admin user for fresh database."""
-from app import app, db, UserMaster, StaffProfile, Department
+"""Seed the SuperAdmin user for fresh database."""
+from app import app, db, UserMaster, StaffProfile
 from werkzeug.security import generate_password_hash
 import uuid
 
@@ -8,9 +8,7 @@ with app.app_context():
     admin_email = "admin@mituniversity.edu.in"
     if not UserMaster.query.filter_by(username=admin_email).first():
         new_uuid = str(uuid.uuid4())
-        if not Department.query.filter_by(name="Department of Information Technology").first():
-            db.session.add(Department(name="Department of Information Technology"))
-            db.session.flush()
+        # NOTE: No department is created here - SuperAdmin must set up hierarchy first
         
         admin_user = UserMaster(
             user_id=new_uuid, 
