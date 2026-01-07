@@ -1,0 +1,498 @@
+{% extends "super_admin_layout.html" %}
+
+{% block content %}
+<div class="mb-8">
+  <h1 class="text-2xl font-bold">Setup University Hierarchy</h1>
+  <p class="text-sm text-gray-600 mt-1">SuperAdmin only. Define School → Program → Department → Specialization, then create department admins.</p>
+</div>
+
+<!-- Summary Cards -->
+<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+  <div class="bg-white border border-gray-200 rounded-xl p-4">
+    <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Schools</div>
+    <div class="text-2xl font-bold mt-1" id="summary_schools">—</div>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-xl p-4">
+    <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Departments</div>
+    <div class="text-2xl font-bold mt-1" id="summary_departments">—</div>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-xl p-4">
+    <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Programs</div>
+    <div class="text-2xl font-bold mt-1" id="summary_programs">—</div>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-xl p-4">
+    <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Specializations</div>
+    <div class="text-2xl font-bold mt-1" id="summary_specializations">—</div>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-xl p-4">
+    <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Dept Admins</div>
+    <div class="text-2xl font-bold mt-1" id="summary_dept_admins">—</div>
+  </div>
+</div>
+
+<!-- Department Admins Table -->
+<div class="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-bold">Department Admins</h2>
+    <button class="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:bg-gray-50" onclick="loadDeptAdmins()">
+      <span class="flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Refresh
+      </span>
+    </button>
+  </div>
+  <div id="dept_admins_table" class="mt-4">
+    <div class="text-sm text-gray-500">Loading…</div>
+  </div>
+</div>
+
+<div class="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+  <h2 class="text-lg font-bold">Import from CSV</h2>
+  <p class="text-sm text-gray-600 mt-1">Upload CSV with headers: School, Degree, Program, Department, Specialization. Department admin logins will be generated automatically.</p>
+
+  <div class="flex items-center gap-3 mt-4">
+    <input id="hierarchy_file" type="file" accept=".csv" class="text-sm" />
+    <button class="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800" onclick="importHierarchyCsv()">Import CSV</button>
+    <span id="import_status" class="text-sm text-gray-600"></span>
+  </div>
+
+  <div id="import_result" class="mt-4 hidden">
+    <div class="flex items-center justify-between gap-3">
+      <h3 class="text-sm font-bold text-gray-700">Department Admin Credentials</h3>
+      <div class="text-xs text-gray-500">Passwords show only for newly created admins</div>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3" id="import_kpis">
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Schools</div>
+        <div class="text-lg font-bold" id="kpi_schools">0</div>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Departments</div>
+        <div class="text-lg font-bold" id="kpi_departments">0</div>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Programs</div>
+        <div class="text-lg font-bold" id="kpi_programs">0</div>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Specializations</div>
+        <div class="text-lg font-bold" id="kpi_specializations">0</div>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Dept Admins</div>
+        <div class="text-lg font-bold" id="kpi_dept_admins">0</div>
+        <div class="text-[11px] text-gray-500" id="kpi_dept_admins_existing"></div>
+      </div>
+    </div>
+
+    <div class="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-gray-600 text-xs uppercase">
+            <tr>
+              <th class="text-left font-bold px-4 py-3">Department</th>
+              <th class="text-left font-bold px-4 py-3">Login (Email)</th>
+              <th class="text-left font-bold px-4 py-3">Employee Code</th>
+              <th class="text-left font-bold px-4 py-3">Password</th>
+              <th class="text-left font-bold px-4 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody id="import_table_body" class="divide-y divide-gray-100 bg-white"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="bg-white border border-gray-200 rounded-xl p-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-bold">Current Hierarchy</h2>
+    <button class="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:bg-gray-50" onclick="loadTree()">
+      <span class="flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Refresh
+      </span>
+    </button>
+  </div>
+  <div id="tree" class="mt-4">
+    <div class="text-sm text-gray-500">Loading…</div>
+  </div>
+</div>
+
+{% include '_toast_modal.html' %}
+
+<script>
+// Load summary KPIs
+async function loadSummary() {
+  try {
+    const resp = await fetch('/api/superadmin/kpis');
+    const data = await resp.json();
+    if (resp.ok) {
+      document.getElementById('summary_schools').textContent = String(data.schools ?? 0);
+      document.getElementById('summary_departments').textContent = String(data.departments ?? 0);
+      document.getElementById('summary_programs').textContent = String(data.programs ?? 0);
+      document.getElementById('summary_specializations').textContent = String(data.specializations ?? 0);
+      document.getElementById('summary_dept_admins').textContent = String(data.department_admins ?? 0);
+    }
+  } catch (e) {
+    console.error('Failed to load summary:', e);
+  }
+}
+
+// Load department admins table
+async function loadDeptAdmins() {
+  const container = document.getElementById('dept_admins_table');
+  container.innerHTML = '<div class="text-sm text-gray-500">Loading…</div>';
+  try {
+    const resp = await fetch('/api/superadmin/dept_admins');
+    const data = await resp.json();
+    if (!resp.ok) {
+      container.innerHTML = `<div class="text-sm text-red-600">${escapeHtml(data.error || 'Failed to load')}</div>`;
+      return;
+    }
+    renderDeptAdminsTable(data.department_admins || []);
+  } catch (e) {
+    container.innerHTML = `<div class="text-sm text-red-600">${escapeHtml(String(e))}</div>`;
+  }
+}
+
+function renderDeptAdminsTable(admins) {
+  const container = document.getElementById('dept_admins_table');
+  
+  if (!admins || admins.length === 0) {
+    container.innerHTML = '<div class="text-sm text-gray-500">No departments found. Upload a hierarchy CSV to get started.</div>';
+    return;
+  }
+
+  let html = `
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-gray-600 text-xs uppercase">
+            <tr>
+              <th class="text-left font-bold px-4 py-3">Department</th>
+              <th class="text-left font-bold px-4 py-3">Admin Name</th>
+              <th class="text-left font-bold px-4 py-3">Login (Email)</th>
+              <th class="text-left font-bold px-4 py-3">Employee Code</th>
+              <th class="text-left font-bold px-4 py-3">Password</th>
+              <th class="text-left font-bold px-4 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 bg-white">
+  `;
+
+  for (const row of admins) {
+    const hasAdmin = row.admin_name !== null;
+    const statusBadge = hasAdmin
+      ? (row.is_active 
+          ? '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">Active</span>'
+          : '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">Inactive</span>')
+      : '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">No Admin</span>';
+
+    const passwordCell = hasAdmin 
+      ? `<span id="pwd_${escapeHtml(row.department.replace(/\s+/g, '_'))}" class="text-gray-400 text-xs">••••••••</span>
+         <button onclick="resetPassword('${escapeHtml(row.department)}')" class="ml-2 px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded" title="Reset Password">
+           <svg class="w-3.5 h-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+           Reset
+         </button>`
+      : '<span class="text-gray-400">—</span>';
+
+    html += `
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3 font-medium text-gray-900">${escapeHtml(row.department)}</td>
+        <td class="px-4 py-3 text-gray-700">${hasAdmin ? escapeHtml(row.admin_name) : '<span class="text-gray-400">—</span>'}</td>
+        <td class="px-4 py-3 text-gray-700">${hasAdmin ? `<span class="font-mono text-xs">${escapeHtml(row.email)}</span>` : '<span class="text-gray-400">—</span>'}</td>
+        <td class="px-4 py-3 text-gray-700">${hasAdmin ? `<span class="font-mono text-xs">${escapeHtml(row.employee_code)}</span>` : '<span class="text-gray-400">—</span>'}</td>
+        <td class="px-4 py-3">${passwordCell}</td>
+        <td class="px-4 py-3">${statusBadge}</td>
+      </tr>
+    `;
+  }
+
+  html += `
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+// Reset password for department admin
+async function resetPassword(deptName) {
+  showConfirm(
+    'Reset Password',
+    `Are you sure you want to reset the password for "${deptName}" admin? A new secure password will be generated.`,
+    async () => {
+      try {
+        const resp = await fetch('/api/superadmin/dept_admin/reset_password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ department: deptName }),
+        });
+        const data = await resp.json();
+        
+        if (!resp.ok) {
+          showToast(data.error || 'Failed to reset password', 'error');
+          return;
+        }
+        
+        // Show the new password in the table
+        const pwdEl = document.getElementById('pwd_' + deptName.replace(/\s+/g, '_'));
+        if (pwdEl) {
+          pwdEl.innerHTML = `<span class="font-mono text-xs text-green-700 bg-green-50 px-2 py-1 rounded">${escapeHtml(data.new_password)}</span>`;
+        }
+        
+        // Show success toast with password details
+        showToast(`Password reset for ${deptName}`, 'success');
+        
+        // Store password for copy functionality
+        window._lastResetPassword = data.new_password;
+        
+        // Show modal with full details and copy button
+        showConfirm(
+          'Password Reset Complete',
+          `<div class="space-y-3">
+            <div class="bg-gray-50 rounded-lg p-3">
+              <div class="text-xs font-bold text-gray-500 uppercase">Email</div>
+              <div class="font-mono text-sm mt-1 select-all">${escapeHtml(data.email)}</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3 border border-green-200">
+              <div class="text-xs font-bold text-green-700 uppercase">New Password</div>
+              <div class="flex items-center gap-2 mt-1">
+                <code id="reset-pwd-display" class="font-mono text-sm text-green-800 font-bold select-all bg-white px-2 py-1 rounded border">${escapeHtml(data.new_password)}</code>
+                <button onclick="copyResetPassword()" class="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded">
+                  Copy
+                </button>
+              </div>
+            </div>
+            <div class="text-xs text-gray-500">User must change password on first login.</div>
+          </div>`,
+          () => {},
+          'Credentials'
+        );
+        setModalConfirmLabel('Done');
+        
+      } catch (e) {
+        showToast('Error: ' + String(e), 'error');
+      }
+    },
+    'Security'
+  );
+  setModalConfirmLabel('Reset Password');
+}
+
+// Copy password to clipboard
+function copyResetPassword() {
+  const pwd = window._lastResetPassword;
+  if (pwd) {
+    navigator.clipboard.writeText(pwd).then(() => {
+      showToast('Password copied to clipboard!', 'success');
+    }).catch(() => {
+      // Fallback for older browsers
+      const el = document.getElementById('reset-pwd-display');
+      if (el) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('copy');
+        sel.removeAllRanges();
+        showToast('Password copied!', 'success');
+      }
+    });
+  }
+}
+
+async function loadTree() {
+  const treeEl = document.getElementById('tree');
+  treeEl.innerHTML = '<div class="text-sm text-gray-500">Loading…</div>';
+  try {
+    const resp = await fetch('/api/setup/tree');
+    const data = await resp.json();
+    renderHierarchyTable(data);
+  } catch (e) {
+    treeEl.innerHTML = `<div class="text-sm text-red-600">${escapeHtml(String(e))}</div>`;
+  }
+}
+
+function renderHierarchyTable(data) {
+  const treeEl = document.getElementById('tree');
+  
+  if (!data || data.length === 0) {
+    treeEl.innerHTML = '<div class="text-sm text-gray-500">No hierarchy defined yet. Upload a CSV to get started.</div>';
+    return;
+  }
+
+  // Flatten the hierarchy into table rows
+  const rows = [];
+  for (const school of data) {
+    const schoolName = school.name || '';
+    const programs = school.programs || [];
+    
+    if (programs.length === 0) {
+      rows.push({ school: schoolName, program: '—', department: '—', specializations: '—' });
+      continue;
+    }
+    
+    for (const program of programs) {
+      const programName = program.name || '';
+      const departments = program.departments || [];
+      
+      if (departments.length === 0) {
+        rows.push({ school: schoolName, program: programName, department: '—', specializations: '—' });
+        continue;
+      }
+      
+      for (const dept of departments) {
+        const deptName = dept.name || '';
+        const specs = dept.specializations || [];
+        rows.push({
+          school: schoolName,
+          program: programName,
+          department: deptName,
+          specializations: specs.length > 0 ? specs.join(', ') : '—'
+        });
+      }
+    }
+  }
+
+  let html = `
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-gray-600 text-xs uppercase">
+            <tr>
+              <th class="text-left font-bold px-4 py-3">School</th>
+              <th class="text-left font-bold px-4 py-3">Program</th>
+              <th class="text-left font-bold px-4 py-3">Department</th>
+              <th class="text-left font-bold px-4 py-3">Specializations</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 bg-white">
+  `;
+
+  for (const row of rows) {
+    html += `
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3 font-medium text-gray-900">${escapeHtml(row.school)}</td>
+        <td class="px-4 py-3 text-gray-700">${escapeHtml(row.program)}</td>
+        <td class="px-4 py-3 text-gray-700">${escapeHtml(row.department)}</td>
+        <td class="px-4 py-3 text-gray-600 text-xs">${escapeHtml(row.specializations)}</td>
+      </tr>
+    `;
+  }
+
+  html += `
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="mt-2 text-xs text-gray-500">${rows.length} row(s)</div>
+  `;
+
+  treeEl.innerHTML = html;
+}
+
+// Initial load
+loadSummary();
+loadDeptAdmins();
+loadTree();
+
+async function importHierarchyCsv() {
+  const fileInput = document.getElementById('hierarchy_file');
+  const status = document.getElementById('import_status');
+  const resultWrap = document.getElementById('import_result');
+  const tableBody = document.getElementById('import_table_body');
+
+  resultWrap.classList.add('hidden');
+  tableBody.innerHTML = '';
+
+  if (!fileInput.files || !fileInput.files[0]) {
+    status.textContent = 'Select a CSV file first.';
+    return;
+  }
+
+  status.textContent = 'Importing…';
+  try {
+    const form = new FormData();
+    form.append('file', fileInput.files[0]);
+
+    const resp = await fetch('/api/superadmin/hierarchy/import', {
+      method: 'POST',
+      body: form,
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      status.textContent = data.error || 'Import failed';
+      return;
+    }
+    status.textContent = 'Imported.';
+    resultWrap.classList.remove('hidden');
+    renderImportResults(data);
+    // Refresh all sections
+    await Promise.all([loadSummary(), loadDeptAdmins(), loadTree()]);
+  } catch (e) {
+    status.textContent = String(e);
+  }
+}
+
+function renderImportResults(data) {
+  const created = data.created || {};
+  const admins = Array.isArray(data.department_admins) ? data.department_admins : [];
+
+  document.getElementById('kpi_schools').textContent = String(created.schools ?? 0);
+  document.getElementById('kpi_departments').textContent = String(created.departments ?? 0);
+  document.getElementById('kpi_programs').textContent = String(created.programs ?? 0);
+  document.getElementById('kpi_specializations').textContent = String(created.specializations ?? 0);
+  document.getElementById('kpi_dept_admins').textContent = String(created.dept_admins ?? 0);
+  const existingCount = created.dept_admins_existing ?? 0;
+  document.getElementById('kpi_dept_admins_existing').textContent = existingCount ? `${existingCount} reused` : '';
+
+  const tbody = document.getElementById('import_table_body');
+  tbody.innerHTML = '';
+
+  if (admins.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="px-4 py-4 text-gray-600" colspan="5">No department admins were created/updated.</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const row of admins) {
+    const dept = row.department || '';
+    const email = row.email || '';
+    const emp = row.employee_code || '';
+    const pwd = row.password || '';
+    const existed = !pwd;
+    const note = row.note || (existed ? 'Existing account' : 'Created');
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="px-4 py-3 font-medium text-gray-900">${escapeHtml(dept)}</td>
+      <td class="px-4 py-3 text-gray-700"><span class="font-mono text-xs">${escapeHtml(email)}</span></td>
+      <td class="px-4 py-3 text-gray-700"><span class="font-mono text-xs">${escapeHtml(emp)}</span></td>
+      <td class="px-4 py-3 text-gray-700">
+        ${pwd ? `<span class="font-mono text-xs">${escapeHtml(pwd)}</span>` : `<span class="text-xs text-gray-400">—</span>`}
+      </td>
+      <td class="px-4 py-3">
+        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${existed ? 'bg-gray-100 text-gray-700' : 'bg-gray-900 text-white'}">${escapeHtml(note)}</span>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+</script>
+{% endblock %}

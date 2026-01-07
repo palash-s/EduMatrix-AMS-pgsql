@@ -46,21 +46,31 @@
             </div>
         </div>
 
-        <!-- Student List -->
-        <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div id="student-list" class="divide-y divide-gray-100">
-                <p class="p-8 text-center text-gray-400">Loading student list...</p>
+        <!-- LESSON LOG INPUT (hidden for extra sessions) - Expandable Checkbox Panel -->
+        <div id="lesson-tracking-section" class="bg-blue-50 rounded-xl border border-blue-100 mb-6 shadow-sm overflow-hidden">
+            <button type="button" onclick="toggleLessonPanel()" class="w-full p-4 flex items-center justify-between hover:bg-blue-100/50 transition-colors">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="book-open" class="w-4 h-4 text-blue-700"></i>
+                    <span class="text-xs font-bold text-blue-700 uppercase">Lesson Tracking</span>
+                    <span id="selected-count" class="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full font-bold hidden">0 selected</span>
+                </div>
+                <i data-lucide="chevron-down" id="lesson-chevron" class="w-5 h-5 text-blue-600 transition-transform"></i>
+            </button>
+            <div id="lesson-panel" class="hidden border-t border-blue-100">
+                <div class="p-3 bg-blue-100/30 border-b border-blue-100">
+                    <p class="text-xs text-blue-600">Select topics covered in this session (max 3)</p>
+                </div>
+                <div id="topic-checkboxes" class="p-3 space-y-2 max-h-60 overflow-y-auto">
+                    <p class="text-sm text-gray-400 text-center py-4">Loading topics...</p>
+                </div>
             </div>
         </div>
 
-        <!-- LESSON LOG INPUT (hidden for extra sessions) -->
-        <div id="lesson-tracking-section" class="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-20 shadow-sm">
-            <h3 class="text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-2">
-                <i data-lucide="book-open" class="w-4 h-4"></i> Lesson Tracking
-            </h3>
-            <select id="topic-select" class="w-full p-2 border border-blue-200 rounded-lg text-sm bg-white outline-none">
-                <option value="">-- Select Topic Covered (Optional) --</option>
-            </select>
+        <!-- Student List -->
+        <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mb-20">
+            <div id="student-list" class="divide-y divide-gray-100">
+                <p class="p-8 text-center text-gray-400">Loading student list...</p>
+            </div>
         </div>
 
         <!-- Submit Button (Fixed Bottom) -->
@@ -86,6 +96,8 @@
         let currentStudentData = [];
         let isLocked = false;
         let userId = null;
+        let selectedTopicIds = [];  // Multi-select topics
+        const MAX_TOPICS = 3;
 
         document.addEventListener('DOMContentLoaded', async function() {
             // SECURITY: Validate session with server before loading
@@ -137,17 +149,32 @@
                 if (data.is_extra_session) {
                     lessonSection.style.display = 'none';
                 } else {
-                    const topicSelect = document.getElementById('topic-select');
+                    const topicCheckboxes = document.getElementById('topic-checkboxes');
                     try {
                         const syllRes = await fetch(`/api/academic/get_syllabus?subject_id=${data.subject_id}`);
                         const syllData = await syllRes.json();
                         if(syllData.syllabus) {
-                            topicSelect.innerHTML = '<option value="">-- Select Topic Covered --</option>' +
-                            syllData.syllabus.filter(t => t.status === 'Pending').map(t =>
-                                `<option value="${t.id}">Unit ${t.unit}: ${t.topic}</option>`
-                            ).join('');
+                            const pendingTopics = syllData.syllabus.filter(t => t.status === 'Pending');
+                            if (pendingTopics.length === 0) {
+                                topicCheckboxes.innerHTML = `<p class="text-sm text-gray-400 text-center py-4">All topics completed!</p>`;
+                            } else {
+                                topicCheckboxes.innerHTML = pendingTopics.map(t => `
+                                    <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-blue-50 cursor-pointer border border-transparent hover:border-blue-200 transition-all">
+                                        <input type="checkbox" value="${t.id}" onchange="handleTopicToggle(this)" class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+                                        <div class="flex-1">
+                                            <span class="text-sm font-medium text-gray-800">Unit ${t.unit}: ${t.topic}</span>
+                                            ${t.sub_unit ? `<span class="text-xs text-gray-400 ml-2">(${t.sub_unit})</span>` : ''}
+                                        </div>
+                                    </label>
+                                `).join('');
+                            }
+                        } else {
+                            topicCheckboxes.innerHTML = `<p class="text-sm text-gray-400 text-center py-4">No syllabus uploaded for this subject.</p>`;
                         }
-                    } catch(e) { console.error('Failed to load topics:', e); }
+                    } catch(e) {
+                        console.error('Failed to load topics:', e);
+                        topicCheckboxes.innerHTML = `<p class="text-sm text-red-400 text-center py-4">Failed to load topics</p>`;
+                    }
                 }
 
             } catch (e) {
@@ -218,6 +245,11 @@
                     labelHtml = `<span class="ml-2 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200">${s.status_label}</span>`;
                 }
 
+                // Check if student has approved leave (locked status)
+                const isLeaveStudent = ['OnDuty', 'OD', 'ML', 'CL'].includes(s.status);
+                const lockIcon = isLeaveStudent ? `<i data-lucide="lock" class="w-3 h-3 absolute -top-1 -right-1 text-gray-500"></i>` : '';
+                const cursorClass = isLeaveStudent ? 'cursor-not-allowed' : 'cursor-pointer active:scale-95';
+
                 return `
                 <div class="flex items-center justify-between p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors ${rowClass}">
                     <div class="flex items-center gap-4">
@@ -227,9 +259,10 @@
                             <p class="text-xs text-gray-500 font-mono flex items-center mt-0.5">${s.roll_no} ${labelHtml}</p>
                         </div>
                     </div>
-                    
-                    <button onclick="toggleStatus('${s.student_id}')" class="w-12 h-12 rounded-xl font-bold text-lg flex items-center justify-center border transition-all shadow-sm active:scale-95 ${btnClass}">
+
+                    <button onclick="toggleStatus('${s.student_id}')" class="relative w-12 h-12 rounded-xl font-bold text-lg flex items-center justify-center border transition-all shadow-sm ${cursorClass} ${btnClass}">
                         ${btnText}
+                        ${lockIcon}
                     </button>
                 </div>`;
             }).join('');
@@ -242,8 +275,13 @@
 
             const s = currentStudentData.find(st => st.student_id === studentId);
             if (s) {
+                // Don't allow toggling students with approved leaves (OD/ML/CL)
+                // These students are "locked" at their approved leave status
+                if (['OnDuty', 'OD', 'ML', 'CL'].includes(s.status)) {
+                    showToast("Cannot change status - student has approved leave/OD", "error");
+                    return;
+                }
                 // Logic: P -> A -> P
-                // If it was OD/ML/CL, clicking it overrides it to 'Present', then 'Absent'
                 if (s.status === 'Absent') {
                     s.status = 'Present';
                 } else {
@@ -278,7 +316,7 @@
                     schedule_id: scheduleId,
                     date: dateParam,
                     students: currentStudentData,
-                    topic_id: document.getElementById('topic-select').value,
+                    topic_ids: selectedTopicIds,  // Send array of topic IDs
                     submitted_by: submittedBy
                 };
 
@@ -302,6 +340,42 @@
                 showToast("Network Error", "error");
                 btn.innerText = originalText;
                 btn.disabled = false;
+            }
+        }
+
+        // --- LESSON TRACKING PANEL FUNCTIONS ---
+        function toggleLessonPanel() {
+            const panel = document.getElementById('lesson-panel');
+            const chevron = document.getElementById('lesson-chevron');
+            panel.classList.toggle('hidden');
+            chevron.style.transform = panel.classList.contains('hidden') ? '' : 'rotate(180deg)';
+        }
+
+        function handleTopicToggle(checkbox) {
+            const topicId = parseInt(checkbox.value);
+
+            if (checkbox.checked) {
+                // Check max limit
+                if (selectedTopicIds.length >= MAX_TOPICS) {
+                    checkbox.checked = false;
+                    showToast(`Maximum ${MAX_TOPICS} topics allowed per session`, "error");
+                    return;
+                }
+                selectedTopicIds.push(topicId);
+            } else {
+                selectedTopicIds = selectedTopicIds.filter(id => id !== topicId);
+            }
+
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const countBadge = document.getElementById('selected-count');
+            if (selectedTopicIds.length > 0) {
+                countBadge.textContent = `${selectedTopicIds.length} selected`;
+                countBadge.classList.remove('hidden');
+            } else {
+                countBadge.classList.add('hidden');
             }
         }
     </script>

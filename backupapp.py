@@ -8,7 +8,7 @@ import secrets
 import hashlib
 import json
 from functools import wraps
-from datetime import timedelta, timezone
+from datetime import timedelta
 from datetime import datetime, date
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, g
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -18,7 +18,6 @@ from flask_wtf.csrf import CSRFProtect, CSRFError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
-from sqlalchemy import func
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 try:
@@ -33,10 +32,8 @@ except Exception:
 # 1. DATABASE IMPORTS
 from sql_connection import (
     FeedbackQuestion, LessonLog, TeachingPlan, db, UserMaster, Department, Subject, ClassSection,
-    School, Program, Specialization,
-    StaffProfile, ParentProfile, StudentProfile, WeeklySchedule, TimetableVersion,
+    StaffProfile, ParentProfile, StudentProfile, WeeklySchedule,
     EventMaster, EventParticipation, SubjectAllocation, StudentElective,
-    ExtraSession,
     SessionLog, AttendanceTransaction, LeaveApplication, 
     LeaveWorkflowLog, DetentionRecord, SystemLog, MentorBatch, ElectiveOffering, 
     RoomMaster, MentorLog, MentorMeeting, MeetingAttendance, MeetingIssue, Notification, get_db_uri,CAMarks, TermGrantRecord,
@@ -45,187 +42,6 @@ from sql_connection import (
     , SemesterCourseStructure, ElectiveWindow
     , RefreshToken, PushDevice, LoadAdjustment
 )
-
-
-def _infer_spec_code_from_section_name(section_name: str) -> str:
-    """Infer a specialization code from a section/division string.
-
-    Backward compatible:
-    - If section_name is already a code like 'DA' -> returns 'DA'
-    - If it's a division like 'DA1' -> returns 'DA'
-    - If it doesn't match -> returns stripped input
-    """
-    raw = (section_name or '').strip()
-    if not raw:
-        return ''
-    # Strip trailing digits (DA1 -> DA)
-    i = len(raw)
-    while i > 0 and raw[i - 1].isdigit():
-        i -= 1
-    base = raw[:i] if i > 0 else raw
-
-    return base
-
-
-def _resolve_class_section_for_csv(class_level: str, section_value: str) -> ClassSection | None:
-    """Resolve a ClassSection for uploads.
-
-    New convention (preferred):
-      - CSV Section / Section Name == specialization code (e.g., DA, CORE, SMAD)
-      - ClassSection.name stores that code, one row per class_level+code
-
-    Backward-compatible fallback:
-      - If older data uses division-like names (DA1/DA2), we only auto-resolve
-        when there is exactly ONE matching section for the inferred spec.
-        Otherwise we return None to avoid guessing.
-    """
-    cl = str(class_level or '').strip()
-    sv = str(section_value or '').strip()
-    if not cl or not sv:
-        return None
-
-    # 1) Direct match (new convention)
-    direct = ClassSection.query.filter_by(class_level=cl, name=sv).first()
-    if direct:
-        return direct
-
-    # 2) Legacy-safe fallback: infer spec code from division (DA1 -> DA)
-    spec_code = _infer_spec_code_from_section_name(sv)
-    if spec_code and spec_code != sv:
-        by_code_name = ClassSection.query.filter_by(class_level=cl, name=spec_code).first()
-        if by_code_name:
-            return by_code_name
-
-    # 3) If the section rows are linked to Specialization, resolve by spec code.
-    if spec_code:
-        spec = Specialization.query.filter_by(code=spec_code).first()
-        if spec:
-            matches = ClassSection.query.filter_by(class_level=cl, spec_id=spec.id).all()
-            if len(matches) == 1:
-                return matches[0]
-
-    return None
-
-
-def _normalize_header(s: str) -> str:
-    return ''.join((s or '').strip().casefold().split())
-
-
-def _dept_code_from_name(name: str) -> str:
-    """Generate a short department code used for admin usernames.
-
-    Examples:
-      - Department of Information Technology -> IT
-      - Computer Science & Engineering -> CSE
-    """
-    n = (name or '').strip().casefold()
-    if not n:
-        return 'DEPT'
-    if 'information technology' in n:
-        return 'IT'
-    if 'computer science' in n:
-        return 'CSE'
-
-    import re
-    words = [w for w in re.split(r"[^a-z0-9]+", n) if w]
-    stop = {'department', 'of', 'and', 'the', 'engineering', 'technology'}
-    letters = [w[0] for w in words if w not in stop and w[0].isalpha()]
-    code = ''.join(letters[:4]).upper()
-    return code or 'DEPT'
-
-
-def _canonical_department_name(name: str) -> str:
-    """Normalize department names to avoid duplicates from small variants.
-
-    Examples:
-      - "Department of Information Technology" -> "Information Technology"
-      - extra spaces/case differences are normalized
-    """
-    import re
-    raw = (name or '').strip()
-    if not raw:
-        return ''
-    s = re.sub(r"\s+", " ", raw).strip()
-    lower = s.casefold()
-    prefixes = [
-        'department of ',
-        'dept of ',
-        'dept. of ',
-        'department ',
-    ]
-    for p in prefixes:
-        if lower.startswith(p):
-            s = s[len(p):].strip()
-            break
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def _spec_code_from_name(spec_name: str) -> str:
-    """Generate a short specialization code from the name (fallback when CSV has no code)."""
-    import re
-    s = (spec_name or '').strip()
-    if not s:
-        return ''
-    words = [w for w in re.split(r"[^A-Za-z0-9]+", s) if w]
-    stop = {'and', 'of', 'the', 'in', 'for', 'with'}
-    meaningful = [w for w in words if w.casefold() not in stop and w[0].isalnum()]
-    # For single-word names (like "Core"), use the full word uppercased (up to 6 chars)
-    if len(meaningful) == 1:
-        return meaningful[0].upper()[:6]
-    letters = [w[0].upper() for w in meaningful]
-    code = ''.join(letters[:6])
-    return code or (re.sub(r"[^A-Za-z0-9]", "", s).upper()[:6])
-
-
-def _find_department_flexible(name_or_abbrev: str, scope_dept_ids=None):
-    """
-    Find a department by exact name, abbreviation, or partial match.
-    Common abbreviations: IT -> Information Technology, CSE -> Computer Science & Engineering
-    If scope_dept_ids is provided, only search within those departments.
-    Returns the Department object or None.
-    """
-    s = (name_or_abbrev or '').strip()
-    if not s:
-        return None
-    
-    # Build base query
-    base_q = Department.query
-    if scope_dept_ids is not None:
-        base_q = base_q.filter(Department.dept_id.in_(scope_dept_ids))
-    
-    # 1. Exact match
-    dept = base_q.filter(Department.name == s).first()
-    if dept:
-        return dept
-    
-    # 2. Case-insensitive exact match
-    dept = base_q.filter(func.lower(Department.name) == s.lower()).first()
-    if dept:
-        return dept
-    
-    # 3. Common abbreviation mapping
-    abbrev_map = {
-        'IT': ['Information Technology'],
-        'CSE': ['Computer Science', 'Computer Science & Engineering', 'Computer Science and Engineering'],
-        'ECE': ['Electronics', 'Electronics & Communication', 'Electronics and Communication'],
-        'ME': ['Mechanical', 'Mechanical Engineering'],
-        'CE': ['Civil', 'Civil Engineering'],
-        'EE': ['Electrical', 'Electrical Engineering'],
-    }
-    if s.upper() in abbrev_map:
-        for keyword in abbrev_map[s.upper()]:
-            dept = base_q.filter(Department.name.ilike(f'%{keyword}%')).first()
-            if dept:
-                return dept
-    
-    # 4. Partial/substring match (case-insensitive)
-    dept = base_q.filter(Department.name.ilike(f'%{s}%')).first()
-    if dept:
-        return dept
-    
-    return None
-
 
 app = Flask(__name__)
 
@@ -263,15 +79,6 @@ app.config['WTF_CSRF_CHECK_DEFAULT'] = False  # We'll selectively protect routes
 
 db.init_app(app)
 migrate = Migrate(app, db)
-
-
-@app.teardown_appcontext
-def shutdown_session(exception=None):
-    """Clean up database session after each request to prevent stale transactions."""
-    if exception:
-        db.session.rollback()
-    db.session.remove()
-
 
 # ==========================================
 # FLASK-LOGIN SETUP
@@ -387,68 +194,6 @@ limiter = Limiter(
 
 
 # ==========================================
-# FIRST-LOGIN ONBOARDING GUARD (SUPERADMIN)
-# ==========================================
-@app.before_request
-def _enforce_superadmin_onboarding():
-    """Force SuperAdmin to complete hierarchy setup on first login.
-
-    This is server-side (not just a login redirect) so the user can't be
-    bounced to /admin/dashboard by frontend logic while onboarding is pending.
-
-    - If user_master.onboarding_completed exists: require it to be True
-    - Else (older DB): require at least one School row
-    """
-    try:
-        if not current_user.is_authenticated:
-            return None
-
-        user_type_cf = (getattr(current_user, 'user_type', '') or '').strip().casefold()
-        if user_type_cf != 'superadmin':
-            return None
-
-        path = (request.path or '')
-
-        # Always allow these endpoints/resources
-        if (
-            path.startswith('/static/')
-            or path.startswith('/api/login')
-            or path.startswith('/api/logout')
-            or path.startswith('/api/me')
-            or path.startswith('/api/change-password')
-            or path.startswith('/api/setup/')
-            or path.startswith('/setup_hierarchy')
-            or path.startswith('/superadmin/setup_hierarchy')
-            or path.startswith('/superadmin/dashboard')
-            or path.startswith('/change-password')
-        ):
-            return None
-
-        # Only force redirects for page loads (not for API calls)
-        if path.startswith('/api/'):
-            return None
-
-        onboarding_done = False
-        try:
-            from sqlalchemy import inspect as _sa_inspect
-            cols = {c['name'] for c in _sa_inspect(db.engine).get_columns('user_master')}
-            if 'onboarding_completed' in cols:
-                # Avoid attribute access when column missing.
-                onboarding_done = bool(getattr(current_user, 'onboarding_completed', False))
-            else:
-                onboarding_done = (School.query.count() > 0)
-        except Exception:
-            onboarding_done = False
-
-        if not onboarding_done:
-            return redirect('/superadmin/setup_hierarchy')
-        return None
-    except Exception:
-        # Never block requests due to guard errors; fail open.
-        return None
-
-
-# ==========================================
 # AUTH DECORATORS
 # ==========================================
 def require_roles(*allowed_roles):
@@ -465,19 +210,9 @@ def require_roles(*allowed_roles):
         def decorated_function(*args, **kwargs):
             if not current_user.is_authenticated:
                 return jsonify({"error": "Authentication required"}), 401
-
-            # Normalize roles. We store user_type as a string; treat SuperAdmin as a superset of Admin.
-            user_role_cf = (current_user.user_type or '').strip().casefold()
-            allowed_cf = {(r or '').strip().casefold() for r in allowed_roles}
-
-            is_allowed = user_role_cf in allowed_cf
-            if not is_allowed and user_role_cf == 'superadmin' and 'admin' in allowed_cf:
-                is_allowed = True
-
-            if not is_allowed:
-                app.logger.warning(
-                    f"Access denied: {current_user.user_id} ({current_user.user_type}) tried to access {request.endpoint}"
-                )
+            user_role = (current_user.user_type or '').capitalize()
+            if user_role not in allowed_roles:
+                app.logger.warning(f"Access denied: {current_user.user_id} ({user_role}) tried to access {request.endpoint}")
                 return jsonify({"error": "Access denied"}), 403
             return f(*args, **kwargs)
         return decorated_function
@@ -493,403 +228,8 @@ def require_auth(f):
         return f(*args, **kwargs)
     return decorated_function
 
-
-def _is_super_admin() -> bool:
-    return (getattr(current_user, 'user_type', '') or '').strip().casefold() == 'superadmin'
-
-
-def _require_superadmin_json():
-    if not current_user.is_authenticated:
-        return jsonify({"error": "Authentication required"}), 401
-    if not _is_super_admin():
-        return jsonify({"error": "SuperAdmin only"}), 403
-    return None
-
-
-def _get_admin_scope_dept_ids():
-    """Return department IDs the current admin is allowed to manage.
-
-    - SuperAdmin: returns None (means global access)
-    - Department Admin: returns [dept_id]
-    - Admin without scope: returns [] (deny department-scoped operations)
-    """
-    try:
-        if not current_user.is_authenticated:
-            return []
-        role_cf = (current_user.user_type or '').strip().casefold()
-        if role_cf == 'superadmin':
-            return None
-        if role_cf != 'admin':
-            return []
-
-        staff = StaffProfile.query.filter_by(staff_id=current_user.user_id).first()
-        dept_id = getattr(staff, 'admin_access_dept_id', None) if staff else None
-        if dept_id:
-            return [dept_id]
-
-        dept = Department.query.filter_by(dept_admin_id=current_user.user_id).first()
-        if dept:
-            return [dept.dept_id]
-        return []
-    except Exception:
-        return []
-
-
-def _get_user_scope_dept_ids():
-    """Return department IDs the current user is allowed to access.
-
-    Semantics:
-      - SuperAdmin: None (global)
-      - Admin: department scope (via StaffProfile.admin_access_dept_id or Department.dept_admin_id)
-      - Staff: primary_department_id and/or HOD-mapped department
-      - Others: [] (no department-based enumeration privileges)
-    """
-    try:
-        if not current_user.is_authenticated:
-            return []
-
-        role_cf = (getattr(current_user, 'user_type', '') or '').strip().casefold()
-        if role_cf == 'superadmin':
-            return None
-
-        if role_cf == 'admin':
-            return _get_admin_scope_dept_ids()
-
-        if role_cf == 'staff':
-            staff = StaffProfile.query.filter_by(staff_id=current_user.user_id).first()
-            dept_ids = set()
-            if staff and getattr(staff, 'primary_department_id', None):
-                dept_ids.add(int(staff.primary_department_id))
-
-            hod_dept = Department.query.filter_by(hod_staff_id=current_user.user_id).first()
-            if hod_dept:
-                dept_ids.add(int(hod_dept.dept_id))
-
-            return sorted(dept_ids)
-
-        return []
-    except Exception:
-        return []
-
-
-def _get_section_dept_id(section_id):
-    if not section_id:
-        return None
-    row = (db.session.query(Specialization.dept_id)
-           .join(ClassSection, ClassSection.spec_id == Specialization.id)
-           .filter(ClassSection.section_id == section_id)
-           .first())
-    return row[0] if row else None
-
-
-def _ensure_section_in_scope(section_id):
-    """Return a JSON error response if section is out-of-scope; else None."""
-    scope_dept_ids = _get_user_scope_dept_ids()
-    if scope_dept_ids is None:
-        return None
-    if not scope_dept_ids:
-        return jsonify({"error": "Department scope not configured"}), 403
-    dept_id = _get_section_dept_id(int(section_id) if section_id is not None else None)
-    if not dept_id or int(dept_id) not in scope_dept_ids:
-        return jsonify({"error": "Out of scope"}), 403
-    return None
-
-
-def _ensure_student_in_scope(student_id):
-    """Return a JSON error response if student is out-of-scope; else None."""
-    if not student_id:
-        return jsonify({"error": "student_id is required"}), 400
-
-    scope_dept_ids = _get_user_scope_dept_ids()
-    if scope_dept_ids is None:
-        return None
-    if not scope_dept_ids:
-        return jsonify({"error": "Department scope not configured"}), 403
-
-    student = db.session.get(StudentProfile, student_id)
-    if not student:
-        return jsonify({"error": "Student not found"}), 404
-
-    if not getattr(student, 'current_section_id', None):
-        return jsonify({"error": "Student section not assigned"}), 400
-
-    dept_id = _get_section_dept_id(int(student.current_section_id))
-    if not dept_id or int(dept_id) not in scope_dept_ids:
-        return jsonify({"error": "Out of scope"}), 403
-    return None
-
 PRESENT_STATUSES = ['Present', 'OnDuty', 'OD', 'ML', 'CL']
 FIXED_DEPT_NAME = os.environ.get('APP_DEPARTMENT_NAME', 'Department of Information Technology')
-
-
-# ==========================================
-# SETUP: HIERARCHY (SUPER USER / ADMIN)
-# ==========================================
-@app.route('/setup_hierarchy')
-def legacy_setup_hierarchy_redirect():
-    # Backwards-compatible path
-    return redirect('/superadmin/setup_hierarchy')
-
-
-@app.route('/superadmin/setup_hierarchy')
-@login_required
-@require_roles('Admin')
-def render_setup_hierarchy():
-    if not _is_super_admin():
-        return "Access denied", 403
-    return render_template('setup_hierarchy.html')
-
-
-@app.route('/superadmin/dashboard')
-@login_required
-@require_roles('Admin')
-def render_superadmin_dashboard():
-    if not _is_super_admin():
-        return "Access denied", 403
-    return render_template('super_admin_dashboard.html')
-
-
-@app.route('/api/superadmin/kpis', methods=['GET'])
-@login_required
-@require_roles('Admin')
-def api_superadmin_kpis():
-    deny = _require_superadmin_json()
-    if deny:
-        return deny
-    try:
-        dept_admins = Department.query.filter(Department.dept_admin_id != None).count()
-        return jsonify({
-            "schools": School.query.count(),
-            "departments": Department.query.count(),
-            "programs": Program.query.count(),
-            "specializations": Specialization.query.count(),
-            "department_admins": dept_admins,
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/superadmin/dept_admins', methods=['GET'])
-@login_required
-@require_roles('Admin')
-def api_superadmin_list_dept_admins():
-    """List all department admins with their assigned departments."""
-    deny = _require_superadmin_json()
-    if deny:
-        return deny
-    try:
-        # Get all departments with assigned admins
-        depts_with_admins = (
-            db.session.query(Department, StaffProfile, UserMaster)
-            .join(StaffProfile, Department.dept_admin_id == StaffProfile.staff_id)
-            .join(UserMaster, StaffProfile.staff_id == UserMaster.user_id)
-            .order_by(Department.name)
-            .all()
-        )
-        
-        result = []
-        for dept, staff, user in depts_with_admins:
-            result.append({
-                "department": dept.name,
-                "admin_name": staff.full_name,
-                "email": staff.email_contact or user.username,
-                "employee_code": staff.employee_code,
-                "is_active": user.is_active,
-            })
-        
-        # Also get departments without admins
-        depts_without_admins = Department.query.filter(
-            (Department.dept_admin_id == None) | (Department.dept_admin_id == '')
-        ).order_by(Department.name).all()
-        
-        for dept in depts_without_admins:
-            result.append({
-                "department": dept.name,
-                "admin_name": None,
-                "email": None,
-                "employee_code": None,
-                "is_active": None,
-            })
-        
-        return jsonify({"department_admins": result})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/superadmin/dept_admin/reset_password', methods=['POST'])
-@login_required
-@require_roles('Admin')
-def api_superadmin_reset_dept_admin_password():
-    """Reset password for a department admin and return the new password."""
-    deny = _require_superadmin_json()
-    if deny:
-        return deny
-    try:
-        data = request.json or {}
-        dept_name = (data.get('department') or '').strip()
-        
-        if not dept_name:
-            return jsonify({"error": "Department name is required"}), 400
-        
-        dept = Department.query.filter_by(name=dept_name).first()
-        if not dept:
-            return jsonify({"error": f"Department '{dept_name}' not found"}), 404
-        
-        if not dept.dept_admin_id:
-            return jsonify({"error": f"No admin assigned to department '{dept_name}'"}), 400
-        
-        user = UserMaster.query.get(dept.dept_admin_id)
-        if not user:
-            return jsonify({"error": "Admin user not found"}), 404
-        
-        # Generate new password - alphanumeric only for easy typing (no special chars)
-        import string
-        alphabet = string.ascii_letters + string.digits  # a-zA-Z0-9
-        new_password = ''.join(secrets.choice(alphabet) for _ in range(10))
-        user.password_hash = generate_password_hash(new_password)
-        user.must_change_password = True
-        
-        db.session.commit()
-        
-        # Log for debugging (don't log the actual password!)
-        app.logger.info(f"Password reset for {user.username} (dept: {dept_name})")
-        
-        return jsonify({
-            "message": "Password reset successfully",
-            "department": dept_name,
-            "email": user.username,
-            "new_password": new_password,
-            "note": "User must change password on first login"
-        })
-    except Exception as e:
-        db.session.rollback()
-        app.logger.exception(f"Password reset failed for dept {dept_name}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/setup/hierarchy', methods=['POST'])
-@login_required
-@require_roles('Admin')
-def setup_hierarchy():
-    """Create the School -> Program -> Department -> Specialization chain.
-
-    This is a one-time setup overlay; CSV structures remain unchanged.
-    """
-    try:
-        if not _is_super_admin():
-            return jsonify({"error": "Only SuperAdmin can run hierarchy setup"}), 403
-
-        data = request.json or {}
-        school_name = (data.get('school') or '').strip()
-        program_name = (data.get('program') or '').strip()
-        dept_name = (data.get('department') or '').strip()
-        spec_name = (data.get('spec_name') or '').strip()
-        spec_code = (data.get('spec_code') or '').strip()
-        # Dept admin creation is handled by /api/superadmin/dept_admin
-
-        if not school_name or not program_name or not dept_name or not spec_name or not spec_code:
-            return jsonify({"error": "Missing required fields: school, program, department, spec_name, spec_code"}), 400
-
-        school = School.query.filter_by(name=school_name).first()
-        if not school:
-            school = School(name=school_name)
-            db.session.add(school)
-            db.session.flush()
-
-        dept = Department.query.filter_by(name=dept_name).first()
-        if not dept:
-            dept = Department(name=dept_name, school_id=school.id)
-            db.session.add(dept)
-            db.session.flush()
-        else:
-            if getattr(dept, 'school_id', None) in (None, 0):
-                dept.school_id = school.id
-
-
-        # Program (legacy schema requires dept_id + level)
-        program = Program.query.filter_by(name=program_name, dept_id=dept.dept_id).first()
-        if not program:
-            program = Program(name=program_name, dept_id=dept.dept_id, level='Default', school_id=school.id)
-            db.session.add(program)
-            db.session.flush()
-        else:
-            if getattr(program, 'school_id', None) in (None, 0):
-                program.school_id = school.id
-
-        # Overlay link: Department -> Program
-        if getattr(dept, 'program_id', None) in (None, 0):
-            dept.program_id = program.id
-
-        # Specialization codes can repeat across departments/programs (e.g., Core -> "C").
-        # Always scope lookups by department + program.
-        spec = Specialization.query.filter_by(code=spec_code, dept_id=dept.dept_id, program_id=program.id).first()
-        if not spec:
-            spec = Specialization(name=spec_name, code=spec_code, dept_id=dept.dept_id, program_id=program.id)
-            db.session.add(spec)
-        else:
-            # Keep code stable; allow rename / re-link
-            spec.name = spec_name
-            spec.dept_id = dept.dept_id
-            spec.program_id = program.id
-
-        # Mark onboarding complete for the SuperAdmin once the first setup is saved.
-        # Guarded so deployments where the migration wasn't applied yet won't crash.
-        try:
-            from sqlalchemy import inspect as _sa_inspect
-            cols = {c['name'] for c in _sa_inspect(db.engine).get_columns('user_master')}
-            if 'onboarding_completed' in cols:
-                su = db.session.get(UserMaster, current_user.user_id)
-                if su is not None:
-                    su.onboarding_completed = True
-        except Exception:
-            pass
-
-        db.session.commit()
-        return jsonify({"message": "Hierarchy Created"}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/setup/tree', methods=['GET'])
-@login_required
-@require_roles('Admin')
-def get_hierarchy_tree():
-    if not _is_super_admin():
-        return jsonify({"error": "Only SuperAdmin can view hierarchy tree"}), 403
-    schools = School.query.order_by(School.name).all()
-    tree = []
-    for s in schools:
-        s_data = {"name": s.name, "programs": []}
-        programs = Program.query.filter_by(school_id=s.id).order_by(Program.name).all()
-
-        for p in programs:
-            p_data = {"name": p.name, "departments": []}
-
-            # Derive departments per program based on Specialization rows.
-            dept_ids = [r[0] for r in (db.session.query(Specialization.dept_id)
-                                      .filter(Specialization.program_id == p.id)
-                                      .filter(Specialization.dept_id != None)
-                                      .distinct()
-                                      .all())]
-            depts = []
-            if dept_ids:
-                depts = Department.query.filter(Department.dept_id.in_(dept_ids)).order_by(Department.name).all()
-
-            for d in depts:
-                d_data = {"name": d.name, "specializations": []}
-                specs = (Specialization.query
-                         .filter(Specialization.program_id == p.id, Specialization.dept_id == d.dept_id)
-                         .order_by(Specialization.code)
-                         .all())
-                for sp in specs:
-                    d_data["specializations"].append(f"{sp.name} ({sp.code})")
-                p_data["departments"].append(d_data)
-
-            s_data["programs"].append(p_data)
-
-        tree.append(s_data)
-    return jsonify(tree)
 
 
 @app.route('/api/admin/import_templates/<key>', methods=['GET'])
@@ -900,11 +240,11 @@ def api_admin_download_import_template(key: str):
     """
     templates = {
         # Existing sample files
-        'master_class': 'master_class_template.csv',
-        'staff': 'staff_master_template.csv',
-        'students': 'student_master_template.csv',
+        'master_class': 'master_class.csv',
+        'staff': 'staff_master.csv',
+        'students': 'student_master.csv',
         'weekly_schedule': 'weekly_schedule.csv',
-        'rooms': 'rooms_template.csv',
+        'rooms': 'IT_infra.csv',
         'semester_course_structure': 'semester_course_structure_template.csv',
         'subject_allocation': 'subject_allocation_template.csv',
     }
@@ -915,22 +255,6 @@ def api_admin_download_import_template(key: str):
 
     data_dir = os.path.join(app.root_path, 'data')
     return send_from_directory(data_dir, filename, as_attachment=True)
-
-
-# ==========================================
-# HELPER: TIMEZONE CONVERSION
-# ==========================================
-# India Standard Time is UTC+5:30
-IST = timezone(timedelta(hours=5, minutes=30))
-
-def _to_ist(dt):
-    """Convert a naive UTC datetime to IST string for display."""
-    if dt is None:
-        return None
-    # If naive datetime, assume UTC
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(IST).isoformat()
 
 
 # ==========================================
@@ -946,7 +270,6 @@ def _firebase_get_app():
     - FIREBASE_CREDENTIALS_FILE (path to service account json)
     - FIREBASE_CREDENTIALS_JSON (service account json string)
     - GOOGLE_APPLICATION_CREDENTIALS (path)
-    - Auto-discovery in secrets/ folder (for local development)
 
     Returns None when not configured; callers must treat push as best-effort.
     """
@@ -961,16 +284,6 @@ def _firebase_get_app():
     creds_file = os.environ.get('FIREBASE_CREDENTIALS_FILE') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
     creds_json = os.environ.get('FIREBASE_CREDENTIALS_JSON')
 
-    # Auto-discover Firebase credentials in secrets/ folder for local development
-    if not creds_file and not creds_json:
-        secrets_dir = os.path.join(os.path.dirname(__file__), 'secrets')
-        if os.path.isdir(secrets_dir):
-            for fname in os.listdir(secrets_dir):
-                if 'firebase' in fname.lower() and fname.endswith('.json'):
-                    creds_file = os.path.join(secrets_dir, fname)
-                    print(f"FCM: Auto-discovered credentials at {creds_file}")
-                    break
-
     if not creds_file and not creds_json:
         _FIREBASE_APP = None
         return None
@@ -979,48 +292,27 @@ def _firebase_get_app():
         if creds_json:
             info = json.loads(creds_json)
             cred = firebase_credentials.Certificate(info)
-            print(f"FCM: Loaded credentials from JSON env var, project_id={info.get('project_id')}")
         else:
-            print(f"FCM: Loading credentials from file: {creds_file}")
             cred = firebase_credentials.Certificate(creds_file)
 
         try:
             _FIREBASE_APP = firebase_admin.initialize_app(cred)
-            print(f"FCM: Firebase app initialized, project_id={_FIREBASE_APP.project_id}")
         except ValueError:
             _FIREBASE_APP = firebase_admin.get_app()
-            print(f"FCM: Firebase app already existed, project_id={_FIREBASE_APP.project_id}")
         return _FIREBASE_APP
     except Exception as e:
-        import traceback
         print(f"FCM init failed: {e}")
-        traceback.print_exc()
         _FIREBASE_APP = None
         return None
 
 
-_fcm_last_error = None  # Store last FCM error for debugging
-
 def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
     """Send a push notification to a list of FCM tokens (best-effort)."""
-    global _fcm_last_error
-    _fcm_last_error = None
-
     if not tokens:
-        _fcm_last_error = "no tokens provided"
         return 0
 
-    fb_app = _firebase_get_app()
-    if fb_app is None:
-        _fcm_last_error = "Firebase not initialized - check credentials"
+    if _firebase_get_app() is None:
         return 0
-
-    # Log project info for debugging
-    try:
-        project_id = fb_app.project_id
-        print(f"FCM: Using project_id={project_id}, sending to {len(tokens)} token(s)")
-    except Exception as e:
-        print(f"FCM: Could not get project_id: {e}")
 
     try:
         # FCM requires all data values to be strings.
@@ -1030,26 +322,9 @@ def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
                 continue
             safe_data[str(k)] = str(v)
 
-        # Include title/body in data so our app always handles display (even in background)
-        safe_data['title'] = title or ''
-        safe_data['body'] = (body or '')[:240]
-        safe_data['message'] = (body or '')[:240]
-
-        # Android config for high-priority delivery and our custom channel
-        android_config = firebase_messaging.AndroidConfig(
-            priority='high',
-            notification=firebase_messaging.AndroidNotification(
-                channel_id='ams_alerts',
-                priority='high',
-                default_sound=True,
-                default_vibrate_timings=True,
-            )
-        )
-
         msg = firebase_messaging.MulticastMessage(
             notification=firebase_messaging.Notification(title=title or '', body=(body or '')[:240]),
             data=safe_data,
-            android=android_config,
             tokens=tokens,
         )
 
@@ -1068,7 +343,6 @@ def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
                     m = firebase_messaging.Message(
                         notification=firebase_messaging.Notification(title=title or '', body=(body or '')[:240]),
                         data=safe_data,
-                        android=android_config,
                         token=t,
                     )
                     firebase_messaging.send(m)
@@ -1090,7 +364,6 @@ def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
                     exc = getattr(r, 'exception', None)
                     if exc:
                         errors.append(str(exc))
-                _fcm_last_error = "; ".join(errors) if errors else f"{failure_count} failures (no details)"
                 print(f"FCM send result: success={success_count} failure={failure_count} sample_errors={errors}")
             else:
                 print(f"FCM send result: success={success_count} failure={failure_count}")
@@ -1099,7 +372,6 @@ def _fcm_send_to_tokens(tokens, title: str, body: str, data: dict):
 
         return success_count
     except Exception as e:
-        _fcm_last_error = str(e)
         print(f"FCM send failed: {e}")
         return 0
 
@@ -1124,31 +396,23 @@ def _fcm_send_to_user(user_id: str, title: str, body: str, data: dict):
 
 
 def _fcm_send_to_user_debug(user_id: str, title: str, body: str, data: dict) -> dict:
-    """Debug helper returning counts: {tokens, success, error}."""
+    """Debug helper returning counts: {tokens, success}."""
     if not user_id:
-        return {"tokens": 0, "success": 0, "error": "no user_id"}
+        return {"tokens": 0, "success": 0}
 
     try:
-        # Check if Firebase is initialized
-        firebase_app = _firebase_get_app()
-        if firebase_app is None:
-            return {"tokens": 0, "success": 0, "error": "Firebase not initialized - check credentials"}
-
         devices = (PushDevice.query
                    .filter_by(user_id=user_id, is_active=True)
                    .all())
         tokens = [d.fcm_token for d in devices if d.fcm_token]
         if not tokens:
-            return {"tokens": 0, "success": 0, "error": "no tokens registered"}
+            return {"tokens": 0, "success": 0}
 
         success = _fcm_send_to_tokens(tokens, title, body, data)
-        result = {"tokens": len(tokens), "success": int(success or 0)}
-        if success == 0:
-            result["error"] = _fcm_last_error or "FCM send returned 0 success - unknown error"
-        return result
+        return {"tokens": len(tokens), "success": int(success or 0)}
     except Exception as e:
         print(f"FCM debug lookup/send failed for user {user_id}: {e}")
-        return {"tokens": 0, "success": 0, "error": str(e)}
+        return {"tokens": 0, "success": 0}
 
 
 def send_notification(user_id, title, message, type='info', link=None):
@@ -1644,22 +908,15 @@ def _get_student_timetable_payload(student: StudentProfile):
 
     my_batch_name = _get_student_batch_name(student)
 
-    # Get active version for this section
-    active_version_id = get_active_version_id(section.section_id)
-
-    query = (
+    slots = (
         db.session.query(WeeklySchedule, Subject, StaffProfile, RoomMaster)
         .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
         .outerjoin(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
         .outerjoin(RoomMaster, WeeklySchedule.room_id == RoomMaster.room_id)
         .filter(WeeklySchedule.section_id == section.section_id)
+        .all()
     )
 
-    # Filter by active version if one exists
-    if active_version_id:
-        query = query.filter(WeeklySchedule.version_id == active_version_id)
-
-    slots = query.all()
     day_order = {'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6}
     entries = []
     for sched, subj, teacher, room in slots:
@@ -1840,26 +1097,9 @@ def parse_flexible_time(time_str):
         except ValueError: continue
     return None
 
-def log_activity(action, desc, user=None, dept_id=None):
-    """Log an activity with the current user's name, department, and UTC timestamp."""
+def log_activity(action, desc, user="Admin"):
     try:
-        # Get current user and department if not specified
-        if user is None:
-            user = "System"
-            if hasattr(session, 'get') and session.get('user_id'):
-                from sql_connection import UserMaster, StaffProfile
-                u = UserMaster.query.get(session['user_id'])
-                if u:
-                    staff = StaffProfile.query.filter_by(staff_id=u.user_id).first()
-                    user = staff.full_name if staff else u.username
-                    # Get department ID for scoped logging (if not explicitly passed)
-                    if dept_id is None and staff:
-                        if staff.admin_access_dept_id:
-                            dept_id = staff.admin_access_dept_id
-                        elif staff.primary_department_id:
-                            dept_id = staff.primary_department_id
-        
-        log = SystemLog(action_type=action, description=desc, performed_by=user, dept_id=dept_id)
+        log = SystemLog(action_type=action, description=desc, performed_by=user)
         db.session.add(log)
         db.session.commit()
     except Exception as e: print(f"Logging Failed: {e}")
@@ -1934,78 +1174,18 @@ def render_student_feedback():
 # API: CORE UTILITIES
 # ==========================================
 @app.route('/api/core/classes', methods=['GET'])
-@login_required
 def get_core_classes():
     try:
-        role_cf = (getattr(current_user, 'user_type', '') or '').strip().casefold()
-
-        # SuperAdmin can enumerate all.
-        scope_dept_ids = _get_user_scope_dept_ids()
-        if scope_dept_ids is None:
-            classes = ClassSection.query.order_by(ClassSection.class_level, ClassSection.name).all()
-            return jsonify({"classes": [{"id": c.section_id, "name": f"{c.class_level} - {c.name}"} for c in classes]})
-
-        # Student/Parent: only their linked section(s)
-        if role_cf == 'student':
-            sp = StudentProfile.query.filter_by(student_id=current_user.user_id).first()
-            if not sp or not sp.current_section_id:
-                return jsonify({"classes": []})
-            sec = db.session.get(ClassSection, int(sp.current_section_id))
-            if not sec:
-                return jsonify({"classes": []})
-            return jsonify({"classes": [{"id": sec.section_id, "name": f"{sec.class_level} - {sec.name}"}]})
-
-        if role_cf == 'parent':
-            child = StudentProfile.query.filter_by(parent_user_id=current_user.user_id).first()
-            if not child or not child.current_section_id:
-                return jsonify({"classes": []})
-            sec = db.session.get(ClassSection, int(child.current_section_id))
-            if not sec:
-                return jsonify({"classes": []})
-            return jsonify({"classes": [{"id": sec.section_id, "name": f"{sec.class_level} - {sec.name}"}]})
-
-        # Admin/Staff: only sections in scoped departments
-        if not scope_dept_ids:
-            return jsonify({"classes": []})
-
-        classes = (db.session.query(ClassSection)
-                   .join(Specialization, ClassSection.spec_id == Specialization.id)
-                   .filter(Specialization.dept_id.in_(scope_dept_ids))
-                   .order_by(ClassSection.class_level, ClassSection.name)
-                   .all())
-
+        classes = ClassSection.query.order_by(ClassSection.class_level, ClassSection.name).all()
         return jsonify({"classes": [{"id": c.section_id, "name": f"{c.class_level} - {c.name}"} for c in classes]})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 # In app.py
 
 @app.route('/api/core/students', methods=['GET'])
-@login_required
 def get_students_by_section():
     try:
         section_id = request.args.get('section_id')
-        if not section_id:
-            return jsonify({"error": "section_id is required"}), 400
-
-        role_cf = (getattr(current_user, 'user_type', '') or '').strip().casefold()
-
-        # SuperAdmin can enumerate any section.
-        scope_dept_ids = _get_user_scope_dept_ids()
-        if scope_dept_ids is None:
-            pass
-        elif role_cf == 'student':
-            sp = StudentProfile.query.filter_by(student_id=current_user.user_id).first()
-            if not sp or str(getattr(sp, 'current_section_id', '')) != str(section_id):
-                return jsonify({"error": "Out of scope"}), 403
-        elif role_cf == 'parent':
-            child = StudentProfile.query.filter_by(parent_user_id=current_user.user_id).first()
-            if not child or str(getattr(child, 'current_section_id', '')) != str(section_id):
-                return jsonify({"error": "Out of scope"}), 403
-        else:
-            deny = _ensure_section_in_scope(int(section_id))
-            if deny:
-                return deny
-
         students = StudentProfile.query.filter_by(current_section_id=section_id).order_by(StudentProfile.admission_number).all()
         
         student_list = []
@@ -2027,7 +1207,7 @@ def get_students_by_section():
                 attended = AttendanceTransaction.query.filter(
                     AttendanceTransaction.session_id.in_(sess_ids),
                     AttendanceTransaction.student_id == s.student_id,
-                                AttendanceTransaction.status.in_(PRESENT_STATUSES)
+                    AttendanceTransaction.status.in_(['Present', 'OnDuty'])
                 ).count()
             perc = round((attended / total_sessions) * 100, 1) if total_sessions > 0 else 0
 
@@ -2117,8 +1297,7 @@ def login():
         if not user.is_active:
             return jsonify({"error": "Account Deactivated."}), 403
 
-        user_type_raw = (user.user_type or '').strip()
-        role = 'SuperAdmin' if user_type_raw.casefold() == 'superadmin' else user_type_raw.capitalize()
+        role = user.user_type.capitalize()
         
         # Zombie Check (Safety)
         if role == 'Staff' and not StaffProfile.query.filter_by(staff_id=user.user_id).first():
@@ -2132,12 +1311,11 @@ def login():
         login_user(user, remember=False)
         session.permanent = True  # Use PERMANENT_SESSION_LIFETIME
              
-        redirect_map = {
-            'Student': '/student/dashboard',
-            'Staff': '/staff/dashboard',
-            'Parent': '/parent/dashboard',
-            'Admin': '/admin/dashboard',
-            'SuperAdmin': '/superadmin/dashboard',
+        redirect_map = { 
+            'Student': '/student/dashboard', 
+            'Staff': '/staff/dashboard', 
+            'Parent': '/parent/dashboard', 
+            'Admin': '/admin/dashboard' 
         }
         
         # Store user info in session for secure authentication
@@ -2147,24 +1325,6 @@ def login():
         
         # If user must change password, redirect to password change page
         redirect_url = '/change-password' if must_change else redirect_map.get(role, '/')
-
-        # First login onboarding for SuperAdmin.
-        # Use persistent flag; fall back to School-count heuristic for older DBs.
-        if not must_change and role == 'SuperAdmin':
-            try:
-                # Prefer the persistent flag if the column exists; otherwise fall back.
-                from sqlalchemy import inspect as _sa_inspect
-                cols = {c['name'] for c in _sa_inspect(db.engine).get_columns('user_master')}
-                if 'onboarding_completed' in cols:
-                    # Accessing the deferred attribute triggers a SELECT; safe only when column exists.
-                    if bool(getattr(user, 'onboarding_completed', False)) is False:
-                        redirect_url = '/superadmin/setup_hierarchy'
-                else:
-                    if School.query.count() == 0:
-                        redirect_url = '/superadmin/setup_hierarchy'
-            except Exception:
-                # Safe default: send SuperAdmin to setup.
-                redirect_url = '/superadmin/setup_hierarchy'
         
         return jsonify({
             "message": "Success", 
@@ -2233,9 +1393,7 @@ def api_change_password():
         'Student': '/student/dashboard', 
         'Staff': '/staff/dashboard', 
         'Parent': '/parent/dashboard', 
-        'Admin': '/admin/dashboard',
-        'Superadmin': '/admin/dashboard',
-        'SuperAdmin': '/admin/dashboard',
+        'Admin': '/admin/dashboard' 
     }
     
     return jsonify({
@@ -2248,9 +1406,7 @@ def api_change_password():
 @login_required
 def api_me():
     """Return the current user's basic info for frontend session validation."""
-    raw_type = (current_user.user_type or '').strip()
-    is_super_admin = raw_type.casefold() == 'superadmin'
-    role = 'SuperAdmin' if is_super_admin else raw_type.capitalize()
+    role = (current_user.user_type or '').capitalize()
     
     # Get display name
     name = ''
@@ -2265,342 +1421,12 @@ def api_me():
     else:
         name = current_user.user_id
     
-    admin_dept_id = None
-    admin_dept_name = None
-    try:
-        # For Admin users (department admin), expose the scoped department for UI locking.
-        if not is_super_admin and raw_type.casefold() == 'admin':
-            staff = StaffProfile.query.filter_by(staff_id=current_user.user_id).first()
-            dept_id = getattr(staff, 'admin_access_dept_id', None) if staff else None
-            if not dept_id:
-                dept = Department.query.filter_by(dept_admin_id=current_user.user_id).first()
-                dept_id = dept.dept_id if dept else None
-            if dept_id:
-                admin_dept_id = int(dept_id)
-                dept = Department.query.get(admin_dept_id)
-                admin_dept_name = dept.name if dept else None
-    except Exception:
-        admin_dept_id = None
-        admin_dept_name = None
-
     return jsonify({
         "user_id": current_user.user_id,
         "role": role,
-        "is_super_admin": is_super_admin,
         "name": name,
-        "must_change_password": current_user.must_change_password or False,
-        "admin_dept_id": admin_dept_id,
-        "admin_dept_name": admin_dept_name,
+        "must_change_password": current_user.must_change_password or False
     }), 200
-
-
-@app.route('/api/superadmin/dept_admin', methods=['POST'])
-@login_required
-@require_roles('Admin')
-def api_superadmin_create_or_assign_dept_admin():
-    deny = _require_superadmin_json()
-    if deny:
-        return deny
-    data = request.get_json(silent=True) or {}
-    dept_name = (data.get('department') or '').strip()
-    full_name = (data.get('full_name') or '').strip()
-    employee_code = (data.get('employee_code') or '').strip()
-    email = (data.get('email') or '').strip()
-    password = data.get('password') or ''
-
-    if not dept_name:
-        return jsonify({"error": "department is required"}), 400
-    if not employee_code:
-        return jsonify({"error": "employee_code is required"}), 400
-    if not email:
-        return jsonify({"error": "email is required"}), 400
-    if not password:
-        return jsonify({"error": "password is required"}), 400
-    if not full_name:
-        full_name = email
-
-    dept = Department.query.filter_by(name=dept_name).first()
-    if not dept:
-        return jsonify({"error": f"Department '{dept_name}' not found. Create it in hierarchy first."}), 400
-
-    # If staff exists by employee_code, bind that account; else create new staff+user.
-    staff = StaffProfile.query.filter(StaffProfile.employee_code.ilike(employee_code)).first()
-    user = None
-
-    # Email uniqueness: username is the login.
-    existing_by_email = UserMaster.query.filter(UserMaster.username.ilike(email)).first()
-    if existing_by_email and (not staff or existing_by_email.user_id != staff.staff_id):
-        return jsonify({"error": "A user with this email already exists"}), 400
-
-    if staff:
-        user = db.session.get(UserMaster, staff.staff_id)
-        if not user:
-            return jsonify({"error": "StaffProfile exists but user account is missing"}), 400
-        user.username = email
-        user.password_hash = generate_password_hash(password)
-        user.user_type = 'Admin'
-        user.is_active = True
-    else:
-        new_id = str(uuid.uuid4())
-        user = UserMaster(
-            user_id=new_id,
-            username=email,
-            password_hash=generate_password_hash(password),
-            user_type='Admin',
-            is_active=True,
-        )
-        db.session.add(user)
-        db.session.flush()
-        staff = StaffProfile(
-            staff_id=new_id,
-            full_name=full_name,
-            employee_code=employee_code,
-            email_contact=email,
-            admin_access_dept_id=dept.dept_id,
-        )
-        db.session.add(staff)
-
-        # Break circular FK dependency (Department.dept_admin_id -> StaffProfile.staff_id
-        # and StaffProfile.admin_access_dept_id -> Department.dept_id) by inserting the
-        # staff row first, then updating the department.
-        db.session.flush()
-
-    # Scope and assign
-    staff.admin_access_dept_id = dept.dept_id
-    dept.dept_admin_id = staff.staff_id
-
-    db.session.commit()
-    return jsonify({"message": f"Department admin set for {dept.name} ({email})"}), 200
-
-
-@app.route('/api/superadmin/hierarchy/import', methods=['POST'])
-@login_required
-@require_roles('Admin')
-def api_superadmin_import_hierarchy_csv():
-    """Import hierarchy from CSV and auto-create one department-admin login per department.
-
-    Expected headers (case/spacing tolerant):
-      - School, Degree, Program, Department, Specialization
-
-    Optional headers:
-      - Specialization Code
-    """
-    deny = _require_superadmin_json()
-    if deny:
-        return deny
-    try:
-        file = get_db_file_handle(request)
-        df = pd.read_csv(file, dtype=str).fillna('')
-
-        # Map normalized headers to actual column names
-        col_map = {_normalize_header(c): c for c in df.columns}
-        def col(*candidates):
-            for cand in candidates:
-                k = _normalize_header(cand)
-                if k in col_map:
-                    return col_map[k]
-            return None
-
-        school_col = col('School')
-        degree_col = col('Degree')
-        program_col = col('Program')
-        dept_col = col('Department')
-        spec_col = col('Specialization', 'Specialisation')
-        spec_code_col = col('Specialization Code', 'Spec Code', 'Specialisation Code')
-
-        required = {'School': school_col, 'Degree': degree_col, 'Program': program_col, 'Department': dept_col, 'Specialization': spec_col}
-        missing = [k for k, v in required.items() if not v]
-        if missing:
-            return jsonify({"error": f"Missing required columns: {', '.join(missing)}"}), 400
-
-        email_domain = (os.environ.get('ADMIN_EMAIL_DOMAIN') or 'mituniversity.edu.in').strip()
-
-        created = {
-            'schools': 0,
-            'departments': 0,
-            'programs': 0,
-            'specializations': 0,
-            'dept_admins': 0,
-            'dept_admins_existing': 0,
-        }
-        dept_admin_credentials = []
-
-        # Cache lookups
-        schools_by_name = {s.name: s for s in School.query.all()}
-        depts_by_name = {_canonical_department_name(d.name): d for d in Department.query.all()}
-
-        # We'll create programs/specs on demand
-        for _, row in df.iterrows():
-            school_name = str(row.get(school_col, '')).strip()
-            degree = str(row.get(degree_col, '')).strip() or 'Default'
-            program_name = str(row.get(program_col, '')).strip() or 'Default'
-            dept_name_raw = str(row.get(dept_col, '')).strip()
-            dept_name = _canonical_department_name(dept_name_raw)
-            spec_name = str(row.get(spec_col, '')).strip()
-            spec_code = str(row.get(spec_code_col, '')).strip() if spec_code_col else ''
-
-            if not school_name or not dept_name or not spec_name:
-                continue
-
-            school = schools_by_name.get(school_name)
-            if not school:
-                school = School(name=school_name)
-                db.session.add(school)
-                db.session.flush()
-                schools_by_name[school_name] = school
-                created['schools'] += 1
-
-            dept = depts_by_name.get(dept_name)
-            if not dept:
-                dept = Department(name=dept_name, school_id=school.id)
-                db.session.add(dept)
-                db.session.flush()
-                depts_by_name[dept_name] = dept
-                created['departments'] += 1
-            else:
-                if getattr(dept, 'school_id', None) in (None, 0):
-                    dept.school_id = school.id
-
-            program = Program.query.filter_by(name=program_name, dept_id=dept.dept_id).first()
-            if not program:
-                program = Program(name=program_name, dept_id=dept.dept_id, level=degree, school_id=school.id)
-                db.session.add(program)
-                db.session.flush()
-                created['programs'] += 1
-            else:
-                if getattr(program, 'school_id', None) in (None, 0):
-                    program.school_id = school.id
-
-            if getattr(dept, 'program_id', None) in (None, 0):
-                dept.program_id = program.id
-
-            if not spec_code:
-                spec_code = _spec_code_from_name(spec_name)
-
-            # Ensure uniqueness of spec_code per (department, program)
-            base_code = spec_code
-            suffix = 1
-            while Specialization.query.filter_by(code=spec_code, dept_id=dept.dept_id, program_id=program.id).first() is not None:
-                suffix += 1
-                spec_code = f"{base_code}{suffix}"
-
-            # Scope specialization lookup by department + program to avoid collisions
-            # (e.g., Core -> "C" can exist in both IT and CSE).
-            spec = Specialization.query.filter_by(code=spec_code, dept_id=dept.dept_id, program_id=program.id).first()
-            if not spec:
-                spec = Specialization(name=spec_name, code=spec_code, dept_id=dept.dept_id, program_id=program.id)
-                db.session.add(spec)
-                created['specializations'] += 1
-            else:
-                spec.name = spec_name
-                spec.dept_id = dept.dept_id
-                spec.program_id = program.id
-
-        # Create/assign one dept admin per department (if not already assigned)
-        # IMPORTANT: there is a circular FK between staff_profile.admin_access_dept_id -> department
-        # and department.dept_admin_id -> staff_profile. To avoid FK violations during autoflush,
-        # we explicitly flush the staff row before setting dept_admin_id.
-        with db.session.no_autoflush:
-            for dept in depts_by_name.values():
-                if getattr(dept, 'dept_admin_id', None):
-                    continue
-                dept_code = _dept_code_from_name(dept.name)
-                username = f"admin.{dept_code.lower()}@{email_domain}"
-
-                # Create unique employee code
-                emp_base = f"ADMIN_{dept_code}"
-                emp_code = emp_base
-                n = 0
-                while StaffProfile.query.filter(StaffProfile.employee_code.ilike(emp_code)).first() is not None:
-                    n += 1
-                    emp_code = f"{emp_base}{n}"
-
-                existing_user = UserMaster.query.filter(UserMaster.username.ilike(username)).first()
-                if existing_user:
-                    # Bind existing account as this department's admin.
-                    staff = StaffProfile.query.filter_by(staff_id=existing_user.user_id).first()
-                    if not staff:
-                        staff = StaffProfile(
-                            staff_id=existing_user.user_id,
-                            full_name=f"{dept_code} Department Admin",
-                            employee_code=emp_code,
-                            email_contact=username,
-                            admin_access_dept_id=dept.dept_id,
-                        )
-                        db.session.add(staff)
-                        db.session.flush()
-                    else:
-                        staff.admin_access_dept_id = dept.dept_id
-
-                    existing_user.user_type = 'Admin'
-                    existing_user.is_active = True
-                    existing_user.must_change_password = existing_user.must_change_password or True
-
-                    dept.dept_admin_id = staff.staff_id
-                    created['dept_admins_existing'] += 1
-                    dept_admin_credentials.append({
-                        'department': dept.name,
-                        'email': username,
-                        'employee_code': staff.employee_code,
-                        'password': None,
-                        'note': 'already existed; password not reset',
-                    })
-                    continue
-
-                # Create the user + staff
-                password = secrets.token_urlsafe(10)
-                new_id = str(uuid.uuid4())
-                user = UserMaster(
-                    user_id=new_id,
-                    username=username,
-                    password_hash=generate_password_hash(password),
-                    user_type='Admin',
-                    is_active=True,
-                    must_change_password=True,
-                )
-                db.session.add(user)
-                db.session.flush()
-
-                staff = StaffProfile(
-                    staff_id=new_id,
-                    full_name=f"{dept_code} Department Admin",
-                    employee_code=emp_code,
-                    email_contact=username,
-                    admin_access_dept_id=dept.dept_id,
-                )
-                db.session.add(staff)
-                db.session.flush()  # ensure staff_profile row exists before setting dept FK
-
-                dept.dept_admin_id = staff.staff_id
-
-                created['dept_admins'] += 1
-                dept_admin_credentials.append({
-                    'department': dept.name,
-                    'email': username,
-                    'employee_code': emp_code,
-                    'password': password,
-                })
-
-        # Mark onboarding complete for SuperAdmin if possible
-        try:
-            from sqlalchemy import inspect as _sa_inspect
-            cols = {c['name'] for c in _sa_inspect(db.engine).get_columns('user_master')}
-            if 'onboarding_completed' in cols:
-                su = db.session.get(UserMaster, current_user.user_id)
-                if su is not None:
-                    su.onboarding_completed = True
-        except Exception:
-            pass
-
-        db.session.commit()
-        return jsonify({
-            'message': 'Imported',
-            'created': created,
-            'department_admins': dept_admin_credentials,
-        }), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
 
 
 # ==========================================
@@ -2779,7 +1605,7 @@ def api_v1_notifications_list():
                 "type": n.type,
                 "link": n.link,
                 "is_read": bool(n.is_read),
-                "timestamp": _to_ist(n.timestamp),
+                "timestamp": n.timestamp.isoformat() if n.timestamp else None,
                 "child": c,
             })
     else:
@@ -2792,7 +1618,7 @@ def api_v1_notifications_list():
                 "type": n.type,
                 "link": n.link,
                 "is_read": bool(n.is_read),
-                "timestamp": _to_ist(n.timestamp),
+                "timestamp": n.timestamp.isoformat() if n.timestamp else None,
             })
 
     return jsonify({"notifications": items}), 200
@@ -2821,31 +1647,6 @@ def api_v1_notifications_mark_read(notif_id: int):
     n.is_read = True
     db.session.commit()
     return jsonify({"message": "OK"}), 200
-
-
-@app.route('/api/v1/notifications/clear', methods=['DELETE'])
-def api_v1_notifications_clear():
-    """Delete all notifications for the current user."""
-    try:
-        user = _require_mobile_auth()
-    except PermissionError:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    role = (user.user_type or '').lower()
-    deleted_count = 0
-
-    if role == 'parent':
-        # For parents, delete notifications for all their children
-        children = StudentProfile.query.filter_by(parent_user_id=user.user_id).all()
-        child_ids = [c.student_id for c in children]
-        if child_ids:
-            deleted_count = Notification.query.filter(Notification.user_id.in_(child_ids)).delete(synchronize_session=False)
-    else:
-        # For other users, delete their own notifications
-        deleted_count = Notification.query.filter_by(user_id=user.user_id).delete(synchronize_session=False)
-
-    db.session.commit()
-    return jsonify({"message": "OK", "deleted": deleted_count}), 200
 
 
 # ==========================================
@@ -2957,14 +1758,11 @@ def api_v1_push_test():
         },
     )
 
-    response = {
+    return jsonify({
         "message": "sent",
         "push_tokens": push_stats.get("tokens", 0),
         "push_success": push_stats.get("success", 0),
-    }
-    if push_stats.get("error"):
-        response["push_error"] = push_stats.get("error")
-    return jsonify(response), 200
+    }), 200
 
 
 # ==========================================
@@ -3193,279 +1991,6 @@ def api_v1_parent_child_results(child_id: str):
         return jsonify({"error": "Invalid child_id"}), 404
 
     return jsonify(_get_student_results_payload(child.student_id)), 200
-
-
-# ==========================================
-# MOBILE API v1: EXTRA SESSIONS
-# ==========================================
-@app.route('/api/v1/extra_sessions', methods=['GET'])
-def api_v1_extra_sessions_list():
-    """Get extra sessions for the authenticated user (staff sees their own, students see their section's)."""
-    try:
-        user = _require_mobile_auth()
-    except PermissionError:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    role = (user.user_type or '').lower()
-    today = datetime.now().date()
-    result = []
-
-    if role == 'staff':
-        # Staff sees their own extra sessions
-        sessions = (db.session.query(ExtraSession, Subject, ClassSection)
-                    .join(Subject, ExtraSession.subject_id == Subject.subject_id)
-                    .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
-                    .filter(ExtraSession.teacher_id == user.user_id)
-                    .filter(ExtraSession.status != 'Cancelled')
-                    .filter(ExtraSession.date >= today)
-                    .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
-                    .all())
-
-        for es, subj, sec in sessions:
-            session_log = SessionLog.query.filter_by(extra_session_id=es.id).first()
-            result.append({
-                "id": es.id,
-                "subject_id": es.subject_id,
-                "subject_name": subj.name,
-                "section_id": es.section_id,
-                "section_name": f"{sec.class_level}-{sec.name}",
-                "date": es.date.isoformat(),
-                "start_time": es.start_time.strftime('%H:%M'),
-                "end_time": es.end_time.strftime('%H:%M'),
-                "topic": es.topic,
-                "meeting_link": es.meeting_link,
-                "status": es.status,
-                "attendance_marked": session_log is not None,
-                "is_today": es.date == today
-            })
-
-    elif role == 'student':
-        # Student sees extra sessions for their section (filtered by elective if applicable)
-        student = StudentProfile.query.filter_by(student_id=user.user_id).first()
-        if student and student.current_section_id:
-            sessions = (db.session.query(ExtraSession, Subject, ClassSection, StaffProfile)
-                        .join(Subject, ExtraSession.subject_id == Subject.subject_id)
-                        .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
-                        .join(StaffProfile, ExtraSession.teacher_id == StaffProfile.staff_id)
-                        .filter(ExtraSession.section_id == student.current_section_id)
-                        .filter(ExtraSession.status != 'Cancelled')
-                        .filter(ExtraSession.date >= today)
-                        .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
-                        .all())
-
-            for es, subj, sec, teacher in sessions:
-                # Filter by elective: only show if student has approved selection
-                if is_elective_type(subj.subject_type):
-                    approved = StudentElective.query.filter_by(
-                        student_id=student.student_id,
-                        subject_id=subj.subject_id,
-                        status='Approved'
-                    ).first()
-                    if not approved:
-                        continue  # Skip - student hasn't opted for this elective
-
-                result.append({
-                    "id": es.id,
-                    "subject_name": subj.name,
-                    "section_name": f"{sec.class_level}-{sec.name}",
-                    "teacher_name": teacher.full_name,
-                    "date": es.date.isoformat(),
-                    "start_time": es.start_time.strftime('%H:%M'),
-                    "end_time": es.end_time.strftime('%H:%M'),
-                    "topic": es.topic,
-                    "meeting_link": es.meeting_link,
-                    "status": es.status,
-                    "is_today": es.date == today
-                })
-
-    elif role == 'parent':
-        # Parent sees extra sessions for all their children (filtered by elective if applicable)
-        children = StudentProfile.query.filter_by(parent_user_id=user.user_id).all()
-        for child in children:
-            if not child.current_section_id:
-                continue  # Skip children without assigned section
-
-            sessions = (db.session.query(ExtraSession, Subject, ClassSection, StaffProfile)
-                        .join(Subject, ExtraSession.subject_id == Subject.subject_id)
-                        .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
-                        .join(StaffProfile, ExtraSession.teacher_id == StaffProfile.staff_id)
-                        .filter(ExtraSession.section_id == child.current_section_id)
-                        .filter(ExtraSession.status != 'Cancelled')
-                        .filter(ExtraSession.date >= today)
-                        .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
-                        .all())
-
-            for es, subj, sec, teacher in sessions:
-                # Filter by elective: only show if child has approved selection
-                if is_elective_type(subj.subject_type):
-                    approved = StudentElective.query.filter_by(
-                        student_id=child.student_id,
-                        subject_id=subj.subject_id,
-                        status='Approved'
-                    ).first()
-                    if not approved:
-                        continue  # Skip - child hasn't opted for this elective
-
-                result.append({
-                    "id": es.id,
-                    "child_name": child.full_name,
-                    "child_id": child.student_id,
-                    "subject_name": subj.name,
-                    "section_name": f"{sec.class_level}-{sec.name}",
-                    "teacher_name": teacher.full_name,
-                    "date": es.date.isoformat(),
-                    "start_time": es.start_time.strftime('%H:%M'),
-                    "end_time": es.end_time.strftime('%H:%M'),
-                    "topic": es.topic,
-                    "meeting_link": es.meeting_link,
-                    "status": es.status,
-                    "is_today": es.date == today
-                })
-
-    return jsonify({"extra_sessions": result}), 200
-
-
-@app.route('/api/v1/extra_sessions', methods=['POST'])
-def api_v1_extra_sessions_create():
-    """Create a new extra session (staff only)."""
-    try:
-        user = _require_mobile_auth()
-        _require_role(user, {'staff'})
-    except PermissionError:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    data = request.json or {}
-    subject_id = data.get('subject_id')
-    section_id = data.get('section_id')
-    date_str = data.get('date')
-    start_time_str = data.get('start_time')
-    end_time_str = data.get('end_time')
-    topic = data.get('topic', '').strip()
-    meeting_link = data.get('meeting_link', '').strip()
-
-    if not all([subject_id, section_id, date_str, start_time_str, end_time_str]):
-        return jsonify({"error": "Missing required fields"}), 400
-
-    try:
-        from datetime import time as dt_time
-        session_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-        start_time = datetime.strptime(start_time_str, '%H:%M').time()
-        end_time = datetime.strptime(end_time_str, '%H:%M').time()
-    except ValueError:
-        return jsonify({"error": "Invalid date/time format"}), 400
-
-    # Validation: Date not in past
-    if session_date < datetime.now().date():
-        return jsonify({"error": "Cannot schedule sessions in the past"}), 400
-
-    # Validation: Weekday must be after 17:00
-    from datetime import time as dt_time
-    day_of_week = session_date.weekday()
-    is_weekend = day_of_week >= 5
-
-    if not is_weekend and start_time < dt_time(17, 0):
-        return jsonify({"error": "Weekday extra sessions must start after 5:00 PM"}), 400
-
-    # Validation: Check section conflict
-    conflicting = ExtraSession.query.filter(
-        ExtraSession.section_id == section_id,
-        ExtraSession.date == session_date,
-        ExtraSession.status != 'Cancelled',
-        db.or_(
-            db.and_(ExtraSession.start_time <= start_time, ExtraSession.end_time > start_time),
-            db.and_(ExtraSession.start_time < end_time, ExtraSession.end_time >= end_time),
-            db.and_(ExtraSession.start_time >= start_time, ExtraSession.end_time <= end_time)
-        )
-    ).first()
-
-    if conflicting:
-        return jsonify({"error": "This class already has an extra session scheduled at this time"}), 400
-
-    extra_session = ExtraSession(
-        subject_id=subject_id,
-        teacher_id=user.user_id,
-        section_id=section_id,
-        date=session_date,
-        start_time=start_time,
-        end_time=end_time,
-        topic=topic if topic else None,
-        meeting_link=meeting_link if meeting_link else None,
-        status='Scheduled'
-    )
-    db.session.add(extra_session)
-    db.session.commit()
-
-    # Send notification to students (filter by elective if applicable)
-    subject = Subject.query.get(subject_id)
-    if is_elective_type(subject.subject_type):
-        # Only notify students with approved elective selection
-        students = (db.session.query(StudentProfile)
-                    .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
-                    .filter(StudentProfile.current_section_id == section_id)
-                    .filter(StudentElective.subject_id == subject_id)
-                    .filter(StudentElective.status == 'Approved')
-                    .all())
-    else:
-        students = StudentProfile.query.filter_by(current_section_id=section_id).all()
-
-    for student in students:
-        send_notification(
-            student.student_id,
-            f"Extra Class: {subject.name}",
-            f"Extra class scheduled on {session_date.strftime('%d %b')} at {start_time.strftime('%I:%M %p')}. Topic: {topic or 'TBA'}",
-            type='info'
-        )
-
-    return jsonify({"message": "Extra session created", "id": extra_session.id}), 201
-
-
-@app.route('/api/v1/extra_sessions/<int:session_id>', methods=['DELETE'])
-def api_v1_extra_sessions_cancel(session_id):
-    """Cancel an extra session (staff only)."""
-    try:
-        user = _require_mobile_auth()
-        _require_role(user, {'staff'})
-    except PermissionError:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    extra_session = ExtraSession.query.get(session_id)
-    if not extra_session:
-        return jsonify({"error": "Extra session not found"}), 404
-
-    if extra_session.teacher_id != user.user_id:
-        return jsonify({"error": "Not authorized to cancel this session"}), 403
-
-    session_log = SessionLog.query.filter_by(extra_session_id=session_id).first()
-    if session_log:
-        return jsonify({"error": "Cannot cancel session after attendance is marked"}), 400
-
-    extra_session.status = 'Cancelled'
-    db.session.commit()
-
-    # Notify students (filter by elective if applicable)
-    subject = Subject.query.get(extra_session.subject_id)
-    if is_elective_type(subject.subject_type):
-        # Only notify students with approved elective selection
-        students = (db.session.query(StudentProfile)
-                    .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
-                    .filter(StudentProfile.current_section_id == extra_session.section_id)
-                    .filter(StudentElective.subject_id == extra_session.subject_id)
-                    .filter(StudentElective.status == 'Approved')
-                    .all())
-    else:
-        students = StudentProfile.query.filter_by(current_section_id=extra_session.section_id).all()
-
-    for student in students:
-        send_notification(
-            student.student_id,
-            f"Extra Class Cancelled: {subject.name}",
-            f"The extra class scheduled on {extra_session.date.strftime('%d %b')} at {extra_session.start_time.strftime('%I:%M %p')} has been cancelled.",
-            type='warning'
-        )
-
-    return jsonify({"message": "Extra session cancelled"}), 200
-
-
 # ==========================================
 # API: STAFF DASHBOARD
 # ==========================================
@@ -3473,16 +1998,13 @@ def api_v1_extra_sessions_cancel(session_id):
 
 @app.route('/api/staff/dashboard', methods=['GET'])
 @login_required
-@require_roles('Staff')
 def staff_dashboard():
     try:
-        # Do not trust user_id from the client; always use the authenticated user.
-        user_id = current_user.user_id
+        user_id = request.args.get('user_id')
+        if not user_id: return jsonify({"error": "Unauthorized"}), 401
 
         staff = StaffProfile.query.filter_by(staff_id=user_id).first()
         if not staff: return jsonify({"error": "Staff profile not found"}), 404
-
-        scope_dept_ids = _get_user_scope_dept_ids()
 
         # --- 1. ROLES & PERMISSIONS ---
         dept_managed = Department.query.filter_by(hod_staff_id=user_id).first()
@@ -3525,26 +2047,16 @@ def staff_dashboard():
             total = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(session_ids)).count()
             present = AttendanceTransaction.query.filter(
                 AttendanceTransaction.session_id.in_(session_ids),
-                AttendanceTransaction.status.in_(PRESENT_STATUSES)
+                AttendanceTransaction.status.in_(['Present', 'OnDuty'])
             ).count()
             if total > 0: avg_attendance = round((present / total) * 100, 1)
 
         # --- 5. ASSIGNED COURSES (Subject Allocation) ---
-        alloc_q = (db.session.query(SubjectAllocation, Subject, ClassSection)
-                   .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
-                   .join(ClassSection, SubjectAllocation.section_id == ClassSection.section_id)
-                   .filter(SubjectAllocation.teacher_id == staff.staff_id))
-
-        # Enforce department isolation for staff dashboards when we can resolve a scope.
-        if scope_dept_ids is not None and scope_dept_ids:
-            from sqlalchemy import or_
-            alloc_q = (alloc_q.outerjoin(Specialization, ClassSection.spec_id == Specialization.id)
-                             .filter(or_(
-                                 Subject.dept_id.in_(scope_dept_ids),
-                                 Specialization.dept_id.in_(scope_dept_ids),
-                             )))
-
-        allocations = alloc_q.all()
+        allocations = (db.session.query(SubjectAllocation, Subject, ClassSection)
+                       .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
+                       .join(ClassSection, SubjectAllocation.section_id == ClassSection.section_id)
+                       .filter(SubjectAllocation.teacher_id == staff.staff_id)
+                       .all())
         
         my_subjects_list = []
         for alloc, subj, sec in allocations:
@@ -3574,26 +2086,11 @@ def staff_dashboard():
         window_start = today_date
         window_end = today_date + timedelta(days=13)  # 2 weeks window for upcoming sessions
         
-        # Filter by Active timetable versions only
-        slots_q = (db.session.query(WeeklySchedule, ClassSection, Subject)
-                   .join(ClassSection, WeeklySchedule.section_id == ClassSection.section_id)
-                   .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
-                   .outerjoin(TimetableVersion, WeeklySchedule.version_id == TimetableVersion.version_id)
-                   .filter(WeeklySchedule.teacher_id == staff.staff_id)
-                   .filter(db.or_(
-                       TimetableVersion.status == 'Active',
-                       WeeklySchedule.version_id.is_(None)
-                   )))
-
-        if scope_dept_ids is not None and scope_dept_ids:
-            from sqlalchemy import or_
-            slots_q = (slots_q.outerjoin(Specialization, ClassSection.spec_id == Specialization.id)
-                             .filter(or_(
-                                 Subject.dept_id.in_(scope_dept_ids),
-                                 Specialization.dept_id.in_(scope_dept_ids),
-                             )))
-
-        all_slots = slots_q.all()
+        all_slots = (db.session.query(WeeklySchedule, ClassSection, Subject)
+                    .join(ClassSection, WeeklySchedule.section_id == ClassSection.section_id)
+                    .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
+                    .filter(WeeklySchedule.teacher_id == staff.staff_id)
+                    .all())
         
         today_schedule = []; upcoming_schedule = []
         weekly_calendar = [] # <--- Ensure this list is initialized
@@ -3873,7 +2370,7 @@ def staff_dashboard():
         #     total = AttendanceTransaction.query.filter_by(session_id=sess.session_id).count()
         #     present = AttendanceTransaction.query.filter(
         #         AttendanceTransaction.session_id == sess.session_id, 
-        #         AttendanceTransaction.status.in_(PRESENT_STATUSES)
+        #         AttendanceTransaction.status.in_(['Present', 'OnDuty'])
         #     ).count()
         #     perc = round((present/total)*100) if total > 0 else 0
             
@@ -3899,7 +2396,7 @@ def staff_dashboard():
         history_list = []
         for sess, sched, subj, sec in history_records:
             total = AttendanceTransaction.query.filter_by(session_id=sess.session_id).count()
-            present = AttendanceTransaction.query.filter(AttendanceTransaction.session_id == sess.session_id, AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+            present = AttendanceTransaction.query.filter(AttendanceTransaction.session_id == sess.session_id, AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
             perc = round((present/total)*100) if total > 0 else 0
             history_list.append({ "schedule_id": sched.schedule_id, "date_iso": sess.session_date.strftime('%Y-%m-%d'), "date_display": sess.session_date.strftime('%d %b'), "subject": subj.name, "class": f"{sec.class_level}-{sec.name}", "percentage": perc })
 
@@ -3944,85 +2441,33 @@ def staff_dashboard():
         except Exception:
             adjustment_requests = []
 
-        # --- 9. EXTRA SESSIONS (One-time classes) ---
-        extra_sessions_list = []
-        try:
-            extra_sessions = (db.session.query(ExtraSession, Subject, ClassSection)
-                              .join(Subject, ExtraSession.subject_id == Subject.subject_id)
-                              .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
-                              .filter(ExtraSession.teacher_id == staff.staff_id)
-                              .filter(ExtraSession.status != 'Cancelled')
-                              .filter(ExtraSession.date >= today_date)
-                              .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
-                              .all())
-
-            for es, subj, sec in extra_sessions:
-                session_log = SessionLog.query.filter_by(extra_session_id=es.id).first()
-                start_float = es.start_time.hour + (es.start_time.minute / 60.0)
-                end_float = es.end_time.hour + (es.end_time.minute / 60.0)
-                days_from_today = (es.date - today_date).days
-                sort_key = days_from_today * 10000 + int(es.start_time.strftime('%H%M'))
-
-                es_data = {
-                    "id": f"extra_{es.id}",
-                    "extra_session_id": es.id,
-                    "time": f"{es.start_time.strftime('%I:%M %p')} - {es.end_time.strftime('%I:%M %p')}",
-                    "class": f"{sec.class_level}-{sec.name}",
-                    "subject": subj.name,
-                    "day": es.date.strftime('%A'),
-                    "date_iso": es.date.strftime('%Y-%m-%d'),
-                    "date_display": es.date.strftime('%d %b'),
-                    "type": "Extra",
-                    "topic": es.topic,
-                    "meeting_link": es.meeting_link,
-                    "sort_key": sort_key,
-                    "start_float": start_float,
-                    "duration_float": end_float - start_float,
-                    "status": "Done" if session_log else "Pending",
-                    "is_extra_session": True,
-                    "section_id": sec.section_id
-                }
-
-                if es.date == today_date:
-                    today_schedule.append(es_data)
-                else:
-                    upcoming_schedule.append(es_data)
-                extra_sessions_list.append(es_data)
-
-            # Re-sort after adding extra sessions
-            today_schedule.sort(key=lambda x: x['sort_key'])
-            upcoming_schedule.sort(key=lambda x: x['sort_key'])
-        except Exception as ex:
-            print(f"Error loading extra sessions: {ex}")
-
         return jsonify({
-            "profile": {
-                "name": staff.full_name,
-                "code": staff.employee_code,
-                "dept": dept_managed.name if is_hod else "Faculty",
-                "stats": { "weekly_classes": weekly_load, "avg_attendance": f"{avg_attendance}%" }
+            "profile": { 
+                "name": staff.full_name, 
+                "code": staff.employee_code, 
+                "dept": dept_managed.name if is_hod else "Faculty", 
+                "stats": { "weekly_classes": weekly_load, "avg_attendance": f"{avg_attendance}%" } 
             },
-            "roles": {
-                "is_hod": is_hod,
-                "is_class_teacher": is_class_teacher,
-                "is_coordinator": is_coordinator,
-                "is_amc_member": is_amc_member,
-                "is_amc_head": is_amc_head,
-                "is_mentor": is_mentor
+            "roles": { 
+                "is_hod": is_hod, 
+                "is_class_teacher": is_class_teacher, 
+                "is_coordinator": is_coordinator, 
+                "is_amc_member": is_amc_member, 
+                "is_amc_head": is_amc_head, 
+                "is_mentor": is_mentor 
             },
-            "widgets": {
-                "today_schedule": today_schedule,
-                "upcoming_schedule": upcoming_schedule,
-                "history_schedule": history_list,
-                "my_subjects": my_subjects_list,
-                "pending_leaves": pending_leaves,
-                "class_teacher_data": class_details,
-                "mentee_data": {"count": mentee_count},
+            "widgets": { 
+                "today_schedule": today_schedule, 
+                "upcoming_schedule": upcoming_schedule, 
+                "history_schedule": history_list, 
+                "my_subjects": my_subjects_list, 
+                "pending_leaves": pending_leaves, 
+                "class_teacher_data": class_details, 
+                "mentee_data": {"count": mentee_count}, 
                 "my_events": [],
                 "detention_review_count": detention_review_count,
                 "adjustment_requests": adjustment_requests,
-                "can_assign_detention": can_assign_detention,
-                "extra_sessions": extra_sessions_list
+                "can_assign_detention": can_assign_detention
             }
         })
     except Exception as e:
@@ -4034,7 +2479,6 @@ def staff_dashboard():
 
 @app.route('/api/staff/find_adjustment_faculty', methods=['GET'])
 @login_required
-@require_roles('Staff')
 def api_staff_find_adjustment_faculty():
     """Discovery phase for mutual swap system.
 
@@ -4047,8 +2491,7 @@ def api_staff_find_adjustment_faculty():
     try:
         schedule_id_raw = request.args.get('schedule_id')
         req_date_raw = request.args.get('date')
-        # Do not trust requester_id from client
-        requester_id = current_user.user_id
+        requester_id = request.args.get('user_id') or request.args.get('requester_id')
 
         if not schedule_id_raw or not req_date_raw:
             return jsonify([]), 200
@@ -4058,10 +2501,6 @@ def api_staff_find_adjustment_faculty():
 
         req_slot = WeeklySchedule.query.filter_by(schedule_id=req_schedule_id).first()
         if not req_slot:
-            return jsonify([]), 200
-
-        deny = _ensure_section_in_scope(int(req_slot.section_id))
-        if deny:
             return jsonify([]), 200
 
         section = ClassSection.query.filter_by(section_id=req_slot.section_id).first()
@@ -4174,11 +2613,10 @@ def api_staff_find_adjustment_faculty():
 
 @app.route('/api/staff/submit_adjustment', methods=['POST'])
 @login_required
-@require_roles('Staff')
 def api_staff_submit_adjustment():
     try:
         data = request.get_json(force=True) or {}
-        requester_id = current_user.user_id
+        requester_id = data.get('requester_id')
         adjuster_id = data.get('substitute_id')
         req_schedule_id = int(data.get('schedule_id'))
         adj_schedule_id = int(data.get('swap_slot_id'))
@@ -4193,10 +2631,6 @@ def api_staff_submit_adjustment():
         adj_slot = WeeklySchedule.query.filter_by(schedule_id=adj_schedule_id).first()
         if not req_slot or not adj_slot:
             return jsonify({'error': 'Invalid slot id'}), 400
-
-        deny = _ensure_section_in_scope(int(req_slot.section_id))
-        if deny:
-            return jsonify({'error': 'Out of scope'}), 403
 
         # Validate ownership
         if req_slot.teacher_id != requester_id:
@@ -4260,7 +2694,6 @@ def api_staff_submit_adjustment():
 
 @app.route('/api/staff/respond_adjustment', methods=['POST'])
 @login_required
-@require_roles('Staff')
 def api_staff_respond_adjustment():
     try:
         data = request.get_json(force=True) or {}
@@ -4272,10 +2705,6 @@ def api_staff_respond_adjustment():
         rec = LoadAdjustment.query.filter_by(id=req_id).first()
         if not rec:
             return jsonify({'error': 'Not found'}), 404
-
-        # Only the adjuster can respond.
-        if rec.adjuster_id != current_user.user_id:
-            return jsonify({'error': 'Forbidden'}), 403
 
         rec.status = status
         db.session.commit()
@@ -4478,7 +2907,7 @@ def get_hod_stats():
             avg = 0
             if s_ids:
                 tot = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(s_ids)).count()
-                pres = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(s_ids), AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+                pres = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(s_ids), AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
                 if tot > 0: 
                     avg = round((pres/tot)*100, 1)
                     dept_avg_attendance_sum += avg
@@ -4505,7 +2934,7 @@ def get_hod_stats():
                 sub_s_ids = [s.session_id for s in sub_sessions]
                 if sub_s_ids:
                     sub_tot = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(sub_s_ids)).count()
-                    sub_pres = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(sub_s_ids), AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+                    sub_pres = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(sub_s_ids), AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
                     sub_avg = round((sub_pres/sub_tot)*100) if sub_tot > 0 else 0
                     if sub_avg < lowest_att:
                         lowest_att = sub_avg; risk_subject_name = f"{db.session.get(Subject, alloc.subject_id).name} ({sub_avg}%)"
@@ -4775,11 +3204,6 @@ def assign_hod():
 def get_class_analytics():
     try:
         user_id = request.args.get('user_id')
-        # Prevent data leakage via user_id spoofing
-        if user_id and str(user_id) != str(getattr(current_user, 'user_id', '')):
-            return jsonify({"error": "Forbidden"}), 403
-
-        user_id = str(getattr(current_user, 'user_id', user_id))
         class_managed = ClassSection.query.filter_by(class_teacher_id=user_id).first()
         if not class_managed: return jsonify({"error": "No class assigned"}), 404
 
@@ -4803,7 +3227,7 @@ def get_class_analytics():
             avg_sub_att = 0
             if conducted > 0 and len(students) > 0:
                 sub_session_ids = [s.session_id for s in SessionLog.query.join(WeeklySchedule).filter(WeeklySchedule.subject_id == sub_id, WeeklySchedule.section_id == class_managed.section_id).all()]
-                total_presents = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(sub_session_ids), AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+                total_presents = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(sub_session_ids), AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
                 avg_sub_att = round((total_presents / (len(students) * conducted)) * 100, 1)
 
             subject_stats.append({ "id": sub_id, "subject": subject.name, "teacher": teacher_name, "conducted": conducted, "avg_attendance": avg_sub_att })
@@ -4814,7 +3238,7 @@ def get_class_analytics():
 
         if total_class_sessions > 0:
             for s in students:
-                attended = AttendanceTransaction.query.filter(AttendanceTransaction.student_id == s.student_id, AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+                attended = AttendanceTransaction.query.filter(AttendanceTransaction.student_id == s.student_id, AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
                 perc = round((attended / total_class_sessions) * 100, 1)
                 s_data = { "name": s.full_name, "roll": s.admission_number, "perc": perc, "attended": attended, "total": total_class_sessions }
                 if perc < 75: defaulters.append(s_data)
@@ -4822,105 +3246,12 @@ def get_class_analytics():
 
         pending_leaves_count = LeaveApplication.query.join(StudentProfile).filter(StudentProfile.current_section_id == class_managed.section_id, LeaveApplication.status == 'Pending_CT').count()
 
-        # Alerts: approved leave history + students in events (today + all)
-        today = date.today()
-
-        approved_leave_rows = (
-            db.session.query(LeaveApplication, StudentProfile)
-            .join(StudentProfile, LeaveApplication.student_id == StudentProfile.student_id)
-            .filter(StudentProfile.current_section_id == class_managed.section_id)
-            .filter(LeaveApplication.status == 'Approved')
-            .order_by(LeaveApplication.start_date.desc(), LeaveApplication.leave_id.desc())
-            .limit(30)
-            .all()
-        )
-        approved_leave_history = []
-        for leave, student in approved_leave_rows:
-            approved_leave_history.append({
-                "leave_id": leave.leave_id,
-                "student_id": student.student_id,
-                "student_name": student.full_name,
-                "roll_no": student.admission_number,
-                "leave_type": leave.leave_type or "General",
-                "days": leave.total_days,
-                "start_date": leave.start_date.isoformat() if leave.start_date else None,
-                "end_date": leave.end_date.isoformat() if leave.end_date else None,
-                "date_range": f"{leave.start_date.strftime('%d %b')} - {leave.end_date.strftime('%d %b')}" if (leave.start_date and leave.end_date) else "",
-                "reason": leave.reason,
-            })
-
-        # NOTE: We return both:
-        # - out_for_events_today: students currently out today due to an event
-        # - out_for_events_all: students with any non-cancelled event participation (past/upcoming)
-        # To keep payload size reasonable, we cap participation rows.
-        MAX_EVENT_PARTICIPATION_ROWS = 500
-
-        participation_rows = (
-            db.session.query(EventParticipation, EventMaster, StudentProfile)
-            .join(EventMaster, EventParticipation.event_id == EventMaster.event_id)
-            .join(StudentProfile, EventParticipation.student_id == StudentProfile.student_id)
-            .filter(StudentProfile.current_section_id == class_managed.section_id)
-            .order_by(EventMaster.start_date.desc(), EventMaster.event_id.desc())
-            .limit(MAX_EVENT_PARTICIPATION_ROWS)
-            .all()
-        )
-
-        out_all_map = {}
-        out_today_map = {}
-
-        for part, event, student in participation_rows:
-            raw_status = (getattr(part, 'status', '') or '').strip()
-            status_norm = raw_status.lower()
-            if status_norm in {'cancelled', 'canceled', 'rejected'}:
-                continue
-
-            sid = student.student_id
-            event_payload = {
-                "event_id": event.event_id,
-                "event_name": event.event_name,
-                "status": raw_status or 'Nominated',
-                "start_date": event.start_date.isoformat() if event.start_date else None,
-                "end_date": event.end_date.isoformat() if event.end_date else None,
-                "date_range": f"{event.start_date.strftime('%d %b')} - {event.end_date.strftime('%d %b')}" if (event.start_date and event.end_date) else "",
-            }
-
-            if sid not in out_all_map:
-                out_all_map[sid] = {
-                    "student_id": sid,
-                    "student_name": student.full_name,
-                    "roll_no": student.admission_number,
-                    "events": [],
-                }
-            out_all_map[sid]["events"].append(event_payload)
-
-            if event.start_date and event.end_date and (event.start_date <= today <= event.end_date):
-                if sid not in out_today_map:
-                    out_today_map[sid] = {
-                        "student_id": sid,
-                        "student_name": student.full_name,
-                        "roll_no": student.admission_number,
-                        "events": [],
-                    }
-                out_today_map[sid]["events"].append(event_payload)
-
-        out_for_events_today = list(out_today_map.values())
-        out_for_events_today.sort(key=lambda x: (x.get('roll_no') or '', x.get('student_name') or ''))
-
-        out_for_events_all = list(out_all_map.values())
-        out_for_events_all.sort(key=lambda x: (x.get('roll_no') or '', x.get('student_name') or ''))
-
         return jsonify({
             "class_info": { "name": f"{class_managed.class_level} - {class_managed.name}", "total_students": len(students), "total_sessions": total_class_sessions },
             "summary": { "defaulter_count": len(defaulters), "pending_leaves": pending_leaves_count, "class_health": "Good" if len(defaulters) < (len(students)*0.2) else "At Risk" },
             "subjects": subject_stats,
             "defaulters": sorted(defaulters, key=lambda x: x['perc']),
-            "top_students": sorted(top_students, key=lambda x: x['perc'], reverse=True)[:5],
-            "alerts": {
-                "approved_leave_history": approved_leave_history,
-                "out_for_events_today": out_for_events_today,
-                "out_for_events_all": out_for_events_all,
-                "as_of": today.isoformat(),
-            },
+            "top_students": sorted(top_students, key=lambda x: x['perc'], reverse=True)[:5]
         })
     except Exception as e: return jsonify({"error": str(e)}), 500
 
@@ -5097,7 +3428,7 @@ def get_class_overall_summary():
                 valid_sids = [sess.session_id for sess, batch in sessions if not batch or batch == my_batch]
                 
                 cond = len(valid_sids)
-                att = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(valid_sids), AttendanceTransaction.student_id==s.student_id, AttendanceTransaction.status.in_(PRESENT_STATUSES)).count() if cond > 0 else 0
+                att = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(valid_sids), AttendanceTransaction.student_id==s.student_id, AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count() if cond > 0 else 0
                 
                 cond_all += cond; att_all += att
                 cols.append(f"{round((att/cond)*100) if cond > 0 else 0}%")
@@ -5118,79 +3449,24 @@ def get_attendance_sheet():
         date_str = request.args.get('date')
         if date_str: target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         else: target_date = date.today()
-
-        # Check if this is an extra session (ID starts with "extra_")
-        is_extra_session = schedule_id and schedule_id.startswith('extra_')
-
-        if is_extra_session:
-            # Handle Extra Session
-            extra_session_id = int(schedule_id.replace('extra_', ''))
-            extra_session = ExtraSession.query.get(extra_session_id)
-            if not extra_session: return jsonify({"error": "Invalid Extra Session ID"}), 404
-
-            subject = Subject.query.get(extra_session.subject_id)
-            section = ClassSection.query.get(extra_session.section_id)
-
-            # Fetch students - apply elective filter if subject is elective type
-            if is_elective_type(subject.subject_type):
-                # Only students with approved elective selection for this subject
-                students = (db.session.query(StudentProfile)
-                            .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
-                            .filter(StudentProfile.current_section_id == section.section_id)
-                            .filter(StudentElective.subject_id == subject.subject_id)
-                            .filter(StudentElective.status == 'Approved')
-                            .order_by(StudentProfile.admission_number).all())
-            else:
-                # Core subject = all students in section
-                students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
-
-            # Check existing session log for extra session
-            existing_session = SessionLog.query.filter_by(extra_session_id=extra_session_id).first()
-            is_locked = True if existing_session else False
-            saved_status_map = {t.student_id: t.status for t in AttendanceTransaction.query.filter_by(session_id=existing_session.session_id).all()} if existing_session else {}
-
-            # Store for later use in response
-            slot = None
-            time_str = f"{extra_session.start_time.strftime('%I:%M %p')} - {extra_session.end_time.strftime('%I:%M %p')}"
-            display_class_name = f"{section.class_level}-{section.name}"
-            target_date = extra_session.date  # Use the extra session's date
-        else:
-            # Handle Regular Weekly Schedule
-            slot = WeeklySchedule.query.get(schedule_id)
-            if not slot: return jsonify({"error": "Invalid Slot ID"}), 404
-            subject = Subject.query.get(slot.subject_id)
-            section = ClassSection.query.get(slot.section_id)
-
-            # 1. Fetch Students (Batch, Elective, or Class)
-            students = []
-            if is_elective_type(subject.subject_type):
-                # Elective subject = only students with approved selection
-                base_query = (db.session.query(StudentProfile)
-                              .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
-                              .filter(StudentProfile.current_section_id == section.section_id)
-                              .filter(StudentElective.subject_id == subject.subject_id)
-                              .filter(StudentElective.status == 'Approved'))
-                if slot.target_batch:
-                    target_batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
-                    if target_batch_obj:
-                        base_query = base_query.filter(StudentProfile.mentor_batch_id == target_batch_obj.batch_id)
-                students = base_query.order_by(StudentProfile.admission_number).all()
-            elif slot.target_batch:
-                # Batch-specific (lab sessions)
-                target_batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
-                if target_batch_obj: students = StudentProfile.query.filter_by(current_section_id=section.section_id, mentor_batch_id=target_batch_obj.batch_id).all()
-            else:
-                # Core subject = all students in section
-                students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
-
-            # 2. Check Existing Session (Locked State)
-            existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=target_date).first()
-            is_locked = True if existing_session else False
-            saved_status_map = {t.student_id: t.status for t in AttendanceTransaction.query.filter_by(session_id=existing_session.session_id).all()} if existing_session else {}
-
-            time_str = f"{slot.start_time.strftime('%I:%M %p')} - {slot.end_time.strftime('%I:%M %p')}"
-            display_class_name = f"{section.class_level}-{section.name}"
-            if slot.target_batch: display_class_name += f" ({slot.target_batch})"
+        
+        slot = WeeklySchedule.query.get(schedule_id)
+        if not slot: return jsonify({"error": "Invalid Slot ID"}), 404
+        subject = Subject.query.get(slot.subject_id)
+        section = ClassSection.query.get(slot.section_id)
+        
+        # 1. Fetch Students (Batch or Class)
+        students = []
+        if slot.target_batch:
+            target_batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
+            if target_batch_obj: students = StudentProfile.query.filter_by(current_section_id=section.section_id, mentor_batch_id=target_batch_obj.batch_id).all()
+        else: 
+            students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
+        
+        # 2. Check Existing Session (Locked State)
+        existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=target_date).first()
+        is_locked = True if existing_session else False
+        saved_status_map = {t.student_id: t.status for t in AttendanceTransaction.query.filter_by(session_id=existing_session.session_id).all()} if existing_session else {}
 
         # 3. Pre-fetch Approved Leaves & Events for this Date
         # Optimization: Fetch all approved leaves for this section on this date
@@ -5264,12 +3540,15 @@ def get_attendance_sheet():
             })
         
         student_list.sort(key=lambda x: x['name'])
-
-        return jsonify({
-            "subject_name": subject.name, "class_name": display_class_name,
-            "time": time_str, "date_display": target_date.strftime('%d %b %Y'),
-            "is_locked": is_locked, "students": student_list, "subject_id": subject.subject_id,
-            "is_extra_session": is_extra_session
+        
+        display_class_name = f"{section.class_level}-{section.name}"
+        if slot.target_batch: display_class_name += f" ({slot.target_batch})"
+        time_str = f"{slot.start_time.strftime('%I:%M %p')} - {slot.end_time.strftime('%I:%M %p')}"
+        
+        return jsonify({ 
+            "subject_name": subject.name, "class_name": display_class_name, 
+            "time": time_str, "date_display": target_date.strftime('%d %b %Y'), 
+            "is_locked": is_locked, "students": student_list, "subject_id": subject.subject_id 
         })
 
     except Exception as e:
@@ -5288,91 +3567,51 @@ def submit_attendance():
 
         submitted_by = data.get('submitted_by')
 
-        # 1. Lesson Data - Support both single topic_id (legacy) and topic_ids array (new)
-        topic_ids = data.get('topic_ids') or []  # New: array of topic IDs
-        legacy_topic_id = data.get('topic_id')  # Legacy: single topic ID
-        if legacy_topic_id and not topic_ids:
-            topic_ids = [legacy_topic_id]  # Convert legacy to array format
+        # 1. Lesson Data (NEW)
+        topic_id = data.get('topic_id') # Optional
 
-        # Check if this is an extra session (ID starts with "extra_")
-        is_extra_session = schedule_id and str(schedule_id).startswith('extra_')
+        existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=txn_date).first()
+        if existing_session: return jsonify({"error": "Attendance locked."}), 403
+        slot = WeeklySchedule.query.get(schedule_id)
 
-        if is_extra_session:
-            # Handle Extra Session
-            extra_session_id = int(str(schedule_id).replace('extra_', ''))
-            extra_session = ExtraSession.query.get(extra_session_id)
-            if not extra_session:
-                return jsonify({"error": "Invalid Extra Session"}), 404
-
-            # Check if already marked
-            existing_session = SessionLog.query.filter_by(extra_session_id=extra_session_id).first()
-            if existing_session:
-                return jsonify({"error": "Attendance locked."}), 403
-
-            # For extra sessions, only the teacher who created it can mark attendance
-            if extra_session.teacher_id != submitted_by:
-                return jsonify({"error": "Not allowed to submit attendance for this session."}), 403
-
-            # Create session log for extra session
-            session = SessionLog(
-                extra_session_id=extra_session_id,
-                session_date=extra_session.date,
-                status="Conducted",
-                actual_teacher_id=submitted_by
-            )
-            db.session.add(session)
-            db.session.flush()
-
-        else:
-            # Handle Regular Weekly Schedule
-            existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=txn_date).first()
-            if existing_session: return jsonify({"error": "Attendance locked."}), 403
-            slot = WeeklySchedule.query.get(schedule_id)
-
-            # Determine who is allowed to submit attendance for this schedule/date.
-            # - Default: scheduled teacher can submit.
-            # - If there's an approved mutual swap for this schedule/date, only the swapped-in teacher can submit.
-            allowed_teacher_id = slot.teacher_id if slot else None
-            try:
-                approved_swap = (
-                    LoadAdjustment.query
-                    .filter(LoadAdjustment.status == 'Approved')
-                    .filter(
-                        ((LoadAdjustment.req_schedule_id == schedule_id) & (LoadAdjustment.req_date == txn_date)) |
-                        ((LoadAdjustment.adj_schedule_id == schedule_id) & (LoadAdjustment.adj_date == txn_date))
-                    )
-                    .order_by(LoadAdjustment.created_at.desc())
-                    .first()
+        # Determine who is allowed to submit attendance for this schedule/date.
+        # - Default: scheduled teacher can submit.
+        # - If there's an approved mutual swap for this schedule/date, only the swapped-in teacher can submit.
+        allowed_teacher_id = slot.teacher_id if slot else None
+        try:
+            approved_swap = (
+                LoadAdjustment.query
+                .filter(LoadAdjustment.status == 'Approved')
+                .filter(
+                    ((LoadAdjustment.req_schedule_id == schedule_id) & (LoadAdjustment.req_date == txn_date)) |
+                    ((LoadAdjustment.adj_schedule_id == schedule_id) & (LoadAdjustment.adj_date == txn_date))
                 )
-                if approved_swap:
-                    if approved_swap.req_schedule_id == schedule_id and approved_swap.req_date == txn_date:
-                        allowed_teacher_id = approved_swap.adjuster_id
-                    elif approved_swap.adj_schedule_id == schedule_id and approved_swap.adj_date == txn_date:
-                        allowed_teacher_id = approved_swap.requester_id
-            except Exception:
-                pass
+                .order_by(LoadAdjustment.created_at.desc())
+                .first()
+            )
+            if approved_swap:
+                if approved_swap.req_schedule_id == schedule_id and approved_swap.req_date == txn_date:
+                    allowed_teacher_id = approved_swap.adjuster_id
+                elif approved_swap.adj_schedule_id == schedule_id and approved_swap.adj_date == txn_date:
+                    allowed_teacher_id = approved_swap.requester_id
+        except Exception:
+            pass
 
-            actual_teacher_id = submitted_by or allowed_teacher_id
-            if allowed_teacher_id and actual_teacher_id != allowed_teacher_id:
-                return jsonify({"error": "Not allowed to submit attendance for this session."}), 403
+        actual_teacher_id = submitted_by or allowed_teacher_id
+        if allowed_teacher_id and actual_teacher_id != allowed_teacher_id:
+            return jsonify({"error": "Not allowed to submit attendance for this session."}), 403
 
-            session = SessionLog(schedule_id=schedule_id, session_date=txn_date, status="Conducted", actual_teacher_id=actual_teacher_id)
-            db.session.add(session)
-            db.session.flush()
+        session = SessionLog(schedule_id=schedule_id, session_date=txn_date, status="Conducted", actual_teacher_id=actual_teacher_id)
+        db.session.add(session); db.session.flush()
 
         for s in data.get('students'):
             final_status = "OnDuty" if s['is_on_duty'] else s['status']
             new_txn = AttendanceTransaction(session_id=session.session_id, student_id=s['student_id'], status=final_status)
             db.session.add(new_txn)
 
-        # 5. Save Lesson Log(s) - only for regular sessions with topics
-        if topic_ids and not is_extra_session:
-            for tid in topic_ids:
-                db.session.add(LessonLog(session_id=session.session_id, plan_id=tid, remarks="Conducted"))
-                # Mark the TeachingPlan topic as Completed
-                plan = TeachingPlan.query.get(tid)
-                if plan:
-                    plan.status = 'Completed'
+        # 5. Save Lesson Log (NEW)
+        if topic_id:
+            db.session.add(LessonLog(session_id=session.session_id, plan_id=topic_id, remarks="Conducted"))
 
         db.session.commit()
         return jsonify({"message": "Attendance Saved"}), 200
@@ -5402,7 +3641,7 @@ def get_full_session_history():
             total = AttendanceTransaction.query.filter_by(session_id=sess.session_id).count()
             present = AttendanceTransaction.query.filter(
                 AttendanceTransaction.session_id == sess.session_id, 
-                AttendanceTransaction.status.in_(PRESENT_STATUSES)
+                AttendanceTransaction.status.in_(['Present', 'OnDuty'])
             ).count()
             perc = round((present/total)*100) if total > 0 else 0
             
@@ -5418,337 +3657,6 @@ def get_full_session_history():
 
         return jsonify({"history": history_list})
     except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-# ==========================================
-# API: EXTRA SESSIONS (One-time classes)
-# ==========================================
-@app.route('/api/staff/extra_sessions', methods=['GET'])
-@login_required
-def get_extra_sessions():
-    """Get extra sessions for the logged-in teacher."""
-    try:
-        user_id = request.args.get('user_id')
-        if not user_id:
-            return jsonify({"error": "user_id required"}), 400
-
-        sessions = (db.session.query(ExtraSession, Subject, ClassSection)
-                    .join(Subject, ExtraSession.subject_id == Subject.subject_id)
-                    .join(ClassSection, ExtraSession.section_id == ClassSection.section_id)
-                    .filter(ExtraSession.teacher_id == user_id)
-                    .filter(ExtraSession.status != 'Cancelled')
-                    .order_by(ExtraSession.date.desc(), ExtraSession.start_time.asc())
-                    .all())
-
-        result = []
-        for es, subj, sec in sessions:
-            # Check if attendance has been marked
-            session_log = SessionLog.query.filter_by(extra_session_id=es.id).first()
-            result.append({
-                "id": es.id,
-                "subject_id": es.subject_id,
-                "subject_name": subj.name,
-                "section_id": es.section_id,
-                "section_name": f"{sec.class_level}-{sec.name}",
-                "date": es.date.isoformat(),
-                "start_time": es.start_time.strftime('%H:%M'),
-                "end_time": es.end_time.strftime('%H:%M'),
-                "topic": es.topic,
-                "meeting_link": es.meeting_link,
-                "status": es.status,
-                "attendance_marked": session_log is not None
-            })
-
-        return jsonify({"extra_sessions": result}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/staff/extra_sessions/allocations', methods=['GET'])
-@login_required
-def get_extra_session_allocations():
-    """Get teacher's class/subject allocations for creating extra sessions."""
-    try:
-        user_id = request.args.get('user_id')
-        if not user_id:
-            return jsonify({"error": "user_id required"}), 400
-
-        # Use SubjectAllocation instead of WeeklySchedule to get class/subject combos
-        # This ensures classes show even before timetable is published
-        allocations = (db.session.query(SubjectAllocation, Subject, ClassSection)
-                       .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
-                       .join(ClassSection, SubjectAllocation.section_id == ClassSection.section_id)
-                       .filter(SubjectAllocation.teacher_id == user_id)
-                       .all())
-
-        sections = {}
-        subjects = {}
-        section_subjects = []
-
-        for alloc, subj, sec in allocations:
-            sec_key = sec.section_id
-            subj_key = subj.subject_id
-
-            if sec_key not in sections:
-                sections[sec_key] = {
-                    "section_id": sec.section_id,
-                    "name": f"{sec.class_level}-{sec.name}"
-                }
-            if subj_key not in subjects:
-                subjects[subj_key] = {
-                    "subject_id": subj.subject_id,
-                    "name": subj.name
-                }
-
-            section_subjects.append({
-                "section_id": sec.section_id,
-                "subject_id": subj.subject_id
-            })
-
-        return jsonify({
-            "sections": list(sections.values()),
-            "subjects": list(subjects.values()),
-            "section_subjects": section_subjects
-        }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/staff/extra_sessions', methods=['POST'])
-@login_required
-def create_extra_session():
-    """Create a new extra session with validation."""
-    try:
-        data = request.json or {}
-        user_id = data.get('user_id')
-        subject_id = data.get('subject_id')
-        section_id = data.get('section_id')
-        date_str = data.get('date')
-        start_time_str = data.get('start_time')
-        end_time_str = data.get('end_time')
-        topic = data.get('topic', '').strip()
-        meeting_link = data.get('meeting_link', '').strip()
-
-        # Validate required fields
-        if not all([user_id, subject_id, section_id, date_str, start_time_str, end_time_str]):
-            return jsonify({"error": "Missing required fields"}), 400
-
-        # Parse date and time
-        from datetime import datetime, time as dt_time
-        session_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-        start_time = datetime.strptime(start_time_str, '%H:%M').time()
-        end_time = datetime.strptime(end_time_str, '%H:%M').time()
-
-        # Validation 1: Check if date is in the past
-        if session_date < datetime.now().date():
-            return jsonify({"error": "Cannot schedule sessions in the past"}), 400
-
-        # Validation 2: Weekday must be after 17:00
-        day_of_week = session_date.weekday()  # 0=Monday, 6=Sunday
-        is_weekend = day_of_week >= 5  # Saturday or Sunday
-
-        if not is_weekend and start_time < dt_time(17, 0):
-            return jsonify({"error": "Weekday extra sessions must start after 5:00 PM"}), 400
-
-        # Validation 3: Check for section conflict (same section, overlapping time)
-        conflicting = ExtraSession.query.filter(
-            ExtraSession.section_id == section_id,
-            ExtraSession.date == session_date,
-            ExtraSession.status != 'Cancelled',
-            db.or_(
-                db.and_(ExtraSession.start_time <= start_time, ExtraSession.end_time > start_time),
-                db.and_(ExtraSession.start_time < end_time, ExtraSession.end_time >= end_time),
-                db.and_(ExtraSession.start_time >= start_time, ExtraSession.end_time <= end_time)
-            )
-        ).first()
-
-        if conflicting:
-            return jsonify({"error": "This class already has an extra session scheduled at this time"}), 400
-
-        # Create the extra session
-        extra_session = ExtraSession(
-            subject_id=subject_id,
-            teacher_id=user_id,
-            section_id=section_id,
-            date=session_date,
-            start_time=start_time,
-            end_time=end_time,
-            topic=topic if topic else None,
-            meeting_link=meeting_link if meeting_link else None,
-            status='Scheduled'
-        )
-        db.session.add(extra_session)
-        db.session.commit()
-
-        # Send notification to students (filter by elective if applicable)
-        section = ClassSection.query.get(section_id)
-        subject = Subject.query.get(subject_id)
-        teacher = StaffProfile.query.get(user_id)
-
-        if is_elective_type(subject.subject_type):
-            # Only notify students with approved elective selection
-            students = (db.session.query(StudentProfile)
-                        .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
-                        .filter(StudentProfile.current_section_id == section_id)
-                        .filter(StudentElective.subject_id == subject_id)
-                        .filter(StudentElective.status == 'Approved')
-                        .all())
-        else:
-            students = StudentProfile.query.filter_by(current_section_id=section_id).all()
-
-        for student in students:
-            send_notification(
-                student.student_id,
-                f"Extra Class: {subject.name}",
-                f"Extra class scheduled on {session_date.strftime('%d %b')} at {start_time.strftime('%I:%M %p')}. Topic: {topic or 'TBA'}",
-                type='info'
-            )
-
-        return jsonify({
-            "message": "Extra session created successfully",
-            "id": extra_session.id
-        }), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/staff/extra_sessions/<int:session_id>', methods=['PUT'])
-@login_required
-def update_extra_session(session_id):
-    """Update an extra session."""
-    try:
-        data = request.json or {}
-        user_id = data.get('user_id')
-
-        extra_session = ExtraSession.query.get(session_id)
-        if not extra_session:
-            return jsonify({"error": "Extra session not found"}), 404
-
-        if extra_session.teacher_id != user_id:
-            return jsonify({"error": "Not authorized to modify this session"}), 403
-
-        # Check if attendance already marked
-        session_log = SessionLog.query.filter_by(extra_session_id=session_id).first()
-        if session_log:
-            return jsonify({"error": "Cannot modify session after attendance is marked"}), 400
-
-        # Update fields
-        if 'topic' in data:
-            extra_session.topic = data['topic'].strip() or None
-        if 'meeting_link' in data:
-            extra_session.meeting_link = data['meeting_link'].strip() or None
-
-        db.session.commit()
-        return jsonify({"message": "Extra session updated"}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/staff/extra_sessions/<int:session_id>', methods=['DELETE'])
-@login_required
-def cancel_extra_session(session_id):
-    """Cancel an extra session."""
-    try:
-        user_id = request.args.get('user_id')
-
-        extra_session = ExtraSession.query.get(session_id)
-        if not extra_session:
-            return jsonify({"error": "Extra session not found"}), 404
-
-        if extra_session.teacher_id != user_id:
-            return jsonify({"error": "Not authorized to cancel this session"}), 403
-
-        # Check if attendance already marked
-        session_log = SessionLog.query.filter_by(extra_session_id=session_id).first()
-        if session_log:
-            return jsonify({"error": "Cannot cancel session after attendance is marked"}), 400
-
-        extra_session.status = 'Cancelled'
-        db.session.commit()
-
-        # Notify students (filter by elective if applicable)
-        section = ClassSection.query.get(extra_session.section_id)
-        subject = Subject.query.get(extra_session.subject_id)
-
-        if is_elective_type(subject.subject_type):
-            # Only notify students with approved elective selection
-            students = (db.session.query(StudentProfile)
-                        .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
-                        .filter(StudentProfile.current_section_id == extra_session.section_id)
-                        .filter(StudentElective.subject_id == extra_session.subject_id)
-                        .filter(StudentElective.status == 'Approved')
-                        .all())
-        else:
-            students = StudentProfile.query.filter_by(current_section_id=extra_session.section_id).all()
-
-        for student in students:
-            send_notification(
-                student.student_id,
-                f"Extra Class Cancelled: {subject.name}",
-                f"The extra class scheduled on {extra_session.date.strftime('%d %b')} at {extra_session.start_time.strftime('%I:%M %p')} has been cancelled.",
-                type='warning'
-            )
-
-        return jsonify({"message": "Extra session cancelled"}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/staff/extra_sessions/<int:session_id>/mark_attendance', methods=['POST'])
-@login_required
-def mark_extra_session_attendance(session_id):
-    """Mark attendance for an extra session - creates session log and attendance records."""
-    try:
-        data = request.json or {}
-        user_id = data.get('user_id')
-        attendance_data = data.get('attendance', [])
-
-        extra_session = ExtraSession.query.get(session_id)
-        if not extra_session:
-            return jsonify({"error": "Extra session not found"}), 404
-
-        if extra_session.teacher_id != user_id:
-            return jsonify({"error": "Not authorized"}), 403
-
-        # Check if already marked
-        existing_log = SessionLog.query.filter_by(extra_session_id=session_id).first()
-        if existing_log:
-            return jsonify({"error": "Attendance already marked for this session"}), 400
-
-        # Create session log
-        session_log = SessionLog(
-            extra_session_id=session_id,
-            session_date=extra_session.date,
-            status='Conducted',
-            actual_teacher_id=user_id
-        )
-        db.session.add(session_log)
-        db.session.flush()
-
-        # Create attendance transactions
-        for att in attendance_data:
-            student_id = att.get('student_id')
-            status = att.get('status', 'Absent')
-            if student_id:
-                txn = AttendanceTransaction(
-                    session_id=session_log.session_id,
-                    student_id=student_id,
-                    status=status
-                )
-                db.session.add(txn)
-
-        # Update extra session status
-        extra_session.status = 'Conducted'
-        db.session.commit()
-
-        return jsonify({"message": "Attendance marked successfully"}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
 
 # ==========================================
 # API: LEAVE & STUDENT
@@ -5822,52 +3730,7 @@ def get_staff_leave_requests():
             for leave, student, section in hod_history:
                 leave_list.append(format_leave(leave, student, section, "HOD Approval"))
 
-    # Fetch students on duty (events) for Class Teacher's section
-    # Include ALL event participations (not just today) to match web app behavior
-    on_duty_list = []
-    if class_managed:
-        today = date.today()
-        MAX_EVENT_ROWS = 500
-        event_participants = (
-            db.session.query(EventParticipation, EventMaster, StudentProfile)
-            .join(EventMaster, EventParticipation.event_id == EventMaster.event_id)
-            .join(StudentProfile, EventParticipation.student_id == StudentProfile.student_id)
-            .filter(StudentProfile.current_section_id == class_managed.section_id)
-            .order_by(EventMaster.start_date.desc(), EventMaster.event_id.desc())
-            .limit(MAX_EVENT_ROWS)
-            .all()
-        )
-
-        # Group by student to avoid duplicates
-        student_events = {}
-        for part, event, student in event_participants:
-            raw_status = (getattr(part, 'status', '') or '').strip()
-            if raw_status.lower() in ('cancelled', 'canceled', 'rejected'):
-                continue
-
-            sid = student.student_id
-            # Check if event is active today
-            is_today = event.start_date and event.end_date and (event.start_date <= today <= event.end_date)
-
-            if sid not in student_events:
-                student_events[sid] = {
-                    "student_id": sid,
-                    "student_name": student.full_name,
-                    "roll_no": student.admission_number,
-                    "events": []
-                }
-            student_events[sid]["events"].append({
-                "event_id": event.event_id,
-                "event_name": event.event_name,
-                "role": part.student_role or "Participant",
-                "status": raw_status or "Nominated",
-                "date_range": f"{event.start_date.strftime('%d %b')} - {event.end_date.strftime('%d %b')}" if event.start_date and event.end_date else "",
-                "is_today": is_today
-            })
-
-        on_duty_list = sorted(student_events.values(), key=lambda x: x.get('roll_no', ''))
-
-    return jsonify({"requests": leave_list, "on_duty_students": on_duty_list})
+    return jsonify({"requests": leave_list})
 
 @app.route('/api/staff/leave_action', methods=['POST'])
 @login_required
@@ -5974,7 +3837,7 @@ def student_dashboard():
                 attended_sub = AttendanceTransaction.query.filter(
                     AttendanceTransaction.session_id.in_(applicable_ids),
                     AttendanceTransaction.student_id == student.student_id,
-                    AttendanceTransaction.status.in_(PRESENT_STATUSES)
+                    AttendanceTransaction.status.in_(['Present', 'OnDuty'])
                 ).count()
             
             grand_total_conducted += conducted
@@ -6069,7 +3932,7 @@ def student_dashboard():
         # --- 8. TERM GRANT STATUS (NEW) ---
         term_grant = TermGrantRecord.query.filter_by(student_id=user_id).first()
         grant_data = None
-
+        
         # Only show if the record exists (AMC has generated it)
         if term_grant:
             grant_data = {
@@ -6079,62 +3942,22 @@ def student_dashboard():
                 "ca_avg": term_grant.avg_ca_score
             }
 
-        # --- 9. EXTRA SESSIONS (One-time classes) ---
-        extra_sessions_list = []
-        today_date = datetime.now().date()
-        try:
-            extra_sessions = (db.session.query(ExtraSession, Subject, StaffProfile)
-                              .join(Subject, ExtraSession.subject_id == Subject.subject_id)
-                              .join(StaffProfile, ExtraSession.teacher_id == StaffProfile.staff_id)
-                              .filter(ExtraSession.section_id == section.section_id)
-                              .filter(ExtraSession.status != 'Cancelled')
-                              .filter(ExtraSession.date >= today_date)
-                              .order_by(ExtraSession.date.asc(), ExtraSession.start_time.asc())
-                              .all())
-
-            for es, subj, teacher in extra_sessions:
-                # Filter by elective: only show if student has approved selection for elective subjects
-                if is_elective_type(subj.subject_type):
-                    approved = StudentElective.query.filter_by(
-                        student_id=student.student_id,
-                        subject_id=subj.subject_id,
-                        status='Approved'
-                    ).first()
-                    if not approved:
-                        continue  # Skip this extra session - student hasn't opted for this elective
-
-                extra_sessions_list.append({
-                    "id": es.id,
-                    "subject": subj.name,
-                    "teacher": teacher.full_name,
-                    "date": es.date.strftime('%d %b'),
-                    "date_iso": es.date.isoformat(),
-                    "day": es.date.strftime('%A'),
-                    "time": f"{es.start_time.strftime('%I:%M %p')} - {es.end_time.strftime('%I:%M %p')}",
-                    "topic": es.topic,
-                    "meeting_link": es.meeting_link,
-                    "is_today": es.date == today_date
-                })
-        except Exception as ex:
-            print(f"Error loading extra sessions for student: {ex}")
-
-        return jsonify({
-            "profile": { "name": student.full_name, "roll": student.admission_number, "class": f"{section.class_level}-{section.name}" },
-            "stats": {
-                "percentage": overall_percentage,
-                "total_lectures": grand_total_conducted,
-                "attended": grand_total_attended,
-                "is_defaulter": overall_percentage < 75
-            },
-            "subject_wise": sub_perf,
-            "recent_activity": activity,
-            "events": event_history,
-            "mentor": mentor_info,
-            "detention": detention_data,
+        return jsonify({ 
+            "profile": { "name": student.full_name, "roll": student.admission_number, "class": f"{section.class_level}-{section.name}" }, 
+            "stats": { 
+                "percentage": overall_percentage, 
+                "total_lectures": grand_total_conducted, 
+                "attended": grand_total_attended, 
+                "is_defaulter": overall_percentage < 75 
+            }, 
+            "subject_wise": sub_perf, 
+            "recent_activity": activity, 
+            "events": event_history, 
+            "mentor": mentor_info, 
+            "detention": detention_data, 
             "meeting": upcoming_meeting,
             "results": results_data,
-            "term_grant": grant_data,
-            "extra_sessions": extra_sessions_list
+            "term_grant": grant_data # <--- NEW FIELD
         })
 
     except Exception as e:
@@ -6142,40 +3965,6 @@ def student_dashboard():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/student/timetable', methods=['GET'])
-@login_required
-def student_timetable_web():
-    """Web-session based timetable for student dashboard (uses _get_student_timetable_payload)"""
-    try:
-        user_id = request.args.get('user_id')
-        student = StudentProfile.query.get(user_id)
-        if not student:
-            return jsonify({"error": "Student not found"}), 404
-
-        payload = _get_student_timetable_payload(student)
-
-        # Add version info for display
-        if student.current_section_id:
-            active_version = TimetableVersion.query.filter_by(
-                section_id=student.current_section_id,
-                status='Active'
-            ).first()
-            if active_version:
-                payload['version'] = {
-                    'version_number': active_version.version_number,
-                    'version_label': active_version.version_label,
-                    'published_at': active_version.published_at.isoformat() if active_version.published_at else None
-                }
-
-        return jsonify(payload), 200
-
-    except Exception as e:
-        print(f"Error in student timetable: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
 # ==========================================
 # ADMIN & STAFF UTILITIES (RESTORED/NEW)
 # ==========================================
@@ -6294,7 +4083,7 @@ def assign_detention():
 #                 attended_count = AttendanceTransaction.query.filter(
 #                     AttendanceTransaction.session_id.in_(session_ids),
 #                     AttendanceTransaction.student_id == student_id,
-#                     AttendanceTransaction.status.in_(PRESENT_STATUSES)
+#                     AttendanceTransaction.status.in_(['Present', 'OnDuty'])
 #                 ).count()
                 
 #                 perc = round((attended_count / len(session_ids)) * 100, 1)
@@ -6399,7 +4188,7 @@ def get_defaulter_watchlist():
                     if not target_batch or target_batch == student_batch_name:
                         valid_sessions += 1
                         # Check if attended
-                        txn = AttendanceTransaction.query.filter_by(session_id=sess_id, student_id=student_id).filter(AttendanceTransaction.status.in_(PRESENT_STATUSES)).first()
+                        txn = AttendanceTransaction.query.filter_by(session_id=sess_id, student_id=student_id).filter(AttendanceTransaction.status.in_(['Present', 'OnDuty'])).first()
                         if txn: attended += 1
                 
                 if valid_sessions == 0: continue
@@ -6734,89 +4523,32 @@ def release_detention():
 def get_admin_stats():
     try:
         today = date.today()
-
-        scope_dept_ids = _get_admin_scope_dept_ids()
         
         # 1. Students (Active Only)
-        st_q = (db.session.query(StudentProfile)
-                .join(UserMaster, StudentProfile.student_id == UserMaster.user_id)
-                .filter(UserMaster.is_active == True))
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                total_students = 0
-            else:
-                st_q = (st_q.join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
-                          .join(Specialization, ClassSection.spec_id == Specialization.id)
-                          .filter(Specialization.dept_id.in_(scope_dept_ids)))
-
-        total_students = st_q.count()
+        total_students = (db.session.query(StudentProfile)
+                          .join(UserMaster, StudentProfile.student_id == UserMaster.user_id)
+                          .filter(UserMaster.is_active == True)
+                          .count())
         
         # 2. Staff (Active Only, Excluding System Admin)
-        staff_q = (db.session.query(StaffProfile)
-                   .join(UserMaster, StaffProfile.staff_id == UserMaster.user_id)
-                   .filter(UserMaster.is_active == True)
-                   .filter(StaffProfile.full_name != "System Administrator"))
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                total_staff = 0
-            else:
-                staff_q = staff_q.filter(StaffProfile.primary_department_id.in_(scope_dept_ids))
-
-        total_staff = staff_q.count()
+        total_staff = (db.session.query(StaffProfile)
+                       .join(UserMaster, StaffProfile.staff_id == UserMaster.user_id)
+                       .filter(UserMaster.is_active == True)
+                       .filter(StaffProfile.full_name != "System Administrator")
+                       .count())
                        
         # 3. Classes
-        if scope_dept_ids is None:
-            total_classes = ClassSection.query.count()
-        elif not scope_dept_ids:
-            total_classes = 0
-        else:
-            total_classes = (db.session.query(ClassSection)
-                             .join(Specialization, ClassSection.spec_id == Specialization.id)
-                             .filter(Specialization.dept_id.in_(scope_dept_ids))
-                             .count())
+        total_classes = ClassSection.query.count()
         
         # 4. Attendance Rate (Today)
         attendance_rate = 0
-        sess_q = (db.session.query(SessionLog)
-                  .filter(SessionLog.session_date == today))
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                total_sessions = 0
-            else:
-                # Prefer subject dept; fall back to section->spec dept.
-                from sqlalchemy import or_
-                sess_q = (sess_q.join(WeeklySchedule, SessionLog.schedule_id == WeeklySchedule.schedule_id)
-                              .outerjoin(Subject, Subject.subject_id == WeeklySchedule.subject_id)
-                              .outerjoin(ClassSection, ClassSection.section_id == WeeklySchedule.section_id)
-                              .outerjoin(Specialization, Specialization.id == ClassSection.spec_id)
-                              .filter(or_(
-                                  Subject.dept_id.in_(scope_dept_ids),
-                                  Specialization.dept_id.in_(scope_dept_ids),
-                              )))
-                total_sessions = sess_q.count()
-        else:
-            total_sessions = sess_q.count()
+        total_sessions = SessionLog.query.filter_by(session_date=today).count()
         if total_sessions > 0:
-            pres_q = (db.session.query(AttendanceTransaction)
-                      .join(SessionLog)
-                      .filter(SessionLog.session_date == today)
-                      .filter(AttendanceTransaction.status.in_(PRESENT_STATUSES)))
-
-            if scope_dept_ids is not None and scope_dept_ids:
-                from sqlalchemy import or_
-                pres_q = (pres_q.join(WeeklySchedule, SessionLog.schedule_id == WeeklySchedule.schedule_id)
-                              .outerjoin(Subject, Subject.subject_id == WeeklySchedule.subject_id)
-                              .outerjoin(ClassSection, ClassSection.section_id == WeeklySchedule.section_id)
-                              .outerjoin(Specialization, Specialization.id == ClassSection.spec_id)
-                              .filter(or_(
-                                  Subject.dept_id.in_(scope_dept_ids),
-                                  Specialization.dept_id.in_(scope_dept_ids),
-                              )))
-
-            total_presents = pres_q.count()
+            total_presents = (db.session.query(AttendanceTransaction)
+                              .join(SessionLog)
+                              .filter(SessionLog.session_date == today)
+                              .filter(AttendanceTransaction.status.in_(['Present', 'OnDuty']))
+                              .count())
             
             # Denominator: Total students in conducted sessions (approx)
             # For true accuracy, we'd need session-wise strength, but this is a dashboard estimate
@@ -6844,23 +4576,15 @@ def get_student_distribution():
         distribution = {}
         
         # Query active students grouped by class_level (via their section)
-        scope_dept_ids = _get_admin_scope_dept_ids()
-
-        q = (db.session.query(
-                ClassSection.class_level,
-                db.func.count(StudentProfile.student_id)
-            )
-            .join(StudentProfile, StudentProfile.current_section_id == ClassSection.section_id)
-            .join(UserMaster, StudentProfile.student_id == UserMaster.user_id)
-            .filter(UserMaster.is_active == True))
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"No Students": 0})
-            q = (q.join(Specialization, ClassSection.spec_id == Specialization.id)
-                   .filter(Specialization.dept_id.in_(scope_dept_ids)))
-
-        results = (q.group_by(ClassSection.class_level).all())
+        results = (db.session.query(
+            ClassSection.class_level,
+            db.func.count(StudentProfile.student_id)
+        )
+        .join(StudentProfile, StudentProfile.current_section_id == ClassSection.section_id)
+        .join(UserMaster, StudentProfile.student_id == UserMaster.user_id)
+        .filter(UserMaster.is_active == True)
+        .group_by(ClassSection.class_level)
+        .all())
         
         for class_level, count in results:
             if class_level:
@@ -6879,24 +4603,9 @@ def get_student_distribution():
 @require_roles('Admin')
 def get_admin_classes():
     try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
-
-        classes_q = (db.session.query(ClassSection, StaffProfile)
-                     .outerjoin(StaffProfile, ClassSection.class_teacher_id == StaffProfile.staff_id))
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"classes": [], "staff_directory": []})
-            classes_q = (classes_q.join(Specialization, ClassSection.spec_id == Specialization.id)
-                                   .filter(Specialization.dept_id.in_(scope_dept_ids)))
-
-        classes = classes_q.all()
+        classes = db.session.query(ClassSection, StaffProfile).outerjoin(StaffProfile, ClassSection.class_teacher_id == StaffProfile.staff_id).all()
         class_list = [{ "section_id": c.section_id, "name": c.name, "display_name": f"{c.class_level} - {c.name}", "teacher_id": c.class_teacher_id, "teacher_name": t.full_name if t else "Not Assigned" } for c, t in classes]
-
-        staff_q = StaffProfile.query.with_entities(StaffProfile.staff_id, StaffProfile.full_name).order_by(StaffProfile.full_name)
-        if scope_dept_ids is not None:
-            staff_q = staff_q.filter(StaffProfile.primary_department_id.in_(scope_dept_ids))
-        all_staff = staff_q.all()
+        all_staff = StaffProfile.query.with_entities(StaffProfile.staff_id, StaffProfile.full_name).order_by(StaffProfile.full_name).all()
         return jsonify({ "classes": class_list, "staff_directory": [{"id": s.staff_id, "name": s.full_name} for s in all_staff] })
     except Exception as e: return jsonify({"error": str(e)}), 500
 
@@ -6911,19 +4620,6 @@ def assign_class_teacher():
             return jsonify({"error": "section_id is required"}), 400
         section = db.session.get(ClassSection, section_id)
         if not section: return jsonify({"error": "Class not found"}), 404
-
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        if scope_dept_ids is not None:
-            deny = _ensure_section_in_scope(int(section_id))
-            if deny:
-                return deny
-
-            staff_id = data.get('staff_id')
-            if staff_id:
-                staff = db.session.get(StaffProfile, staff_id)
-                if not staff or not staff.primary_department_id or int(staff.primary_department_id) not in scope_dept_ids:
-                    return jsonify({"error": "Out of scope"}), 403
-
         section.class_teacher_id = data.get('staff_id')
         db.session.commit()
         log_activity("Role Update", f"Assigned Class Teacher for {section.class_level}-{section.name}")
@@ -6935,17 +4631,7 @@ def assign_class_teacher():
 @require_roles('Admin')
 def get_all_staff_coordinators():
     try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
-
-        q = (db.session.query(StaffProfile, Department)
-             .outerjoin(Department, StaffProfile.primary_department_id == Department.dept_id))
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"staff": []})
-            q = q.filter(StaffProfile.primary_department_id.in_(scope_dept_ids))
-
-        staff_list = q.all()
+        staff_list = (db.session.query(StaffProfile, Department).outerjoin(Department, StaffProfile.primary_department_id == Department.dept_id).all())
         result = []
         for staff, dept in staff_list:
             result.append({ "id": staff.staff_id, "name": staff.full_name, "emp_code": staff.employee_code, "dept": dept.name if dept else "N/A", "is_coordinator": staff.is_event_coordinator, "is_amc_member": staff.is_amc_member, "is_amc_head": staff.is_amc_head })
@@ -6964,13 +4650,6 @@ def toggle_staff_role():
         staff = db.session.get(StaffProfile, staff_id)
         role = data.get('role_type') if data else None
         if not staff: return jsonify({"error": "Staff not found"}), 404
-
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"error": "Admin department scope not configured"}), 403
-            if not staff.primary_department_id or int(staff.primary_department_id) not in scope_dept_ids:
-                return jsonify({"error": "Out of scope"}), 403
         
         if role == 'event': staff.is_event_coordinator = not staff.is_event_coordinator
         elif role == 'amc_member': staff.is_amc_member = not staff.is_amc_member
@@ -6989,18 +4668,10 @@ def toggle_staff_role():
 @require_roles('Admin')
 def get_admin_faculty_list():
     try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        q = (db.session.query(StaffProfile, UserMaster, Department)
-             .join(UserMaster, StaffProfile.staff_id == UserMaster.user_id)
-             .outerjoin(Department, StaffProfile.primary_department_id == Department.dept_id))
-
-        # Department Admins only see their own department.
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"faculty": []})
-            q = q.filter(StaffProfile.primary_department_id.in_(scope_dept_ids))
-
-        data = q.all()
+        data = (db.session.query(StaffProfile, UserMaster, Department)
+                .join(UserMaster, StaffProfile.staff_id == UserMaster.user_id)
+                .outerjoin(Department, StaffProfile.primary_department_id == Department.dept_id)
+                .all())
         
         # HOD Logic (Keep existing)
         hods = Department.query.filter(Department.hod_staff_id != None).all()
@@ -7063,7 +4734,7 @@ def get_archive_stats():
         
         # 2. GLOBAL ATTENDANCE STATS
         total_txns = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(session_ids)).count()
-        present_txns = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(session_ids), AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+        present_txns = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(session_ids), AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
         avg_att = round((present_txns / total_txns) * 100, 1) if total_txns > 0 else 0
 
         # 3. BEST PERFORMING CLASS (Attendance Based)
@@ -7074,7 +4745,7 @@ def get_archive_stats():
             
             # Get txns for this specific session
             s_txns = AttendanceTransaction.query.filter_by(session_id=sess.session_id).count()
-            s_pres = AttendanceTransaction.query.filter_by(session_id=sess.session_id).filter(AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+            s_pres = AttendanceTransaction.query.filter_by(session_id=sess.session_id).filter(AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
             
             class_perf_map[sec.name]['total'] += s_txns
             class_perf_map[sec.name]['present'] += s_pres
@@ -7202,7 +4873,7 @@ def get_hod_archive_stats():
         total_txns = AttendanceTransaction.query.filter(AttendanceTransaction.session_id.in_(session_ids)).count()
         present_txns = AttendanceTransaction.query.filter(
             AttendanceTransaction.session_id.in_(session_ids),
-            AttendanceTransaction.status.in_(PRESENT_STATUSES)
+            AttendanceTransaction.status.in_(['Present', 'OnDuty'])
         ).count()
         avg_att = round((present_txns / total_txns) * 100, 1) if total_txns > 0 else 0
 
@@ -7215,7 +4886,7 @@ def get_hod_archive_stats():
             s_txns = AttendanceTransaction.query.filter_by(session_id=sess.session_id).count()
             s_pres = (
                 AttendanceTransaction.query.filter_by(session_id=sess.session_id)
-                .filter(AttendanceTransaction.status.in_(PRESENT_STATUSES))
+                .filter(AttendanceTransaction.status.in_(['Present', 'OnDuty']))
                 .count()
             )
             class_perf_map[key]['total'] += s_txns
@@ -7451,25 +5122,12 @@ def add_single_faculty():
         data = request.json
         email = data.get('email')
         if UserMaster.query.filter_by(username=email).first(): return jsonify({"error": "Email exists"}), 400
-
-        scope_dept_ids = _get_admin_scope_dept_ids()
         
         new_uuid = str(uuid.uuid4())
         db.session.add(UserMaster(user_id=new_uuid, username=email, password_hash=generate_password_hash("Staff@123"), user_type='Staff', is_active=True))
-
-        # Department Admins cannot create faculty outside their scope.
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"error": "Admin department scope not configured"}), 403
-            dept = Department.query.get(scope_dept_ids[0])
-            if not dept:
-                return jsonify({"error": "Scoped department not found"}), 400
-        else:
-            dept = Department.query.filter_by(name=data.get('dept')).first()
-            if not dept:
-                dept = Department(name=data.get('dept'))
-                db.session.add(dept)
-                db.session.flush()
+        
+        dept = Department.query.filter_by(name=data.get('dept')).first()
+        if not dept: dept = Department(name=data.get('dept')); db.session.add(dept); db.session.flush()
         
         db.session.add(StaffProfile(
             staff_id=new_uuid, 
@@ -7494,19 +5152,9 @@ def archive_faculty():
         user_id = data.get('user_id')
         if not user_id:
             return jsonify({"error": "user_id is required"}), 400
-
-        scope_dept_ids = _get_admin_scope_dept_ids()
         user = db.session.get(UserMaster, user_id)
         staff = db.session.get(StaffProfile, user_id)
         if not user: return jsonify({"error": "User not found"}), 404
-
-        # Department Admins cannot modify faculty outside their scope.
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"error": "Admin department scope not configured"}), 403
-            if not staff or staff.primary_department_id not in scope_dept_ids:
-                return jsonify({"error": "Out of scope"}), 403
-
         user.is_active = (data.get('action') == 'activate')
         if data.get('action') == 'archive':
             classes = ClassSection.query.filter_by(class_teacher_id=user.user_id).all()
@@ -7651,53 +5299,20 @@ def is_resource_free(day, start_str, end_str, teacher_id, section_id, batch=None
 @require_roles('Admin')
 def generate_timetable():
     try:
-        data = request.json or {}
-        target_section_id = data.get('section_id')  # Optional: generate for specific section only
-
-        # Track versions created per section
-        version_map = {}  # section_id -> version_id
+        # 1. Clear Old Schedule
+        db.session.query(WeeklySchedule).delete()
+        db.session.commit()
 
         days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
         time_slots = get_time_slots()
-
-        faculty_daily_load = {}
+        
+        faculty_daily_load = {} 
         schedule_log = []
         failed_items = []
 
         sections = ClassSection.query.all()
-        if target_section_id:
-            sections = [s for s in sections if s.section_id == int(target_section_id)]
 
         for section in sections:
-            # Create draft version for this section
-            existing_draft = TimetableVersion.query.filter_by(
-                section_id=section.section_id,
-                status='Draft'
-            ).first()
-
-            if existing_draft:
-                # Clear existing draft slots (will be replaced)
-                WeeklySchedule.query.filter_by(version_id=existing_draft.version_id).delete()
-                draft_version = existing_draft
-                # Update metadata
-                draft_version.version_label = f"Auto-Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                draft_version.source_type = 'auto_generate'
-                draft_version.created_by_id = current_user.user_id
-            else:
-                max_version = db.session.query(db.func.max(TimetableVersion.version_number)).filter_by(section_id=section.section_id).scalar() or 0
-                draft_version = TimetableVersion(
-                    section_id=section.section_id,
-                    version_number=max_version + 1,
-                    version_label=f"Auto-Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                    status='Draft',
-                    created_by_id=current_user.user_id,
-                    source_type='auto_generate'
-                )
-                db.session.add(draft_version)
-                db.session.flush()
-
-            version_map[section.section_id] = draft_version.version_id
-
             # Get Student Count for Room Capacity Check
             class_strength = StudentProfile.query.filter_by(current_section_id=section.section_id).count()
             if class_strength == 0: class_strength = 60
@@ -7710,14 +5325,14 @@ def generate_timetable():
             queue = []
             for alloc, subject in allocations:
                 # --- NEW FILTER: EXCLUDE MDM-MINOR ---
-                if "MDM-Minor" in subject.name:
+                if "MDM-Minor" in subject.name: 
                     continue # Skip this subject entirely
                 # -------------------------------------
 
                 # Lectures
                 for _ in range(subject.l_count):
                     queue.append({ "sub": subject, "teacher": alloc.teacher_id, "type": "Lecture", "batch": None, "duration": 1 })
-
+                
                 # Tutorials
                 for _ in range(subject.t_count):
                     queue.append({ "sub": subject, "teacher": alloc.teacher_id, "type": "Tutorial", "batch": None, "duration": 1 })
@@ -7745,18 +5360,18 @@ def generate_timetable():
                     if placed: break
                     for day in days:
                         if placed: break
-
+                        
                         # LY Project Rule
                         if section.class_level == 'LY' and "Project" in item['sub'].name and day != 'Friday': continue
 
                         for i, slot in enumerate(time_slots):
                             if placed: break
-
+                            
                             # Duration Check
                             if i + item['duration'] > len(time_slots): continue
-
+                            
                             # Lunch Guard (No 2hr lab starting at 11:45)
-                            if item['duration'] == 2 and slot['id'] == 4: continue
+                            if item['duration'] == 2 and slot['id'] == 4: continue 
 
                             start_str = slot['start']
                             end_slot_idx = i + item['duration'] - 1
@@ -7765,21 +5380,20 @@ def generate_timetable():
                             # Load Check
                             if faculty_daily_load.get((item['teacher'], day), 0) + item['duration'] > 4: continue
 
-                            # Conflict Check (uses active versions + current draft being built)
+                            # Conflict Check
                             if is_resource_free(day, start_str, end_str, item['teacher'], section.section_id, item['batch']):
-
+                                
                                 # Room Check
                                 start_obj = datetime.strptime(start_str, "%H:%M").time()
                                 end_obj = datetime.strptime(end_str, "%H:%M").time()
                                 assigned_room = get_free_room(day, start_obj, end_obj, required_room_type, required_capacity)
-
+                                
                                 if assigned_room:
                                     new_slot = WeeklySchedule(
                                         section_id=section.section_id, subject_id=item['sub'].subject_id, teacher_id=item['teacher'],
                                         day_of_week=day, start_time=start_obj, end_time=end_obj,
                                         session_type=item['type'], target_batch=item['batch'],
-                                        room_id=assigned_room.room_id,
-                                        version_id=draft_version.version_id  # Link to draft version
+                                        room_id=assigned_room.room_id
                                     )
                                     db.session.add(new_slot)
                                     faculty_daily_load[(item['teacher'], day)] = faculty_daily_load.get((item['teacher'], day), 0) + item['duration']
@@ -7792,22 +5406,11 @@ def generate_timetable():
                     failed_items.append(f"{section.name}: {item['sub'].name} ({item['type']})")
 
         db.session.commit()
-
-        full_log = schedule_log + ["--- FAILED ITEMS ---"] + failed_items + [
-            "",
-            "=== IMPORTANT ===",
-            "Schedule generated as DRAFT.",
-            "Go to Version Manager to preview and publish."
-        ]
-        return jsonify({
-            "message": "Generated as DRAFT",
-            "logs": full_log,
-            "versions_created": version_map,
-            "note": "Use Version Manager to preview and publish the draft."
-        }), 200
+        
+        full_log = schedule_log + ["--- FAILED ITEMS ---"] + failed_items
+        return jsonify({"message": "Generated", "logs": full_log}), 200
 
     except Exception as e:
-        db.session.rollback()
         print(f"Scheduler Error: {e}")
         return jsonify({"error": str(e)}), 500
 # ==========================================
@@ -8594,16 +6197,10 @@ def api_admin_elective_subjects_by_source():
 # ==========================================
 
 @app.route('/api/admin/class_possible_electives', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_class_possible_electives():
     try:
         section_id = request.args.get('section_id')
         if not section_id: return jsonify({"error": "Section ID required"}), 400
-
-        deny = _ensure_section_in_scope(int(section_id))
-        if deny:
-            return deny
 
         # --- IMPROVED LOGIC ---
         # 1. Find subjects allocated to this section
@@ -8629,27 +6226,11 @@ def get_class_possible_electives():
 
     
 @app.route('/api/admin/all_active_electives', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_all_active_electives():
     try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
-
         # 1. Find all sections that have ANY elective offering 'Open'
         active_section_ids = db.session.query(ElectiveOffering.section_id).filter_by(status='Open').distinct().all()
         active_section_ids = [i[0] for i in active_section_ids]
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"dashboard": []})
-            allowed_section_ids = [
-                r[0] for r in (db.session.query(ClassSection.section_id)
-                               .join(Specialization, ClassSection.spec_id == Specialization.id)
-                               .filter(Specialization.dept_id.in_(scope_dept_ids))
-                               .all())
-            ]
-            allowed_set = set(int(x) for x in allowed_section_ids)
-            active_section_ids = [int(x) for x in active_section_ids if int(x) in allowed_set]
         
         dashboard_data = []
         
@@ -8680,26 +6261,9 @@ def get_all_active_electives():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/directory', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_student_directory():
     try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"directory": {}})
-            # For scoped admins, only students whose section maps to their dept via specialization.
-            q = (db.session.query(StudentProfile, ClassSection)
-                 .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
-                 .join(Specialization, ClassSection.spec_id == Specialization.id)
-                 .filter(Specialization.dept_id.in_(scope_dept_ids)))
-        else:
-            # SuperAdmin sees all students
-            q = (db.session.query(StudentProfile, ClassSection)
-                 .outerjoin(ClassSection, StudentProfile.current_section_id == ClassSection.section_id))
-
-        results = q.order_by(ClassSection.class_level, ClassSection.name, StudentProfile.full_name).all()
+        results = (db.session.query(StudentProfile, ClassSection).outerjoin(ClassSection, StudentProfile.current_section_id == ClassSection.section_id).order_by(ClassSection.class_level, ClassSection.name, StudentProfile.full_name).all())
         directory = {}
         for student, section in results:
             lvl = section.class_level if section else "Unassigned"
@@ -8711,15 +6275,9 @@ def get_student_directory():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/update_student_status', methods=['POST'])
-@login_required
-@require_roles('Admin')
 def update_student_status():
     try:
         data = request.json
-        deny = _ensure_student_in_scope((data or {}).get('student_id'))
-        if deny:
-            return deny
-
         student = StudentProfile.query.get(data.get('student_id'))
         status = data.get('status')
         if not student: return jsonify({"error": "Student not found"}), 404
@@ -8742,16 +6300,9 @@ def render_admin_mentors():
 # API: MENTOR MANAGEMENT (UPDATED)
 # ==========================================
 @app.route('/api/admin/get_batches', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_batches():
     try:
         section_id = request.args.get('section_id')
-        if not section_id:
-            return jsonify({"error": "section_id is required"}), 400
-        deny = _ensure_section_in_scope(int(section_id))
-        if deny:
-            return deny
         batches = MentorBatch.query.filter_by(section_id=section_id).all()
         batch_data = []
         for b in batches:
@@ -8762,17 +6313,11 @@ def get_batches():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/delete_batch', methods=['POST'])
-@login_required
-@require_roles('Admin')
 def delete_batch():
     try:
         batch_id = request.json.get('batch_id')
         batch = MentorBatch.query.get(batch_id)
         if not batch: return jsonify({"error": "Batch not found"}), 404
-
-        deny = _ensure_section_in_scope(int(batch.section_id))
-        if deny:
-            return deny
         
         # Unlink students
         students = StudentProfile.query.filter_by(mentor_batch_id=batch_id).all()
@@ -8784,29 +6329,10 @@ def delete_batch():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/assign_mentors', methods=['POST'])
-@login_required
-@require_roles('Admin')
 def assign_mentors():
     try:
         data = request.json
         section_id = data.get('section_id')
-        if not section_id:
-            return jsonify({"error": "section_id is required"}), 400
-        deny = _ensure_section_in_scope(int(section_id))
-        if deny:
-            return deny
-
-        # Mentors must be within department scope when scoped.
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        if scope_dept_ids is not None:
-            mentor_ids = [c.get('mentor_id') for c in (data.get('configs') or []) if c.get('mentor_id')]
-            if mentor_ids:
-                bad = (db.session.query(StaffProfile)
-                       .filter(StaffProfile.staff_id.in_(mentor_ids))
-                       .filter(~StaffProfile.primary_department_id.in_(scope_dept_ids))
-                       .first())
-                if bad:
-                    return jsonify({"error": "Out of scope"}), 403
         mode = data.get('mode') # 'single', 'auto_split', 'manual_split'
         configs = data.get('configs') # List of objects: {mentor_id: x, count: y (optional)}
 
@@ -8863,20 +6389,10 @@ def assign_mentors():
 
 
 @app.route('/api/admin/mentor_hierarchy', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_mentor_hierarchy():
     try:
         # 1. Fetch all Classes
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        classes_q = ClassSection.query
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({}), 200
-            classes_q = (classes_q
-                        .join(Specialization, ClassSection.spec_id == Specialization.id)
-                        .filter(Specialization.dept_id.in_(scope_dept_ids)))
-        classes = classes_q.order_by(ClassSection.class_level, ClassSection.name).all()
+        classes = ClassSection.query.order_by(ClassSection.class_level, ClassSection.name).all()
         
         hierarchy = {}
         
@@ -8919,29 +6435,10 @@ def get_mentor_hierarchy():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/auto_split_batches', methods=['POST'])
-@login_required
-@require_roles('Admin')
 def auto_split_batches():
     try:
         data = request.json
         section_id = data.get('section_id')
-        if not section_id:
-            return jsonify({"error": "section_id is required"}), 400
-        deny = _ensure_section_in_scope(int(section_id))
-        if deny:
-            return deny
-
-        # Mentors must be within department scope when scoped.
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        if scope_dept_ids is not None:
-            mentor_ids = [mid for mid in (data.get('mentor_ids') or []) if mid]
-            if mentor_ids:
-                bad = (db.session.query(StaffProfile)
-                       .filter(StaffProfile.staff_id.in_(mentor_ids))
-                       .filter(~StaffProfile.primary_department_id.in_(scope_dept_ids))
-                       .first())
-                if bad:
-                    return jsonify({"error": "Out of scope"}), 403
         mentor_ids = data.get('mentor_ids') # List
         mode = data.get('mode') # 'auto' or 'manual_single'
 
@@ -8995,23 +6492,10 @@ def auto_split_batches():
 # API: MENTOR MENTEES (Restore Missing API)
 # ==========================================
 @app.route('/api/staff/my_mentees', methods=['GET'])
-@login_required
-@require_roles('Staff')
 def get_my_mentees():
     try:
-        user_id = current_user.user_id
+        user_id = request.args.get('user_id')
         my_batches = MentorBatch.query.filter_by(mentor_id=user_id).all()
-
-        scope_dept_ids = _get_user_scope_dept_ids()
-        if scope_dept_ids is not None and scope_dept_ids:
-            allowed_section_ids = [
-                r[0] for r in (db.session.query(ClassSection.section_id)
-                               .join(Specialization, ClassSection.spec_id == Specialization.id)
-                               .filter(Specialization.dept_id.in_(scope_dept_ids))
-                               .all())
-            ]
-            allowed_set = set(int(x) for x in allowed_section_ids)
-            my_batches = [b for b in my_batches if int(b.section_id) in allowed_set]
         
         mentees = []
         for b in my_batches:
@@ -9027,7 +6511,7 @@ def get_my_mentees():
             for s, p in students_data:
                 # Attendance Calc
                 total_sessions = db.session.query(SessionLog).join(WeeklySchedule).filter(WeeklySchedule.section_id == section.section_id, SessionLog.status=='Conducted').count()
-                attended = AttendanceTransaction.query.filter(AttendanceTransaction.student_id == s.student_id, AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+                attended = AttendanceTransaction.query.filter(AttendanceTransaction.student_id == s.student_id, AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
                 perc = round((attended/total_sessions)*100) if total_sessions > 0 else 0
                 
                 mentees.append({
@@ -9048,67 +6532,24 @@ def get_my_mentees():
     except Exception as e: return jsonify({"error": str(e)}), 500
     
 @app.route('/api/admin/activity_log', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_system_logs():
     try:
-        from datetime import timezone, timedelta
-        IST = timezone(timedelta(hours=5, minutes=30))
-        
-        # Filter logs by department scope
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        logs_q = SystemLog.query
-        
-        if scope_dept_ids is not None:
-            # Department admin: show only their department's logs
-            if not scope_dept_ids:
-                return jsonify({"logs": []})
-            logs_q = logs_q.filter(SystemLog.dept_id.in_(scope_dept_ids))
-        # else: SuperAdmin sees all logs (no filter)
-        
-        logs = logs_q.order_by(SystemLog.timestamp.desc()).limit(20).all()
+        logs = SystemLog.query.order_by(SystemLog.timestamp.desc()).limit(10).all()
         log_data = []
-        
-        now_utc = datetime.now(timezone.utc)
-        
         for log in logs:
-            # Convert timestamp to IST
-            if log.timestamp.tzinfo is None:
-                # Assume stored as UTC if no tzinfo
-                log_utc = log.timestamp.replace(tzinfo=timezone.utc)
-            else:
-                log_utc = log.timestamp
-            log_ist = log_utc.astimezone(IST)
-            
-            # Calculate time ago from UTC now
-            diff = now_utc - log_utc
+            diff = datetime.now() - log.timestamp
             time_ago = "Just now"
-            if diff.days > 0: 
-                time_ago = f"{diff.days}d ago"
-            elif diff.seconds > 3600: 
-                time_ago = f"{diff.seconds//3600}h ago"
-            elif diff.seconds > 60: 
-                time_ago = f"{diff.seconds//60}m ago"
-            
-            # Format: "06 Jan 2026, 3:45 PM"
-            formatted_time = log_ist.strftime("%d %b %Y, %I:%M %p")
+            if diff.days > 0: time_ago = f"{diff.days} days ago"
+            elif diff.seconds > 3600: time_ago = f"{diff.seconds//3600}h ago"
+            elif diff.seconds > 60: time_ago = f"{diff.seconds//60}m ago"
             
             icon = "activity"; color = "bg-gray-100 text-gray-600"
             if "Import" in log.action_type: icon="upload"; color="bg-blue-50 text-blue-600"
             elif "Role" in log.action_type: icon="shield"; color="bg-green-50 text-green-600"
             elif "Faculty" in log.action_type: icon="user-x"; color="bg-red-50 text-red-600"
             elif "Promotion" in log.action_type: icon="trending-up"; color="bg-yellow-50 text-yellow-600"
-            elif "Student" in log.action_type: icon="users"; color="bg-purple-50 text-purple-600"
-            elif "Timetable" in log.action_type: icon="calendar"; color="bg-indigo-50 text-indigo-600"
             
-            log_data.append({ 
-                "action": log.action_type, 
-                "desc": log.description, 
-                "time": time_ago,
-                "timestamp": formatted_time,
-                "icon": icon, 
-                "color": color 
-            })
+            log_data.append({ "action": log.action_type, "desc": log.description, "time": time_ago, "icon": icon, "color": color })
         return jsonify({"logs": log_data})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
@@ -9175,7 +6616,7 @@ def get_amc_stats():
             present = 0
             absent = 0
             if session:
-                present = AttendanceTransaction.query.filter_by(session_id=session.session_id).filter(AttendanceTransaction.status.in_(PRESENT_STATUSES)).count()
+                present = AttendanceTransaction.query.filter_by(session_id=session.session_id).filter(AttendanceTransaction.status.in_(['Present', 'OnDuty'])).count()
                 absent = strength - present
             elif status == "Missing":
                 absent = strength
@@ -9374,63 +6815,31 @@ def get_amc_compliance_hierarchy():
 
 
 @app.route('/api/admin/batch_stats', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_batch_stats():
     try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
         levels = ['FY', 'SY', 'TY', 'LY']
         stats = []
         for lvl in levels:
-            q = (db.session.query(StudentProfile)
-                 .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
-                 .filter(ClassSection.class_level == lvl)
-                 .filter(StudentProfile.academic_status == 'Active'))
-
-            bq = (db.session.query(StudentProfile.batch)
-                  .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
-                  .filter(ClassSection.class_level == lvl))
-
-            if scope_dept_ids is not None:
-                if not scope_dept_ids:
-                    stats.append({"level": lvl, "count": 0, "batches": ""})
-                    continue
-                q = (q.join(Specialization, ClassSection.spec_id == Specialization.id)
-                       .filter(Specialization.dept_id.in_(scope_dept_ids)))
-                bq = (bq.join(Specialization, ClassSection.spec_id == Specialization.id)
-                        .filter(Specialization.dept_id.in_(scope_dept_ids)))
-
-            count = q.count()
-            batches = bq.distinct().all()
+            count = (db.session.query(StudentProfile).join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id).filter(ClassSection.class_level == lvl).filter(StudentProfile.academic_status == 'Active').count())
+            batches = (db.session.query(StudentProfile.batch).join(ClassSection).filter(ClassSection.class_level == lvl).distinct().all())
             batch_names = [b[0] for b in batches if b[0]]
             stats.append({ "level": lvl, "count": count, "batches": ", ".join(batch_names) })
         return jsonify({"stats": stats})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/promote_batch', methods=['POST'])
-@login_required
-@require_roles('Admin')
 def promote_batch():
     try:
         data = request.json
         from_lvl = data.get('from_level')
         to_lvl = data.get('to_level')
-
-        scope_dept_ids = _get_admin_scope_dept_ids()
         
         # 1. Find Students to Promote
-        q = (db.session.query(StudentProfile, ClassSection)
-             .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
-             .filter(ClassSection.class_level == from_lvl)
-             .filter(StudentProfile.academic_status == 'Active'))
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"error": "Admin department scope not configured"}), 403
-            q = (q.join(Specialization, ClassSection.spec_id == Specialization.id)
-                   .filter(Specialization.dept_id.in_(scope_dept_ids)))
-
-        students_to_promote = q.all()
+        students_to_promote = (db.session.query(StudentProfile, ClassSection)
+                               .join(ClassSection, StudentProfile.current_section_id == ClassSection.section_id)
+                               .filter(ClassSection.class_level == from_lvl)
+                               .filter(StudentProfile.academic_status == 'Active')
+                               .all())
         
         if not students_to_promote: return jsonify({"error": "No students found"}), 404
         promoted_count = 0
@@ -9446,11 +6855,7 @@ def promote_batch():
         # 3. Handle Progression (FY -> SY -> TY)
         else:
             # Pre-fetch target sections to minimize DB hits
-            target_sections_q = ClassSection.query.filter_by(class_level=to_lvl)
-            if scope_dept_ids is not None:
-                target_sections_q = (target_sections_q.join(Specialization, ClassSection.spec_id == Specialization.id)
-                                     .filter(Specialization.dept_id.in_(scope_dept_ids)))
-            target_sections = target_sections_q.all()
+            target_sections = ClassSection.query.filter_by(class_level=to_lvl).all()
             target_map = {sec.name: sec.section_id for sec in target_sections}
             
             # Cache for Target Batches to prevent duplicates during loop
@@ -9500,16 +6905,10 @@ def promote_batch():
 # In app.py - Add these missing functions
 
 @app.route('/api/admin/allocation_data', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_allocation_data():
     try:
         section_id = request.args.get('section_id')
         if not section_id: return jsonify({"error": "Section ID required"}), 400
-
-        deny = _ensure_section_in_scope(int(section_id))
-        if deny:
-            return deny
         
         allocations = (db.session.query(SubjectAllocation, Subject, StaffProfile)
                        .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
@@ -9580,17 +6979,9 @@ def get_allocation_data():
 
 
 @app.route('/api/admin/faculty_load_list', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_faculty_load_list():
     try:
         section_id = request.args.get('section_id')
-        if section_id:
-            deny = _ensure_section_in_scope(int(section_id))
-            if deny:
-                return deny
-
-        scope_dept_ids = _get_admin_scope_dept_ids()
         load_counts = db.session.query(SubjectAllocation.teacher_id, db.func.count(SubjectAllocation.allocation_id)).group_by(SubjectAllocation.teacher_id).all()
         load_map = {tid: count for tid, count in load_counts}
         active_mentors = db.session.query(MentorBatch.mentor_id).filter(MentorBatch.mentor_id != None).distinct().all()
@@ -9602,11 +6993,6 @@ def get_faculty_load_list():
                      .filter(UserMaster.is_active == True)
                      .order_by(StaffProfile.full_name)
                      .all())
-
-        if scope_dept_ids is not None:
-            if not scope_dept_ids:
-                return jsonify({"faculty": [], "subjects": []})
-            all_staff = [s for s in all_staff if s.primary_department_id in scope_dept_ids]
         
         staff_list = []
         for s in all_staff:
@@ -9624,47 +7010,18 @@ def get_faculty_load_list():
             query = Subject.query.filter(Subject.subject_id.notin_(assigned_ids))
             if target_level: query = query.filter_by(target_class=target_level)
             query = query.filter(Subject.subject_type == 'Core')
-            if scope_dept_ids is not None:
-                query = query.filter(Subject.dept_id.in_(scope_dept_ids))
             available_subjects = query.order_by(Subject.name).all()
         else:
-            query = Subject.query
-            if scope_dept_ids is not None:
-                query = query.filter(Subject.dept_id.in_(scope_dept_ids))
-            available_subjects = query.order_by(Subject.name).all()
+            available_subjects = Subject.query.order_by(Subject.name).all()
             
         subject_list = [{"id": s.subject_id, "name": s.name, "code": s.code} for s in available_subjects]
         return jsonify({"faculty": staff_list, "subjects": subject_list})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/save_allocation', methods=['POST'])
-@login_required
-@require_roles('Admin')
 def save_allocation():
     try:
         data = request.json
-        section_id = (data or {}).get('section_id')
-        subject_id = (data or {}).get('subject_id')
-        staff_id = (data or {}).get('staff_id')
-
-        if not section_id or not subject_id:
-            return jsonify({"error": "section_id and subject_id are required"}), 400
-
-        deny = _ensure_section_in_scope(int(section_id))
-        if deny:
-            return deny
-
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        if scope_dept_ids is not None:
-            if staff_id:
-                staff = db.session.get(StaffProfile, staff_id)
-                if not staff or not staff.primary_department_id or int(staff.primary_department_id) not in scope_dept_ids:
-                    return jsonify({"error": "Out of scope"}), 403
-
-            subj = db.session.get(Subject, int(subject_id))
-            if subj and getattr(subj, 'dept_id', None) and int(subj.dept_id) not in scope_dept_ids:
-                return jsonify({"error": "Out of scope"}), 403
-
         existing = SubjectAllocation.query.filter_by(section_id=data.get('section_id'), subject_id=data.get('subject_id')).first()
         if existing: existing.teacher_id = data.get('staff_id'); msg = "Updated"
         else: db.session.add(SubjectAllocation(section_id=data.get('section_id'), subject_id=data.get('subject_id'), teacher_id=data.get('staff_id'))); msg = "Assigned"
@@ -9673,32 +7030,18 @@ def save_allocation():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/admin/get_class_schedule', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_class_schedule():
     try:
         section_id = request.args.get('section_id')
         if not section_id: return jsonify({"error": "Section ID missing"}), 400
-
-        deny = _ensure_section_in_scope(int(section_id))
-        if deny:
-            return deny
-
-        # Get active version for this section
-        active_version_id = get_active_version_id(int(section_id))
-
-        # 1. Get Time Slots (filtered by active version)
-        query = (db.session.query(WeeklySchedule, Subject, StaffProfile, RoomMaster)
+        
+        # 1. Get Time Slots (Existing)
+        slots = (db.session.query(WeeklySchedule, Subject, StaffProfile, RoomMaster)
                  .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
                  .join(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
                  .outerjoin(RoomMaster, WeeklySchedule.room_id == RoomMaster.room_id)
-                 .filter(WeeklySchedule.section_id == section_id))
-
-        # Filter by active version if one exists
-        if active_version_id:
-            query = query.filter(WeeklySchedule.version_id == active_version_id)
-
-        slots = query.all()
+                 .filter(WeeklySchedule.section_id == section_id)
+                 .all())
                  
         schedule_data = []
         for slot, subj, teacher, room in slots:
@@ -9741,288 +7084,13 @@ def get_class_schedule():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 
-# ==========================================
-# TIMETABLE VERSION MANAGEMENT APIs
-# ==========================================
-
-def get_active_version_id(section_id):
-    """Get the active version_id for a section, or None if no active version"""
-    active = TimetableVersion.query.filter_by(section_id=section_id, status='Active').first()
-    return active.version_id if active else None
-
-
-@app.route('/api/admin/timetable_versions', methods=['GET'])
-@login_required
-@require_roles('Admin')
-def list_timetable_versions():
-    """List all versions for a section"""
-    section_id = request.args.get('section_id', type=int)
-    if not section_id:
-        return jsonify({"error": "section_id required"}), 400
-
-    deny = _ensure_section_in_scope(int(section_id))
-    if deny:
-        return deny
-
-    versions = (TimetableVersion.query
-                .filter_by(section_id=section_id)
-                .order_by(TimetableVersion.version_number.desc())
-                .all())
-
-    section = ClassSection.query.get(section_id)
-
-    result = []
-    for v in versions:
-        creator = StaffProfile.query.get(v.created_by_id) if v.created_by_id else None
-        slot_count = WeeklySchedule.query.filter_by(version_id=v.version_id).count()
-
-        result.append({
-            "version_id": v.version_id,
-            "version_number": v.version_number,
-            "version_label": v.version_label,
-            "status": v.status,
-            "created_by": creator.full_name if creator else "System",
-            "created_at": v.created_at.isoformat() if v.created_at else None,
-            "published_at": v.published_at.isoformat() if v.published_at else None,
-            "source_type": v.source_type,
-            "slot_count": slot_count,
-            "notes": v.notes
-        })
-
-    return jsonify({
-        "section_id": section_id,
-        "section_name": f"{section.class_level} - {section.name}" if section else "Unknown",
-        "versions": result,
-        "has_active": any(v["status"] == "Active" for v in result),
-        "has_draft": any(v["status"] == "Draft" for v in result)
-    })
-
-
-@app.route('/api/admin/timetable_versions/<int:version_id>', methods=['GET'])
-@login_required
-@require_roles('Admin')
-def get_version_schedule(version_id):
-    """Get schedule slots for a specific version (preview)"""
-    version = TimetableVersion.query.get_or_404(version_id)
-
-    deny = _ensure_section_in_scope(int(version.section_id))
-    if deny:
-        return deny
-
-    slots = (db.session.query(WeeklySchedule, Subject, StaffProfile, RoomMaster)
-             .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
-             .join(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
-             .outerjoin(RoomMaster, WeeklySchedule.room_id == RoomMaster.room_id)
-             .filter(WeeklySchedule.version_id == version_id)
-             .all())
-
-    schedule_data = []
-    for slot, subj, teacher, room in slots:
-        schedule_data.append({
-            "schedule_id": slot.schedule_id,
-            "day": slot.day_of_week,
-            "start_time": slot.start_time.strftime("%I:%M %p"),
-            "end_time": slot.end_time.strftime("%I:%M %p"),
-            "subject": subj.name,
-            "code": subj.code,
-            "type": slot.session_type,
-            "batch": slot.target_batch,
-            "teacher": teacher.full_name,
-            "teacher_id": teacher.staff_id,
-            "room": room.room_number if room else "TBD"
-        })
-
-    return jsonify({
-        "version": {
-            "version_id": version.version_id,
-            "version_number": version.version_number,
-            "version_label": version.version_label,
-            "status": version.status
-        },
-        "schedule": schedule_data
-    })
-
-
-@app.route('/api/admin/timetable_versions/publish', methods=['POST'])
-@login_required
-@require_roles('Admin')
-def publish_timetable_version():
-    """Publish a draft version, archiving the current active"""
-    data = request.json
-    version_id = data.get('version_id')
-
-    version = TimetableVersion.query.get_or_404(version_id)
-
-    deny = _ensure_section_in_scope(int(version.section_id))
-    if deny:
-        return deny
-
-    if version.status != 'Draft':
-        return jsonify({"error": "Only draft versions can be published"}), 400
-
-    # Find and archive current active version for this section
-    current_active = TimetableVersion.query.filter_by(
-        section_id=version.section_id,
-        status='Active'
-    ).first()
-
-    if current_active:
-        current_active.status = 'Archived'
-        current_active.archived_at = datetime.now()
-
-    # Publish the draft
-    version.status = 'Active'
-    version.published_at = datetime.now()
-
-    db.session.commit()
-
-    # Send notifications to affected students and staff
-    _notify_timetable_change(version.section_id, version.version_id)
-
-    log_activity("Timetable Published", f"Version {version.version_number} published for section {version.section_id}")
-
-    return jsonify({"message": "Version published successfully", "version_id": version.version_id}), 200
-
-
-@app.route('/api/admin/timetable_versions/clone', methods=['POST'])
-@login_required
-@require_roles('Admin')
-def clone_timetable_version():
-    """Clone active version to create a new draft for editing"""
-    data = request.json
-    section_id = data.get('section_id')
-    if not section_id:
-        return jsonify({"error": "section_id required"}), 400
-
-    deny = _ensure_section_in_scope(int(section_id))
-    if deny:
-        return deny
-
-    # Check if draft already exists
-    existing_draft = TimetableVersion.query.filter_by(section_id=section_id, status='Draft').first()
-    if existing_draft:
-        return jsonify({"error": "A draft already exists for this section. Delete it first."}), 400
-
-    # Find active version
-    active_version = TimetableVersion.query.filter_by(section_id=section_id, status='Active').first()
-    if not active_version:
-        return jsonify({"error": "No active version to clone"}), 404
-
-    # Calculate next version number
-    max_version = db.session.query(db.func.max(TimetableVersion.version_number)).filter_by(section_id=section_id).scalar() or 0
-
-    # Create new draft version
-    new_version = TimetableVersion(
-        section_id=section_id,
-        version_number=max_version + 1,
-        version_label=data.get('label', f"Draft v{max_version + 1}"),
-        status='Draft',
-        created_by_id=current_user.user_id,
-        source_type='clone',
-        cloned_from_version_id=active_version.version_id,
-        notes=data.get('notes')
-    )
-    db.session.add(new_version)
-    db.session.flush()  # Get the version_id
-
-    # Clone all schedule slots
-    active_slots = WeeklySchedule.query.filter_by(version_id=active_version.version_id).all()
-    for slot in active_slots:
-        new_slot = WeeklySchedule(
-            section_id=slot.section_id,
-            subject_id=slot.subject_id,
-            teacher_id=slot.teacher_id,
-            day_of_week=slot.day_of_week,
-            start_time=slot.start_time,
-            end_time=slot.end_time,
-            session_type=slot.session_type,
-            target_batch=slot.target_batch,
-            room_id=slot.room_id,
-            version_id=new_version.version_id
-        )
-        db.session.add(new_slot)
-
-    db.session.commit()
-
-    return jsonify({
-        "message": "Draft created from active version",
-        "version_id": new_version.version_id,
-        "slot_count": len(active_slots)
-    }), 201
-
-
-@app.route('/api/admin/timetable_versions/<int:version_id>', methods=['DELETE'])
-@login_required
-@require_roles('Admin')
-def delete_timetable_version(version_id):
-    """Delete a draft or archived version"""
-    version = TimetableVersion.query.get_or_404(version_id)
-
-    deny = _ensure_section_in_scope(int(version.section_id))
-    if deny:
-        return deny
-
-    if version.status == 'Active':
-        return jsonify({"error": "Cannot delete active version. Publish another version first."}), 400
-
-    # Delete associated schedules
-    WeeklySchedule.query.filter_by(version_id=version_id).delete()
-
-    # Delete version
-    db.session.delete(version)
-    db.session.commit()
-
-    return jsonify({"message": "Version deleted successfully"}), 200
-
-
-def _notify_timetable_change(section_id, version_id):
-    """Send notifications to students and teachers when timetable changes"""
-    section = ClassSection.query.get(section_id)
-    if not section:
-        return
-
-    section_name = f"{section.class_level} - {section.name}"
-
-    # Notify all students in the section
-    students = StudentProfile.query.filter_by(current_section_id=section_id).all()
-    for student in students:
-        send_notification(
-            student.student_id,
-            "Timetable Updated",
-            f"A new timetable has been published for {section_name}. Please check your schedule.",
-            "info",
-            "/student/dashboard"
-        )
-
-    # Notify teachers who have classes in this section's new version
-    teacher_ids = db.session.query(WeeklySchedule.teacher_id).filter_by(
-        version_id=version_id
-    ).distinct().all()
-
-    for (teacher_id,) in teacher_ids:
-        if teacher_id:
-            send_notification(
-                teacher_id,
-                "Timetable Updated",
-                f"A new timetable has been published for {section_name} that includes your classes.",
-                "info",
-                "/staff/dashboard"
-            )
-
-
 # In app.py
 
 @app.route('/api/admin/course_structure', methods=['GET'])
-@login_required
-@require_roles('Admin')
 def get_course_structure():
     try:
         section_id = request.args.get('section_id')
         if not section_id: return jsonify({"error": "Section ID missing"}), 400
-
-        deny = _ensure_section_in_scope(int(section_id))
-        if deny:
-            return deny
 
         # Fetch allocations for this section (Source of Truth)
         allocations = (db.session.query(SubjectAllocation, Subject, StaffProfile)
@@ -10046,150 +7114,6 @@ def get_course_structure():
         return jsonify({"courses": course_list})
 
     except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-# ==========================================
-# API: ADMIN EVENTS MANAGEMENT
-# ==========================================
-
-@app.route('/api/admin/events', methods=['GET'])
-@login_required
-@require_roles('Admin')
-def get_admin_events():
-    """Get all events with coordinator info for admin management."""
-    try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        
-        # Get all events with coordinator info
-        events_query = (db.session.query(EventMaster, StaffProfile)
-                       .join(StaffProfile, EventMaster.coordinator_id == StaffProfile.staff_id)
-                       .order_by(EventMaster.start_date.desc()))
-        
-        # If department-scoped admin, filter by department
-        if scope_dept_ids:
-            events_query = events_query.filter(StaffProfile.primary_department_id.in_(scope_dept_ids))
-        
-        events = events_query.all()
-        
-        events_list = []
-        for evt, coord in events:
-            date_str = evt.start_date.strftime('%d %b %Y')
-            if evt.end_date and evt.end_date != evt.start_date:
-                date_str += f" - {evt.end_date.strftime('%d %b %Y')}"
-            
-            events_list.append({
-                "id": evt.event_id,
-                "name": evt.event_name,
-                "date": date_str,
-                "start_date": evt.start_date.strftime('%Y-%m-%d'),
-                "end_date": evt.end_date.strftime('%Y-%m-%d') if evt.end_date else evt.start_date.strftime('%Y-%m-%d'),
-                "coordinator_id": evt.coordinator_id,
-                "coordinator_name": coord.full_name,
-                "description": evt.description or ""
-            })
-        
-        # Get staff list for dropdown (event coordinators)
-        staff_query = StaffProfile.query.filter_by(is_archived=False)
-        if scope_dept_ids:
-            staff_query = staff_query.filter(StaffProfile.primary_department_id.in_(scope_dept_ids))
-        
-        staff = staff_query.order_by(StaffProfile.full_name).all()
-        staff_list = [{"id": s.staff_id, "name": s.full_name} for s in staff]
-        
-        return jsonify({
-            "events": events_list,
-            "staff_directory": staff_list
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/admin/save_event', methods=['POST'])
-@login_required
-@require_roles('Admin')
-def save_admin_event():
-    """Create or update an event (admin only)."""
-    try:
-        data = request.json or {}
-        event_id = data.get('id')
-        name = (data.get('name') or '').strip()
-        date_str = data.get('date')
-        coordinator_id = data.get('coordinator_id')
-        description = (data.get('description') or '').strip()
-        
-        if not name or not date_str or not coordinator_id:
-            return jsonify({"error": "name, date, and coordinator_id are required"}), 400
-        
-        try:
-            event_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-        except ValueError:
-            return jsonify({"error": "Invalid date format"}), 400
-        
-        if event_id:
-            # Update existing event
-            event = EventMaster.query.get(event_id)
-            if not event:
-                return jsonify({"error": "Event not found"}), 404
-            
-            event.event_name = name
-            event.start_date = event_date
-            event.end_date = event_date
-            event.coordinator_id = coordinator_id
-            event.description = description
-            
-            log_activity("Events", f"Updated event: {name}")
-            db.session.commit()
-            return jsonify({"message": "Event updated successfully"}), 200
-        else:
-            # Create new event
-            new_event = EventMaster(
-                event_name=name,
-                start_date=event_date,
-                end_date=event_date,
-                coordinator_id=coordinator_id,
-                description=description
-            )
-            db.session.add(new_event)
-            db.session.commit()
-            
-            log_activity("Events", f"Created event: {name}")
-            return jsonify({"message": "Event created successfully", "id": new_event.event_id}), 201
-            
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/admin/delete_event', methods=['POST'])
-@login_required
-@require_roles('Admin')
-def delete_admin_event():
-    """Delete an event and its participation records (admin only)."""
-    try:
-        data = request.json or {}
-        event_id = data.get('id')
-        
-        if not event_id:
-            return jsonify({"error": "Event ID is required"}), 400
-        
-        event = EventMaster.query.get(event_id)
-        if not event:
-            return jsonify({"error": "Event not found"}), 404
-        
-        event_name = event.event_name
-        
-        # Delete participation records first (foreign key constraint)
-        EventParticipation.query.filter_by(event_id=event_id).delete()
-        
-        # Delete the event
-        db.session.delete(event)
-        db.session.commit()
-        
-        log_activity("Events", f"Deleted event: {event_name}")
-        return jsonify({"message": "Event deleted successfully"}), 200
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/events/create', methods=['POST'])
 def create_event():
@@ -10455,20 +7379,13 @@ def get_notifications():
         if not user_id:
             return jsonify({"notifications": [], "unread": 0}), 200
         
-        # 1. Identify Target IDs (User + Linked Students if Parent)
+        # 1. Identify Target IDs (User + Linked Student if Parent)
         target_ids = [user_id]
-
-        children = StudentProfile.query.filter_by(parent_user_id=user_id).all()
-        child_prefix_map = {}
-        for c in children:
-            try:
-                first_name = (c.full_name or '').split()[0]
-            except Exception:
-                first_name = ''
-            child_prefix_map[c.student_id] = first_name or (c.admission_number or 'Child')
-
-        if children:
-            target_ids.extend([c.student_id for c in children])
+        
+        # Check if this user is a Parent
+        student = StudentProfile.query.filter_by(parent_user_id=user_id).first()
+        if student:
+            target_ids.append(student.student_id)
             
         # 2. Fetch Notifications for ALL target IDs
         # We fetch unread + recent read (limit 20)
@@ -10488,11 +7405,10 @@ def get_notifications():
             elif time_diff.seconds > 3600: time_ago = f"{time_diff.seconds//3600}h ago"
             else: time_ago = f"{time_diff.seconds//60}m ago"
             
-            # Add a visual indicator if it's for a child
+            # Add a visual indicator if it's for the student
             prefix = ""
-            child_label = child_prefix_map.get(n.user_id)
-            if child_label:
-                prefix = f"[{child_label}] "
+            if student and n.user_id == student.student_id:
+                prefix = f"[{student.full_name.split()[0]}] "
             
             data.append({
                 "id": n.id, 
@@ -10517,11 +7433,11 @@ def mark_notification_read():
             if not user_id:
                 return jsonify({"error": "user_id required"}), 400
 
-            # Parent users can see their linked students' notifications too; clear all.
+            # Parent users can see their linked student's notifications too; clear both.
             target_ids = [user_id]
-            children = StudentProfile.query.filter_by(parent_user_id=user_id).all()
-            if children:
-                target_ids.extend([c.student_id for c in children])
+            student = StudentProfile.query.filter_by(parent_user_id=user_id).first()
+            if student:
+                target_ids.append(student.student_id)
 
             Notification.query.filter(Notification.user_id.in_(target_ids), Notification.is_read == False).update({'is_read': True})
         else:
@@ -10539,29 +7455,10 @@ def mark_notification_read():
 @require_roles('Admin')
 def upload_dept_subject():
     try:
-        dept_ids = _get_admin_scope_dept_ids()
         file = get_db_file_handle(request); df = pd.read_csv(file, dtype=str)
-
-        # Department Admins can only upload for their own department.
-        if dept_ids is not None:
-            if not dept_ids:
-                return jsonify({"error": "Admin department scope not set. Assign Department Admin to a department first."}), 403
-            allowed_depts = Department.query.filter(Department.dept_id.in_(dept_ids)).all()
-            allowed_names = {d.name for d in allowed_depts}
-            csv_names = {str(x).strip() for x in df['Department Name'].dropna().unique()}
-            disallowed = sorted([n for n in csv_names if n not in allowed_names])
-            if disallowed:
-                return jsonify({
-                    "error": "Department Admin can only upload data for their own department",
-                    "disallowed_departments": disallowed,
-                }), 403
-
         unique_depts = df['Department Name'].dropna().unique()
         for dept_name in unique_depts:
-            # Only SuperAdmin can create new departments.
-            if dept_ids is None:
-                if not Department.query.filter_by(name=str(dept_name).strip()).first():
-                    db.session.add(Department(name=str(dept_name).strip()))
+            if not Department.query.filter_by(name=str(dept_name).strip()).first(): db.session.add(Department(name=str(dept_name).strip()))
         db.session.commit()
         for _, row in df.iterrows():
             dept = Department.query.filter_by(name=str(row['Department Name']).strip()).first()
@@ -10579,101 +7476,14 @@ def upload_dept_subject():
 @require_roles('Admin')
 def upload_classes():
     try:
-        dept_ids = _get_admin_scope_dept_ids()
-        file = get_db_file_handle(request)
-        df = pd.read_csv(file, dtype=str).fillna('')
-
-        created = 0
-        updated = 0
-
-        # Optional columns to help map each class section to a specialization.
-        # If missing, we can infer from Section Name (e.g., DA1 -> DA) or auto-assign
-        # when the department has exactly one specialization.
-        def _pick_col(*candidates):
-            for c in candidates:
-                if c in df.columns:
-                    return c
-            return None
-
-        spec_code_col = _pick_col('Specialization Code', 'Spec Code', 'Specialisation Code')
-        spec_name_col = _pick_col('Specialization', 'Specialisation')
-
-        scoped_specs = None
-        scoped_specs_by_code = {}
-        scoped_specs_by_name = {}
-        if dept_ids is not None:
-            if not dept_ids:
-                return jsonify({"error": "Admin department scope not set. Assign Department Admin to a department first."}), 403
-            scoped_specs = Specialization.query.filter(Specialization.dept_id.in_(dept_ids)).all()
-            scoped_specs_by_code = {str(s.code).strip(): s for s in scoped_specs if getattr(s, 'code', None)}
-            scoped_specs_by_name = {str(s.name).strip().casefold(): s for s in scoped_specs if getattr(s, 'name', None)}
-
-        mapping_errors = []
-        for idx, row in df.iterrows():
-            class_level = str(row.get('Class Level', '')).strip()
-            section_name = str(row.get('Section Name', '')).strip()
-            if not class_level or not section_name:
-                continue
-
-            # Determine specialization for this row.
-            spec = None
-            spec_code = ''
-            spec_name = ''
-
-            if spec_code_col:
-                spec_code = str(row.get(spec_code_col, '')).strip()
-            if not spec_code:
-                spec_code = _infer_spec_code_from_section_name(section_name)
-
-            if spec_name_col:
-                spec_name = str(row.get(spec_name_col, '')).strip()
-
-            if dept_ids is None:
-                # SuperAdmin/global: try to resolve by code, else proceed without spec.
-                if spec_code:
-                    spec = Specialization.query.filter_by(code=spec_code).first()
-                if not spec and spec_name:
-                    spec = Specialization.query.filter(Specialization.name.ilike(spec_name)).first()
-            else:
-                # Department Admin: scoped mapping required, but allow auto-assign if only one spec exists.
-                if scoped_specs and len(scoped_specs) == 1:
-                    spec = scoped_specs[0]
-                else:
-                    if spec_code and spec_code in scoped_specs_by_code:
-                        spec = scoped_specs_by_code.get(spec_code)
-                    elif spec_name and spec_name.casefold() in scoped_specs_by_name:
-                        spec = scoped_specs_by_name.get(spec_name.casefold())
-
-                if not spec:
-                    mapping_errors.append({
-                        "row": int(idx) + 2,
-                        "class_level": class_level,
-                        "section_name": section_name,
-                        "inferred_spec_code": spec_code,
-                        "hint": "Preferred: set 'Section Name' equal to the Specialization Code (e.g., DA, CORE). Or add 'Specialization Code' column explicitly.",
-                    })
-                    continue
-
-            existing = ClassSection.query.filter_by(class_level=class_level, name=section_name).first()
-            if not existing:
-                db.session.add(ClassSection(class_level=class_level, name=section_name, spec_id=(spec.id if spec else None)))
-                created += 1
-            else:
-                if spec and getattr(existing, 'spec_id', None) in (None, 0):
-                    existing.spec_id = spec.id
-                    updated += 1
+        file = get_db_file_handle(request); df = pd.read_csv(file, dtype=str)
+        count = 0
+        for _, row in df.iterrows():
+            if not ClassSection.query.filter_by(class_level=str(row['Class Level']).strip(), name=str(row['Section Name']).strip()).first():
+                db.session.add(ClassSection(class_level=str(row['Class Level']).strip(), name=str(row['Section Name']).strip())); count += 1
         db.session.commit()
-        if mapping_errors:
-            return jsonify({
-                "error": "Some rows could not be mapped to a specialization in this department.",
-                "details": mapping_errors[:25],
-                "details_truncated": len(mapping_errors) > 25,
-            }), 400
-        log_activity("Bulk Import", f"Created {created} Class Sections")
-        msg = f"{created} created"
-        if updated:
-            msg += f", {updated} linked to specialization"
-        return jsonify({"message": msg}), 201
+        log_activity("Bulk Import", f"Created {count} Class Sections")
+        return jsonify({"message": f"{count} created"}), 201
     except Exception:
         app.logger.exception("upload_classes failed")
         return jsonify({"error": "Upload failed. Check file format."}), 400
@@ -10744,10 +7554,10 @@ def upload_semester_course_structure():
                     errors.append(f"Row {idx+2}: SEM '{sem_raw}' does not match parity '{parity}'")
                     continue
 
-            section = _resolve_class_section_for_csv(class_level, section_name)
+            section = ClassSection.query.filter_by(class_level=class_level, name=section_name).first()
             if not section:
                 skipped_rows += 1
-                errors.append(f"Row {idx+2}: Class section '{class_level}-{section_name}' not found. Ensure Class Level + Section match your Class Sections upload (Section should be specialization code).")
+                errors.append(f"Row {idx+2}: Class section '{class_level}-{section_name}' not found")
                 continue
 
             seen_keys.add((section.section_id, semester_no))
@@ -10778,7 +7588,7 @@ def upload_semester_course_structure():
                 if (parity == 'odd' and not is_odd) or (parity == 'even' and is_odd):
                     continue
 
-            section = _resolve_class_section_for_csv(class_level, section_name)
+            section = ClassSection.query.filter_by(class_level=class_level, name=section_name).first()
             if not section:
                 continue
 
@@ -10880,41 +7690,15 @@ def upload_staff():
     try:
         file = get_db_file_handle(request); df = pd.read_csv(file)
         count = 0
-        skipped = 0
-        errors = []
         created_accounts = []  # Track for admin to see temp passwords
-        
-        # Department scope check for non-SuperAdmin
-        scope_dept_ids = _get_admin_scope_dept_ids()
-        
         for _, row in df.iterrows():
             if UserMaster.query.filter_by(username=row['Email']).first(): continue
-            
-            # Handle Dept - use flexible lookup with abbreviation support
-            d_name = str(row['Department Name']).strip()
-            dept = _find_department_flexible(d_name, scope_dept_ids)
-            
-            # Department Admin scope validation
-            if scope_dept_ids is not None:
-                if not dept:
-                    errors.append({
-                        "email": row['Email'],
-                        "error": f"Department '{d_name}' does not exist or is not in your scope. Create it in hierarchy first."
-                    })
-                    skipped += 1
-                    continue
-                # Already filtered by scope in _find_department_flexible
-            else:
-                # SuperAdmin: auto-create department if needed
-                if not dept: 
-                    dept = Department(name=d_name)
-                    db.session.add(dept); db.session.flush()
             
             new_uuid = str(uuid.uuid4())
             # Default password - users must change on first login
             default_password = 'Staff@123'
             
-            # Create Login - must flush before creating profile due to FK constraint
+            # Create Login
             db.session.add(UserMaster(
                 user_id=new_uuid, 
                 username=row['Email'], 
@@ -10923,11 +7707,17 @@ def upload_staff():
                 is_active=True,
                 must_change_password=True  # Force password change on first login
             ))
-            db.session.flush()  # Ensure UserMaster exists before StaffProfile
+            
+            # Handle Dept
+            d_name = str(row['Department Name']).strip()
+            dept = Department.query.filter_by(name=d_name).first()
+            if not dept: 
+                dept = Department(name=d_name)
+                db.session.add(dept); db.session.flush()
             
             # Create Profile with Designation
             # Default to 'Assistant Professor' if column missing in CSV
-            desig = row.get('Designation').strip() if row.get('Designation') else 'Assistant Professor'
+            desig = row.get('Designation').strip()
             
             db.session.add(StaffProfile(
                 staff_id=new_uuid, 
@@ -10935,7 +7725,7 @@ def upload_staff():
                 employee_code=str(row['Employee Code']).strip(), 
                 email_contact=row['Email'], 
                 primary_department_id=dept.dept_id,
-                designation=desig
+                designation=desig # <--- SAVING HERE
             ))
             created_accounts.append({"email": row['Email'], "temp_password": default_password})
             count += 1
@@ -10943,15 +7733,11 @@ def upload_staff():
         db.session.commit()
         log_activity("Bulk Import", f"Onboarded {count} Staff Members")
         # Return info about default password
-        response = {
+        return jsonify({
             "message": f"Staff uploaded: {count} accounts created",
             "default_password": "Staff@123",
             "note": "All staff accounts use default password 'Staff@123'. Users must change password on first login."
-        }
-        if skipped > 0:
-            response["skipped"] = skipped
-            response["errors"] = errors
-        return jsonify(response), 201
+        }), 201
     except Exception:
         app.logger.exception("upload_staff failed")
         return jsonify({"error": "Upload failed. Check file format."}), 400
@@ -10965,8 +7751,6 @@ def upload_students():
         df = pd.read_csv(file, dtype=str).fillna('')
         
         count = 0
-        updated = 0
-        errors = []
         created_accounts = []  # Track for admin
         # Local cache to handle siblings in the same CSV efficiently
         # Format: { 'phone_number': 'user_id_uuid' }
@@ -11013,90 +7797,51 @@ def upload_students():
                     processed_parents[parent_phone] = parent_uuid
                     created_accounts.append({"type": "parent", "username": parent_phone, "password": "Parent@123"})
 
-            # 2. Resolve class section (needed even for existing students so we can repair assignment)
-            admission_no = str(row.get('Admission Number', '')).strip()
-            c_level = str(row.get('Class Level', '')).strip()
-            c_sec = str(row.get('Section Name', '')).strip()
-            if not admission_no:
-                errors.append({"error": "Missing Admission Number"})
-                continue
+            # 2. Create Student
+            if not StudentProfile.query.filter_by(admission_number=str(row['Admission Number'])).first():
+                student_uuid = str(uuid.uuid4())
+                c_level = str(row['Class Level']).strip()
+                c_sec = str(row['Section Name']).strip()
+                
+                section = ClassSection.query.filter_by(class_level=c_level, name=c_sec).first()
+                
+                # Default password - students must change on first login
+                student_default_pwd = 'Student@123'
+                student_email = row['Student Email'] or f"{row['Admission Number']}@school.mituniversity.edu.in"
+                
+                # A. Create Student Login
+                db.session.add(UserMaster(
+                    user_id=student_uuid, 
+                    username=student_email, 
+                    password_hash=generate_password_hash(student_default_pwd), 
+                    user_type='Student', 
+                    is_active=True,
+                    must_change_password=True  # Force password change on first login
+                ))
+                
+                # --- FIX: Force DB to recognize UserMaster BEFORE creating Profile ---
+                db.session.flush() 
+                # -------------------------------------------------------------------
 
-            section = _resolve_class_section_for_csv(c_level, c_sec)
-            if not section:
-                errors.append({
-                    "admission_number": admission_no,
-                    "class_level": c_level,
-                    "section": c_sec,
-                    "error": "Class section not found. Upload Class Sections first (Class Level + Section Name must match; Section Name should be specialization code like DA/CORE)."
-                })
-                continue
-
-            # Department-scoped admins can only upload students into their own department.
-            scope_dept_ids = _get_admin_scope_dept_ids()
-            if scope_dept_ids is not None:
-                deny = _ensure_section_in_scope(int(section.section_id))
-                if deny:
-                    errors.append({
-                        "admission_number": admission_no,
-                        "class_level": c_level,
-                        "section": c_sec,
-                        "error": "Out of scope. This class section is not mapped to your department (check specialization mapping)."
-                    })
-                    continue
-
-            # 3. Create or update student
-            existing_student = StudentProfile.query.filter_by(admission_number=admission_no).first()
-            if existing_student:
-                # Repair missing/wrong section assignments on re-upload.
-                if getattr(existing_student, 'current_section_id', None) != section.section_id:
-                    existing_student.current_section_id = section.section_id
-                    updated += 1
-                continue
-
-            # New student create path
-            student_uuid = str(uuid.uuid4())
-
-            # Default password - students must change on first login
-            student_default_pwd = 'Student@123'
-            student_email = row.get('Student Email') or f"{admission_no}@school.mituniversity.edu.in"
-
-            # A. Create Student Login
-            db.session.add(UserMaster(
-                user_id=student_uuid,
-                username=student_email,
-                password_hash=generate_password_hash(student_default_pwd),
-                user_type='Student',
-                is_active=True,
-                must_change_password=True  # Force password change on first login
-            ))
-
-            # --- FIX: Force DB to recognize UserMaster BEFORE creating Profile ---
-            db.session.flush()
-            # -------------------------------------------------------------------
-
-            # B. Create Student Profile
-            db.session.add(StudentProfile(
-                student_id=student_uuid,
-                full_name=row['Student Full Name'],
-                admission_number=admission_no,
-                parent_user_id=parent_uuid,
-                current_section_id=section.section_id,
-            ))
-            created_accounts.append({"type": "student", "username": student_email, "password": "Student@123"})
-            count += 1
+                # B. Create Student Profile
+                db.session.add(StudentProfile(
+                    student_id=student_uuid, 
+                    full_name=row['Student Full Name'], 
+                    admission_number=str(row['Admission Number']), 
+                    parent_user_id=parent_uuid, 
+                    current_section_id=section.section_id if section else None,
+                    batch=str(row['Batch']).strip() if 'Batch' in row else None
+                ))
+                created_accounts.append({"type": "student", "username": student_email, "password": "Student@123"})
+                count += 1
         
         db.session.commit()
         log_activity("Bulk Import", f"Enrolled {count} Students")
-        msg = f"Successfully enrolled {count} students."
-        if updated:
-            msg += f" Updated {updated} existing students."
         return jsonify({
-            "message": msg,
-            "updated": updated,
-            "errors": errors,
+            "message": f"Successfully enrolled {count} students.",
             "default_passwords": {"student": "Student@123", "parent": "Parent@123"},
             "note": "All accounts use default passwords. Users must change password on first login.",
-            "security_note": "Distribute these temporary passwords securely. Users should change passwords on first login."
+            "note": "Distribute these temporary passwords securely. Users should change passwords on first login."
         }), 201
 
     except Exception:
@@ -11109,106 +7854,66 @@ def upload_students():
 @require_roles('Admin')
 def upload_schedule():
     try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
         file = get_db_file_handle(request)
         df = pd.read_csv(file, dtype=str).fillna('')
-
-        # Track versions created per section (creates DRAFT versions)
-        sections_processed = {}  # section_id -> version_id
+        
+        # Optional: Clear existing schedule before upload to prevent duplicates
+        # db.session.query(WeeklySchedule).delete()
+        # db.session.commit()
+        
         success = 0
         errors = []
-
+        
         for index, row in df.iterrows():
             # 1. Basic Lookups
             subject = Subject.query.filter_by(code=str(row['Subject Code']).strip()).first()
             teacher = StaffProfile.query.filter_by(employee_code=str(row['Employee Code']).strip()).first()
-            section = _resolve_class_section_for_csv(str(row['Class Level']).strip(), str(row['Section Name']).strip())
-
-            if not subject or not teacher or not section:
+            section = ClassSection.query.filter_by(
+                class_level=str(row['Class Level']).strip(), 
+                name=str(row['Section Name']).strip()
+            ).first()
+            
+            if not subject or not teacher or not section: 
                 errors.append(f"Row {index}: Data missing (Subject/Teacher/Class not found)")
                 continue
 
-            # Department scope validation for non-SuperAdmin
-            if scope_dept_ids is not None:
-                deny = _ensure_section_in_scope(int(section.section_id))
-                if deny:
-                    errors.append(f"Row {index}: Section '{section.name}' is out of scope for your department")
-                    continue
-
-            # 2. Create or get draft version for this section
-            if section.section_id not in sections_processed:
-                # Check for existing draft
-                existing_draft = TimetableVersion.query.filter_by(
-                    section_id=section.section_id,
-                    status='Draft'
-                ).first()
-
-                if existing_draft:
-                    # Delete existing draft slots (will be replaced)
-                    WeeklySchedule.query.filter_by(version_id=existing_draft.version_id).delete()
-                    draft_version = existing_draft
-                else:
-                    # Create new draft
-                    max_version = db.session.query(db.func.max(TimetableVersion.version_number)).filter_by(section_id=section.section_id).scalar() or 0
-                    draft_version = TimetableVersion(
-                        section_id=section.section_id,
-                        version_number=max_version + 1,
-                        version_label=f"CSV Upload {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                        status='Draft',
-                        created_by_id=current_user.user_id,
-                        source_type='csv_upload'
-                    )
-                    db.session.add(draft_version)
-                    db.session.flush()
-
-                sections_processed[section.section_id] = draft_version.version_id
-
-            version_id = sections_processed[section.section_id]
-
-            # 3. Parse Times
+            # 2. Parse Times
             start = parse_flexible_time(row['Start Time'])
             end = parse_flexible_time(row['End Time'])
-            if not start or not end:
+            if not start or not end: 
                 errors.append(f"Row {index}: Invalid Time Format")
                 continue
 
-            # 4. Parse Metadata (Type, Batch, Room)
+            # 3. Parse Metadata (Type, Batch, Room)
             sess_type = str(row.get('Session Type', 'Lecture')).strip()
-
+            
             raw_batch = str(row.get('Batch', '')).strip()
             target_batch = raw_batch if raw_batch else None
-
+            
             # Room Lookup
             room_num = str(row.get('Room Number', '')).strip()
             room = RoomMaster.query.filter_by(room_number=room_num).first()
             room_id = room.room_id if room else None
 
-            # 5. Save Slot with version_id
+            # 4. Save Slot
             new_slot = WeeklySchedule(
-                section_id=section.section_id,
-                subject_id=subject.subject_id,
-                teacher_id=teacher.staff_id,
-                day_of_week=str(row['Day']).strip(),
-                start_time=start,
+                section_id=section.section_id, 
+                subject_id=subject.subject_id, 
+                teacher_id=teacher.staff_id, 
+                day_of_week=str(row['Day']).strip(), 
+                start_time=start, 
                 end_time=end,
                 session_type=sess_type,
                 target_batch=target_batch,
-                room_id=room_id,
-                version_id=version_id  # Link to draft version
+                room_id=room_id # <--- Saved from CSV
             )
             db.session.add(new_slot)
             success += 1
-
+            
         db.session.commit()
-        log_activity("Bulk Import", f"Uploaded Weekly Schedule ({success} slots) as DRAFT.")
-        return jsonify({
-            "message": f"{success} slots created as DRAFT",
-            "sections_affected": list(sections_processed.keys()),
-            "note": "Schedule saved as draft. Use Version Manager to preview and publish.",
-            "errors": errors
-        }), 201
+        log_activity("Bulk Import", f"Uploaded Weekly Schedule ({success} slots).")
+        return jsonify({"message": f"{success} slots created", "errors": errors}), 201
     except Exception:
-        db.session.rollback()
         app.logger.exception("upload_schedule failed")
         return jsonify({"error": "Upload failed. Check file format."}), 500
     
@@ -11218,29 +7923,17 @@ def upload_schedule():
 @require_roles('Admin')
 def upload_class_teachers():
     try:
-        scope_dept_ids = _get_admin_scope_dept_ids()
         file = get_db_file_handle(request); df = pd.read_csv(file, dtype=str)
         success = 0; errors = []
         for index, row in df.iterrows():
-            cls = _resolve_class_section_for_csv(row['Class Level'].strip(), row['Section Name'].strip())
+            cls = ClassSection.query.filter_by(class_level=row['Class Level'].strip(), name=row['Section Name'].strip()).first()
             user = UserMaster.query.filter_by(username=row['Teacher Email'].strip()).first()
             if not cls or not user: errors.append(f"Row {index}: Data mismatch"); continue
-            
-            # Department scope validation for non-SuperAdmin
-            if scope_dept_ids is not None:
-                deny = _ensure_section_in_scope(int(cls.section_id))
-                if deny:
-                    errors.append(f"Row {index}: Section '{cls.name}' is out of scope for your department")
-                    continue
-            
             staff = StaffProfile.query.get(user.user_id)
             if staff: cls.class_teacher_id = staff.staff_id; success += 1
         db.session.commit()
         log_activity("Role Update", f"Bulk Assigned {success} Class Teachers")
-        response = {"message": f"{success} assigned"}
-        if errors:
-            response["errors"] = errors
-        return jsonify(response), 201
+        return jsonify({"message": f"{success} assigned"}), 201
     except Exception:
         app.logger.exception("upload_class_teachers failed")
         return jsonify({"error": "Upload failed. Check file format."}), 500
@@ -11779,11 +8472,8 @@ def get_mentor_logs():
 
 # 1. UPDATE UPLOAD LOGIC (Save specific type)
 @app.route('/api/upload/subject_allocation', methods=['POST'])
-@login_required
-@require_roles('Admin')
 def upload_subject_allocation():
     try:
-        dept_ids = _get_admin_scope_dept_ids()
         try:
             file = get_db_file_handle(request)
         except Exception as e:
@@ -11811,40 +8501,6 @@ def upload_subject_allocation():
         unassigned_count = 0
         skipped_list = []
 
-        def resolve_section_for_row(row):
-            """Resolve the target ClassSection.
-
-            Convention:
-              - CSV 'Section' is the specialization code / class section name (e.g., DA, CORE)
-              - Mentor batches (DA1/DA2) are NOT uploaded here.
-            """
-            class_level = str(row.get('Class Level', '')).strip()
-            section_code = str(row.get('Section', '')).strip()
-
-            section = _resolve_class_section_for_csv(class_level, section_code)
-            if not section:
-                return None
-
-            # Backfill spec_id using specialization code if missing.
-            if getattr(section, 'spec_id', None) in (None, 0):
-                spec_q = Specialization.query.filter_by(code=str(section.name).strip())
-                if dept_ids is not None and dept_ids:
-                    spec_q = spec_q.filter(Specialization.dept_id.in_(dept_ids))
-                spec = spec_q.first()
-                if spec:
-                    section.spec_id = spec.id
-
-            # Enforce department scoping for Dept Admins
-            if dept_ids is not None:
-                if not dept_ids:
-                    return None
-                if getattr(section, 'spec_id', None):
-                    sp = db.session.get(Specialization, section.spec_id)
-                    if not sp or getattr(sp, 'dept_id', None) not in dept_ids:
-                        return None
-
-            return section
-
         # --- PRE-VALIDATION (fail fast; no partial updates) ---
         # Validate that every row references an existing structure entry.
         pre_errors = []
@@ -11863,7 +8519,7 @@ def upload_subject_allocation():
                 pre_errors.append(f"Row {index+2}: Invalid SEM '{sem_raw}'")
                 continue
 
-            section = resolve_section_for_row(row)
+            section = ClassSection.query.filter_by(class_level=class_level, name=section_name).first()
             if not section:
                 pre_errors.append(f"Row {index+2}: Class section '{class_level}-{section_name}' not found")
                 continue
@@ -11926,6 +8582,7 @@ def upload_subject_allocation():
         for index, row in df.iterrows():
             # Parse Basic Info
             course_code = row.get('Course Code', '').strip()
+            section_name = row.get('Section', '').strip()
             class_level = row.get('Class Level', '').strip()
             sem_raw = str(row.get('SEM', '')).strip()
 
@@ -11938,9 +8595,9 @@ def upload_subject_allocation():
                 continue
 
             # 3. Resolve Class Section
-            section = resolve_section_for_row(row)
+            section = ClassSection.query.filter_by(class_level=class_level, name=section_name).first()
             if not section:
-                skipped_list.append(f"Row {index+2}: Class '{class_level}-{row.get('Section','').strip()}' not found.")
+                skipped_list.append(f"Row {index+2}: Class '{class_level}-{section_name}' not found.")
                 continue
 
             # 3b. Enforce structure existence per (section, sem, subject)
@@ -11949,7 +8606,7 @@ def upload_subject_allocation():
                       .first())
             if not struct:
                 skipped_list.append(
-                    f"Row {index+2}: No SemesterCourseStructure for '{class_level}-{row.get('Section','').strip()}', Sem {semester_no}, Course '{course_code}'."
+                    f"Row {index+2}: No SemesterCourseStructure for '{class_level}-{section_name}', Sem {semester_no}, Course '{course_code}'."
                 )
                 continue
 
@@ -12297,7 +8954,7 @@ def submit_ca_marks():
                 if not target_batch or target_batch == student_batch:
                     valid_sessions += 1
                     status = att_map.get((student_id, sess_id))
-                    if status in PRESENT_STATUSES:
+                    if status in ['Present', 'OnDuty']:
                         attended_count += 1
             
             # Scale to 5 Marks
@@ -12537,9 +9194,780 @@ def get_amc_ca_report():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 
+# In app.py
+
 # ==========================================
-# API: SYLLABUS REPORT (AMC)
+# API: TERM GRANT (AMC)
 # ==========================================
+
+@app.route('/api/amc/generate_term_grant', methods=['POST'])
+def generate_term_grant():
+    try:
+        data = request.json
+        section_id = data.get('section_id')
+        threshold_att = float(data.get('att_threshold', 75))
+        threshold_marks = float(data.get('marks_threshold', 20)) # Out of 50
+        
+        # 1. Clear old records for this class (Re-calculation)
+        TermGrantRecord.query.filter_by(section_id=section_id).delete()
+        
+        # 2. Fetch all students
+        students = StudentProfile.query.filter_by(current_section_id=section_id).all()
+        
+        # 3. Fetch all subjects for this class (for Marks check)
+        allocations = SubjectAllocation.query.filter_by(section_id=section_id).all()
+        subject_ids = [a.subject_id for a in allocations]
+        
+        # 4. Fetch Global Attendance (Simplified for performance)
+        # We assume get_students_by_section logic logic or recalculate here
+        # For batch calculation, we'll do a quick loop
+        
+        total_sessions = db.session.query(SessionLog).join(WeeklySchedule).filter(WeeklySchedule.section_id == section_id, SessionLog.status=='Conducted').count()
+        
+        count = 0
+        for s in students:
+            # A. Attendance %
+            # Note: This is global class attendance. For batch-specific accuracy, we'd need the detailed logic.
+            # Using simple global approximation for speed in this demo block:
+            attended = AttendanceTransaction.query.join(SessionLog).join(WeeklySchedule).filter(
+                WeeklySchedule.section_id == section_id,
+                AttendanceTransaction.student_id == s.student_id,
+                AttendanceTransaction.status.in_(['Present', 'OnDuty'])
+            ).count()
+            
+            att_perc = round((attended / total_sessions) * 100, 1) if total_sessions > 0 else 0
+            
+            # B. CA Marks
+            ca_records = CAMarks.query.filter(CAMarks.student_id == s.student_id, CAMarks.subject_id.in_(subject_ids)).all()
+            total_score = sum(m.total_ca for m in ca_records)
+            subject_count = len(ca_records)
+            avg_ca = round(total_score / subject_count, 1) if subject_count > 0 else 0
+            
+            # Count Failed Subjects (Below Threshold)
+            failed_count = sum(1 for m in ca_records if m.total_ca < threshold_marks)
+            
+            # C. Detention
+            det_count = DetentionRecord.query.filter_by(student_id=s.student_id).filter(DetentionRecord.status.in_(['Assigned', 'In_Review'])).count()
+            
+            # D. DECISION LOGIC
+            status = 'Granted'
+            reasons = []
+            
+            if att_perc < threshold_att:
+                status = 'Provisional' if att_perc > (threshold_att - 15) else 'Detained'
+                reasons.append(f"Low Attendance ({att_perc}%)")
+                
+            if failed_count > 0:
+                if status == 'Granted': status = 'Provisional'
+                reasons.append(f"Failed {failed_count} Subjects")
+                
+            if det_count > 0:
+                status = 'Detained' # Strict Rule
+                reasons.append(f"Active Detention ({det_count})")
+            
+            # Create Record
+            rec = TermGrantRecord(
+                student_id=s.student_id,
+                section_id=section_id,
+                attendance_perc=att_perc,
+                avg_ca_score=avg_ca,
+                failed_subjects_count=failed_count,
+                active_detentions=det_count,
+                status=status,
+                remarks=", ".join(reasons) if reasons else "All Clear",
+                is_published=False
+            )
+            db.session.add(rec)
+            count += 1
+            
+        db.session.commit()
+        return jsonify({"message": f"Generated Term Grant for {count} students."}), 200
+
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route('/api/amc/term_grant_list', methods=['GET'])
+def get_term_grant_list():
+    try:
+        section_id = request.args.get('section_id')
+        records = (db.session.query(TermGrantRecord, StudentProfile)
+                   .join(StudentProfile)
+                   .filter(TermGrantRecord.section_id == section_id)
+                   .order_by(StudentProfile.admission_number)
+                   .all())
+        
+        data = []
+        stats = {"Granted": 0, "Provisional": 0, "Detained": 0}
+        
+        for r, s in records:
+            stats[r.status] = stats.get(r.status, 0) + 1
+            data.append({
+                "id": r.record_id,
+                "roll": s.admission_number,
+                "name": s.full_name,
+                "att": r.attendance_perc,
+                "ca_avg": r.avg_ca_score,
+                "fails": r.failed_subjects_count,
+                "det": r.active_detentions,
+                "status": r.status,
+                "remarks": r.remarks,
+                "published": r.is_published
+            })
+            
+        return jsonify({"students": data, "stats": stats})
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route('/api/amc/update_grant_status', methods=['POST'])
+def update_grant_status():
+    try:
+        data = request.json
+        rec = TermGrantRecord.query.get(data.get('record_id'))
+        if not rec: return jsonify({"error": "Record not found"}), 404
+        
+        rec.status = data.get('status')
+        rec.remarks = data.get('remarks', rec.remarks)
+        db.session.commit()
+        return jsonify({"message": "Updated"}), 200
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+
+# In app.py
+
+# ==========================================
+# API: FEEDBACK SYSTEM
+# ==========================================
+
+@app.route('/api/feedback/active_cycle', methods=['GET'])
+def get_active_feedback_cycle():
+    try:
+        today = date.today()
+        cycle = FeedbackCycle.query.filter(
+            FeedbackCycle.is_active == True,
+            FeedbackCycle.start_date <= today,
+            FeedbackCycle.end_date >= today
+        ).order_by(FeedbackCycle.cycle_id.desc()).first()
+        if not cycle:
+            return jsonify({"active": False})
+        
+        return jsonify({
+            "active": True,
+            "id": cycle.cycle_id,
+            "name": cycle.name,
+            "end_date": cycle.end_date.strftime('%d %b %Y')
+        })
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route('/api/feedback/questions', methods=['GET'])
+def get_feedback_questions():
+    try:
+        qs = FeedbackQuestion.query.filter_by(is_active=True).all()
+        return jsonify({"questions": [{"id": q.question_id, "text": q.text, "category": q.category} for q in qs]})
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route('/api/feedback/pending_list', methods=['GET'])
+def get_student_pending_feedback():
+    try:
+        user_id = request.args.get('user_id')
+        
+        # 1. Check Active Cycle
+        today = date.today()
+        cycle = FeedbackCycle.query.filter(
+            FeedbackCycle.is_active == True,
+            FeedbackCycle.start_date <= today,
+            FeedbackCycle.end_date >= today
+        ).order_by(FeedbackCycle.cycle_id.desc()).first()
+        if not cycle:
+            return jsonify({"active": False, "subjects": []})
+
+        # 2. Get Enrolled Subjects
+        student = StudentProfile.query.get(user_id)
+        if not student or not student.current_section_id: return jsonify({"active": False, "subjects": []})
+        
+        allocations = SubjectAllocation.query.filter_by(section_id=student.current_section_id).all()
+        
+        pending_list = []
+        for alloc in allocations:
+            subject = db.session.get(Subject, alloc.subject_id)
+            
+            # Elective Check
+            if is_elective_type(subject.subject_type):
+                approved = StudentElective.query.filter_by(student_id=user_id, subject_id=subject.subject_id, status='Approved').first()
+                if not approved: continue
+
+            # Check if already submitted
+            done = StudentFeedbackStatus.query.filter_by(student_id=user_id, cycle_id=cycle.cycle_id, subject_id=subject.subject_id).first()
+            if not done:
+                teacher = db.session.get(StaffProfile, alloc.teacher_id)
+                pending_list.append({
+                    "subject_id": subject.subject_id,
+                    "subject_name": subject.name,
+                    "code": subject.code,
+                    "teacher_name": teacher.full_name if teacher else "Unassigned",
+                    "teacher_id": alloc.teacher_id
+                })
+        
+        return jsonify({"active": True, "cycle_name": cycle.name, "subjects": pending_list})
+
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route('/api/feedback/submit', methods=['POST'])
+def submit_feedback():
+    try:
+        data = request.json
+        student_id = data.get('student_id')
+        cycle_id = data.get('cycle_id')
+        subject_id = data.get('subject_id')
+        section_id = data.get('section_id')
+        teacher_id = data.get('teacher_id')
+        responses = data.get('responses') # {question_id: rating}
+
+        student = StudentProfile.query.get(student_id)
+        if not student or not student.current_section_id:
+             return jsonify({"error": "Student class not found"}), 400
+        section_id = student.current_section_id
+        
+        
+        # 1. Save Anonymous Responses
+        for q_id, rating in responses.items():
+            db.session.add(FeedbackResponse(
+                cycle_id=cycle_id,
+                subject_id=subject_id,
+                teacher_id=teacher_id,
+                section_id=section_id,
+                question_id=int(q_id),
+                rating=int(rating)
+            ))
+        
+        # 2. Mark as Done for Student
+        db.session.add(StudentFeedbackStatus(student_id=student_id, cycle_id=cycle_id, subject_id=subject_id))
+        
+        db.session.commit()
+        return jsonify({"message": "Feedback Submitted"}), 200
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+# ADMIN SETUP
+@app.route('/api/admin/create_feedback_cycle', methods=['POST'])
+def create_feedback_cycle():
+    try:
+        data = request.json
+        name = (data.get('name') or '').strip()
+        start_raw = data.get('start_date')
+        end_raw = data.get('end_date')
+        is_active = bool(data.get('is_active', True))
+
+        if not name or not start_raw or not end_raw:
+            return jsonify({"error": "name, start_date, end_date are required"}), 400
+
+        try:
+            start_date = datetime.strptime(start_raw, '%Y-%m-%d').date()
+            end_date = datetime.strptime(end_raw, '%Y-%m-%d').date()
+        except Exception:
+            return jsonify({"error": "Invalid date format (expected YYYY-MM-DD)"}), 400
+
+        if start_date > end_date:
+            return jsonify({"error": "Start date must be before or equal to end date"}), 400
+
+        # Strict behavior: only an active cycle within its configured window is visible to students.
+        # Enforce that when Admin activates a cycle.
+        if is_active:
+            today = date.today()
+            if not (start_date <= today <= end_date):
+                return jsonify({"error": "To activate a cycle, today's date must fall between start and end dates."}), 400
+
+        # Deactivate others? Maybe not necessary if dates don't overlap, but safe practice.
+        if is_active:
+            FeedbackCycle.query.update({FeedbackCycle.is_active: False})
+            
+        new_cycle = FeedbackCycle(
+            name=name,
+            start_date=start_date,
+            end_date=end_date,
+            is_active=is_active
+        )
+        db.session.add(new_cycle)
+        
+        # Seed default questions if none exist
+        if FeedbackQuestion.query.count() == 0:
+            defaults = [
+                "The faculty covers the syllabus on time.",
+                "The faculty explains concepts clearly.",
+                "The faculty is punctual to class.",
+                "The faculty encourages questions and interaction.",
+                "Course materials/notes provided were helpful."
+            ]
+            for txt in defaults:
+                db.session.add(FeedbackQuestion(text=txt, category="Teaching"))
+        
+        db.session.commit()
+        return jsonify({"message": "Cycle Created"}), 200
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/feedback_status', methods=['GET'])
+def get_admin_feedback_status():
+    """Class/division-wise feedback submission counts for the currently active feedback cycle."""
+    try:
+        from sqlalchemy import and_, func
+
+        today = date.today()
+        cycle = FeedbackCycle.query.filter(
+            FeedbackCycle.is_active == True,
+            FeedbackCycle.start_date <= today,
+            FeedbackCycle.end_date >= today
+        ).order_by(FeedbackCycle.cycle_id.desc()).first()
+
+        if not cycle:
+            return jsonify({"active": False, "sections": []})
+
+        # Total students per section (Active only)
+        # Submitted students per section = distinct students who submitted at least one subject in this cycle.
+        q = (
+            db.session.query(
+                ClassSection.section_id,
+                ClassSection.class_level,
+                ClassSection.name,
+                func.count(StudentProfile.student_id).label('total_students'),
+                func.count(func.distinct(StudentFeedbackStatus.student_id)).label('submitted_students'),
+            )
+            .join(StudentProfile, StudentProfile.current_section_id == ClassSection.section_id)
+            .outerjoin(
+                StudentFeedbackStatus,
+                and_(
+                    StudentFeedbackStatus.student_id == StudentProfile.student_id,
+                    StudentFeedbackStatus.cycle_id == cycle.cycle_id,
+                ),
+            )
+            .filter(StudentProfile.academic_status == 'Active')
+            .group_by(ClassSection.section_id)
+            .order_by(ClassSection.class_level.asc(), ClassSection.name.asc())
+        )
+
+        rows = []
+        for section_id, class_level, division_name, total_students, submitted_students in q.all():
+            total_students = int(total_students or 0)
+            submitted_students = int(submitted_students or 0)
+            pct = round((submitted_students / total_students) * 100, 1) if total_students else 0
+            rows.append({
+                "section_id": section_id,
+                "class": f"{class_level}-{division_name}",
+                "submitted_students": submitted_students,
+                "total_students": total_students,
+                "percentage": pct,
+            })
+
+        return jsonify({
+            "active": True,
+            "cycle_id": cycle.cycle_id,
+            "cycle_name": cycle.name,
+            "start_date": cycle.start_date.strftime('%Y-%m-%d'),
+            "end_date": cycle.end_date.strftime('%Y-%m-%d'),
+            "sections": rows,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+# In app.py
+
+@app.route('/api/admin/system_config', methods=['GET', 'POST'])
+def manage_system_config():
+    def _impl():
+        if request.method == 'POST':
+            data = request.json or {}
+            term = (data.get('current_term') or '').strip()
+            if not term:
+                return jsonify({"error": "current_term is required"}), 400
+
+            conf = SystemConfig.query.get('current_term')
+            if not conf:
+                conf = SystemConfig(key='current_term', value=term)
+                db.session.add(conf)
+            else:
+                conf.value = term
+
+            db.session.commit()
+            return jsonify({"message": "Term Updated"}), 200
+        else:
+            conf = SystemConfig.query.get('current_term')
+            return jsonify({"current_term": conf.value if conf else get_current_term_name()})
+
+    try:
+        return _impl()
+    except OperationalError as e:
+        # Helpful for fresh databases where migrations haven't been applied yet.
+        if 'no such table' in str(e).lower():
+            db.create_all()
+            return _impl()
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/admin/rollover_semester', methods=['POST'])
+def rollover_semester():
+    def _impl():
+        # 1. Get Current Term Name to tag the archive
+        conf = SystemConfig.query.get('current_term')
+        old_term = conf.value if conf else get_current_term_name()
+
+        # 2. Archive Allocations
+        allocs = (
+            db.session.query(SubjectAllocation, Subject, StaffProfile)
+            .join(Subject, Subject.subject_id == SubjectAllocation.subject_id)
+            .join(StaffProfile, StaffProfile.staff_id == SubjectAllocation.teacher_id)
+            .all()
+        )
+
+        for a, sub, staff in allocs:
+            db.session.add(
+                ArchivedAllocation(
+                    term_name=old_term,
+                    section_id=a.section_id,
+                    subject_code=sub.code,
+                    subject_name=sub.name,
+                    teacher_name=staff.full_name,
+                )
+            )
+
+        # 3. Archive Schedule
+        slots = (
+            db.session.query(WeeklySchedule, ClassSection, Subject, StaffProfile)
+            .join(ClassSection, ClassSection.section_id == WeeklySchedule.section_id)
+            .join(Subject, Subject.subject_id == WeeklySchedule.subject_id)
+            .join(StaffProfile, StaffProfile.staff_id == WeeklySchedule.teacher_id)
+            .all()
+        )
+
+        for slot, sec, sub, staff in slots:
+            time_str = f"{slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')}"
+            db.session.add(
+                ArchivedSchedule(
+                    term_name=old_term,
+                    section_name=f"{sec.class_level}-{sec.name}",
+                    day=slot.day_of_week,
+                    time_slot=time_str,
+                    subject=sub.name,
+                    teacher=staff.full_name,
+                )
+            )
+
+        # 4. FLUSH Active Tables
+        # We delete all rows to reset the system for the new term
+        db.session.query(WeeklySchedule).delete()
+        db.session.query(SubjectAllocation).delete()
+        db.session.query(StudentElective).delete()  # Reset elective choices
+        db.session.query(ElectiveOffering).delete()  # Reset offerings
+
+        # Note: We DO NOT delete Students, Classes, or Staff. They stay.
+
+        db.session.commit()
+        log_activity("System Rollover", f"Archived {old_term} and reset for new term.")
+
+        return (
+            jsonify(
+                {
+                    "message": f"Rollover Complete. System reset for new term. Old data archived under '{old_term}'."
+                }
+            ),
+            200,
+        )
+
+    try:
+        return _impl()
+    except OperationalError as e:
+        if 'no such table' in str(e).lower():
+            db.create_all()
+            return _impl()
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/hod/feedback_analysis', methods=['GET'])
+def get_hod_feedback_analysis():
+    try:
+        user_id = request.args.get('user_id')
+        
+        # 1. Identify HOD's Department
+        dept = Department.query.filter_by(hod_staff_id=user_id).first()
+        if not dept:
+            # Fallback for Single Dept Mode
+            dept = Department.query.filter_by(name=FIXED_DEPT_NAME).first()
+            
+        if not dept: return jsonify({"error": "Unauthorized / No Dept Found"}), 403
+
+        # 2. Faculty Overall Scores (Group by Teacher)
+        fac_results = (db.session.query(
+                            StaffProfile.full_name, 
+                            db.func.avg(FeedbackResponse.rating).label('avg_rating'),
+                            db.func.count(FeedbackResponse.response_id).label('count')
+                       )
+                       .join(StaffProfile, FeedbackResponse.teacher_id == StaffProfile.staff_id)
+                       .filter(StaffProfile.primary_department_id == dept.dept_id)
+                       .group_by(StaffProfile.full_name)
+                       .all())
+
+        faculty_scores = []
+        dept_sum = 0
+        total_responses = 0
+
+        for name, avg, count in fac_results:
+            score = round(float(avg), 2)
+            faculty_scores.append({
+                "name": name,
+                "score": score,
+                "responses": count,
+                "status": "Excellent" if score >= 4.5 else ("Good" if score >= 3.5 else "Needs Improvement")
+            })
+            dept_sum += (float(avg) * count)
+            total_responses += count
+
+        dept_avg = round(dept_sum / total_responses, 2) if total_responses > 0 else 0
+
+        # 3. Subject-wise Analysis (Class-Division Wise)
+        # FIX: Join ClassSection and Group By it
+        sub_results = (db.session.query(
+                            ClassSection.class_level,
+                            ClassSection.name,
+                            Subject.name,
+                            Subject.code,
+                            StaffProfile.full_name, 
+                            db.func.avg(FeedbackResponse.rating).label('avg_rating')
+                       )
+                       .join(StaffProfile, FeedbackResponse.teacher_id == StaffProfile.staff_id)
+                       .join(Subject, FeedbackResponse.subject_id == Subject.subject_id)
+                       .join(ClassSection, FeedbackResponse.section_id == ClassSection.section_id) # <--- Added Join
+                       .filter(StaffProfile.primary_department_id == dept.dept_id)
+                       .group_by(ClassSection.class_level, ClassSection.name, Subject.name, Subject.code, StaffProfile.full_name)
+                       .order_by(ClassSection.class_level, ClassSection.name, Subject.name) # Sorted for display
+                       .all())
+
+        subject_analysis = []
+        for lvl, sec_name, s_name, s_code, t_name, avg in sub_results:
+            subject_analysis.append({
+                "class": f"{lvl}-{sec_name}", # <--- New Field
+                "subject": s_name,
+                "code": s_code,
+                "faculty": t_name,
+                "score": round(float(avg), 2)
+            })
+
+        # Sort faculty by score descending for the chart
+        faculty_scores.sort(key=lambda x: x['score'], reverse=True)
+
+        return jsonify({
+            "dept_avg": dept_avg,
+            "total_responses": total_responses,
+            "faculty_scores": faculty_scores,
+            "subject_analysis": subject_analysis
+        })
+
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+# In app.py
+
+@app.route('/api/hod/syllabus_status', methods=['GET'])
+def get_hod_syllabus_status():
+    try:
+        section_id = request.args.get('section_id')
+        if not section_id: return jsonify({"error": "Section ID required"}), 400
+        
+        # Get Allocations for this class
+        allocations = (db.session.query(SubjectAllocation, Subject, StaffProfile)
+                       .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
+                       .join(StaffProfile, SubjectAllocation.teacher_id == StaffProfile.staff_id)
+                       .filter(SubjectAllocation.section_id == section_id)
+                       .all())
+        
+        data = []
+        for alloc, sub, teacher in allocations:
+            # 1. Total Topics in Plan (Created by this teacher for this subject)
+            # Note: Assuming plan is per subject/teacher. 
+            total_topics = TeachingPlan.query.filter_by(
+                subject_id=sub.subject_id, 
+                created_by_id=teacher.staff_id
+            ).count()
+            
+            if total_topics == 0:
+                perc = 0
+                status_text = "Plan Not Uploaded"
+                color = "gray"
+            else:
+                # 2. Completed Topics for THIS Section
+                # Link: LessonLog -> SessionLog -> WeeklySchedule (to check section)
+                completed_count = (db.session.query(LessonLog.plan_id)
+                                   .join(SessionLog, LessonLog.session_id == SessionLog.session_id)
+                                   .join(WeeklySchedule, SessionLog.schedule_id == WeeklySchedule.schedule_id)
+                                   .filter(WeeklySchedule.section_id == section_id)
+                                   .filter(WeeklySchedule.subject_id == sub.subject_id)
+                                   .filter(SessionLog.status == 'Conducted')
+                                   .distinct()
+                                   .count())
+                                   
+                perc = round((completed_count / total_topics) * 100)
+                status_text = f"{completed_count}/{total_topics} Topics"
+                
+                # Color Coding
+                if perc < 40: color = "red"
+                elif perc < 70: color = "yellow"
+                else: color = "green"
+
+            data.append({
+                "subject": sub.name,
+                "code": sub.code,
+                "teacher": teacher.full_name,
+                "percentage": perc,
+                "status": status_text,
+                "color": color
+            })
+            
+        return jsonify({"subjects": data})
+        
+    except Exception as e: return jsonify({"error": str(e)}), 500
+    
+
+@app.route('/api/academic/create_plan', methods=['POST'])
+def create_teaching_plan():
+    try:
+        data = request.json
+        subject_id = data.get('subject_id')
+        teacher_id = data.get('teacher_id')
+        topics = data.get('topics') # List of {unit, topic, hours}
+        
+        # Optional: Clear old plan for this subject? Or append? 
+        # Let's append/update based on logic, but for MVP just add new ones.
+        
+        count = 0
+        for item in topics:
+            plan = TeachingPlan(
+                subject_id=subject_id,
+                created_by_id=teacher_id,
+                unit_number=int(item['unit']),
+                topic_name=item['topic'],
+                planned_hours=int(item['hours'])
+            )
+            db.session.add(plan)
+            count += 1
+            
+        db.session.commit()
+        return jsonify({"message": f"Added {count} topics to syllabus."}), 200
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/upload/syllabus', methods=['POST'])
+def upload_syllabus_csv():
+    try:
+        file = get_db_file_handle(request)
+        subject_id = request.form.get('subject_id')
+        teacher_id = request.form.get('teacher_id')
+        
+        if not subject_id or not teacher_id:
+            return jsonify({"error": "Context missing (Subject/Teacher)"}), 400
+
+        # --- FIX: ROBUST ENCODING HANDLING ---
+        try:
+            # Try standard UTF-8 first
+            df = pd.read_csv(file, dtype=str)
+        except UnicodeDecodeError:
+            # If failed (e.g., Excel file with special dashes), try Windows-1252
+            file.seek(0) # Reset file pointer to start
+            df = pd.read_csv(file, dtype=str, encoding='cp1252')
+        except Exception:
+            # Last resort: Latin-1 (handles almost anything)
+            file.seek(0)
+            df = pd.read_csv(file, dtype=str, encoding='latin1')
+            
+        df = df.fillna('')
+        # -------------------------------------
+        
+        # Expected Headers: "Unit", "Sub Unit", "Topic", "Hours"
+        count = 0
+        
+        for index, row in df.iterrows():
+            unit = row.get('Unit', '').strip()
+            topic = row.get('Topic', '').strip()
+            hours = row.get('Hours', '1').strip()
+            sub_unit = row.get('Sub Unit', '').strip()
+            
+            if not unit or not topic: continue
+            
+            # Create Plan Entry
+            plan = TeachingPlan(
+                subject_id=subject_id,
+                created_by_id=teacher_id,
+                unit_number=int(unit),
+                sub_unit=sub_unit,
+                topic_name=topic,
+                planned_hours=int(hours) if hours.isdigit() else 1
+            )
+            db.session.add(plan)
+            count += 1
+            
+        db.session.commit()
+        return jsonify({"message": f"Successfully added {count} topics."}), 201
+
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route('/api/academic/get_syllabus', methods=['GET'])
+def get_syllabus():
+    try:
+        subject_id = request.args.get('subject_id')
+        
+        # Fetch Plan
+        plans = TeachingPlan.query.filter_by(subject_id=subject_id).order_by(TeachingPlan.unit_number, TeachingPlan.sub_unit).all()
+        
+        syllabus = []
+        total_topics = len(plans)
+        completed_topics = 0
+        
+        # Helper to group hours by unit
+        unit_hours = {}
+
+        # First Pass: Calculate Unit Totals
+        for p in plans:
+            u = p.unit_number
+            unit_hours[u] = unit_hours.get(u, 0) + p.planned_hours
+
+        # Second Pass: Build Response
+        for p in plans:
+            # Check if this topic is logged
+            # We join SessionLog to get the date
+            log_entry = (db.session.query(LessonLog, SessionLog)
+                         .join(SessionLog, LessonLog.session_id == SessionLog.session_id)
+                         .filter(LessonLog.plan_id == p.plan_id)
+                         .first())
+            
+            conducted_date = None
+            status = "Pending"
+
+            if log_entry: 
+                lesson, session = log_entry
+                status = 'Completed'
+                conducted_date = session.session_date.strftime('%d %b %Y')
+                completed_topics += 1
+                
+            syllabus.append({
+                "id": p.plan_id,
+                "unit": p.unit_number,
+                "sub_unit": p.sub_unit,
+                "topic": p.topic_name,
+                "hours": p.planned_hours,
+                "unit_total_hours": unit_hours.get(p.unit_number, 0),
+                "status": status,
+                "conducted_date": conducted_date # <--- NEW FIELD
+            })
+            
+        progress = round((completed_topics / total_topics) * 100) if total_topics > 0 else 0
+        
+        return jsonify({
+            "syllabus": syllabus,
+            "progress": progress
+        })
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+# In app.py - Add to the AMC section
+
 @app.route('/api/amc/syllabus_report', methods=['GET'])
 def get_amc_syllabus_report():
     try:
@@ -12630,748 +10058,70 @@ def get_amc_syllabus_report():
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 
-# In app.py
-
-# ==========================================
-# API: TERM GRANT (AMC)
-# ==========================================
-
-@app.route('/api/amc/generate_term_grant', methods=['POST'])
-def generate_term_grant():
-    try:
-        data = request.json
-        section_id = data.get('section_id')
-        threshold_att = float(data.get('att_threshold', 75))
-        threshold_marks = float(data.get('marks_threshold', 20)) # Out of 50
-        
-        # 1. Clear old records for this class (Re-calculation)
-        TermGrantRecord.query.filter_by(section_id=section_id).delete()
-        
-        # 2. Fetch all students
-        students = StudentProfile.query.filter_by(current_section_id=section_id).all()
-        
-        # 3. Fetch all subjects for this class (for Marks check)
-        allocations = SubjectAllocation.query.filter_by(section_id=section_id).all()
-        subject_ids = [a.subject_id for a in allocations]
-        
-        # 4. Fetch Global Attendance (Simplified for performance)
-        total_sessions = db.session.query(SessionLog).join(WeeklySchedule).filter(WeeklySchedule.section_id == section_id, SessionLog.status=='Conducted').count()
-        
-        count = 0
-        for s in students:
-            # A. Attendance %
-            attended = AttendanceTransaction.query.join(SessionLog).join(WeeklySchedule).filter(
-                WeeklySchedule.section_id == section_id,
-                AttendanceTransaction.student_id == s.student_id,
-                AttendanceTransaction.status.in_(['Present', 'OnDuty'])
-            ).count()
-            
-            att_perc = round((attended / total_sessions) * 100, 1) if total_sessions > 0 else 0
-            
-            # B. CA Marks
-            ca_records = CAMarks.query.filter(CAMarks.student_id == s.student_id, CAMarks.subject_id.in_(subject_ids)).all()
-            total_score = sum(m.total_ca for m in ca_records)
-            subject_count = len(ca_records)
-            avg_ca = round(total_score / subject_count, 1) if subject_count > 0 else 0
-            
-            # Count Failed Subjects (Below Threshold)
-            failed_count = sum(1 for m in ca_records if m.total_ca < threshold_marks)
-            
-            # C. Detention
-            det_count = DetentionRecord.query.filter_by(student_id=s.student_id).filter(DetentionRecord.status.in_(['Assigned', 'In_Review'])).count()
-            
-            # D. DECISION LOGIC
-            status = 'Granted'
-            reasons = []
-            
-            if att_perc < threshold_att:
-                status = 'Provisional' if att_perc > (threshold_att - 15) else 'Detained'
-                reasons.append(f"Low Attendance ({att_perc}%)")
-                
-            if failed_count > 0:
-                if status == 'Granted': status = 'Provisional'
-                reasons.append(f"Failed {failed_count} Subjects")
-                
-            if det_count > 0:
-                status = 'Detained' # Strict Rule
-                reasons.append(f"Active Detention ({det_count})")
-            
-            # Create Record
-            rec = TermGrantRecord(
-                student_id=s.student_id,
-                section_id=section_id,
-                attendance_perc=att_perc,
-                avg_ca_score=avg_ca,
-                failed_subjects_count=failed_count,
-                active_detentions=det_count,
-                status=status,
-                remarks=", ".join(reasons) if reasons else "All Clear",
-                is_published=False
-            )
-            db.session.add(rec)
-            count += 1
-            
-        db.session.commit()
-        return jsonify({"message": f"Generated Term Grant for {count} students."}), 200
-
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/amc/term_grant_list', methods=['GET'])
-def get_term_grant_list():
+@app.route('/api/amc/syllabus_progress', methods=['GET'])
+def get_syllabus_progress():
     try:
         section_id = request.args.get('section_id')
-        records = (db.session.query(TermGrantRecord, StudentProfile)
-                   .join(StudentProfile)
-                   .filter(TermGrantRecord.section_id == section_id)
-                   .order_by(StudentProfile.admission_number)
-                   .all())
+        term = request.args.get('term')  # '1' or '2'
         
-        data = []
-        stats = {"Granted": 0, "Provisional": 0, "Detained": 0}
-        
-        for r, s in records:
-            stats[r.status] = stats.get(r.status, 0) + 1
-            data.append({
-                "id": r.record_id,
-                "roll": s.admission_number,
-                "name": s.full_name,
-                "att": r.attendance_perc,
-                "ca_avg": r.avg_ca_score,
-                "fails": r.failed_subjects_count,
-                "det": r.active_detentions,
-                "status": r.status,
-                "remarks": r.remarks,
-                "published": r.is_published
-            })
-            
-        return jsonify({"students": data, "stats": stats})
-    except Exception as e: return jsonify({"error": str(e)}), 500
+        if not section_id or not term:
+            return jsonify({"error": "Missing parameters"}), 400
 
+        # Define target units based on term
+        target_units = []
+        if term == '1': target_units = [1, 2, 3]
+        elif term == '2': target_units = [4, 5, 6]
 
-@app.route('/api/amc/update_grant_status', methods=['POST'])
-def update_grant_status():
-    try:
-        data = request.json
-        rec = TermGrantRecord.query.get(data.get('record_id'))
-        if not rec: return jsonify({"error": "Record not found"}), 404
-        
-        rec.status = data.get('status')
-        rec.remarks = data.get('remarks', rec.remarks)
-        db.session.commit()
-        return jsonify({"message": "Updated"}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-# ==========================================
-# API: FEEDBACK SYSTEM
-# ==========================================
-
-@app.route('/api/feedback/active_cycle', methods=['GET'])
-def get_active_feedback_cycle():
-    try:
-        today = date.today()
-        cycle = FeedbackCycle.query.filter(
-            FeedbackCycle.is_active == True,
-            FeedbackCycle.start_date <= today,
-            FeedbackCycle.end_date >= today
-        ).order_by(FeedbackCycle.cycle_id.desc()).first()
-        if not cycle:
-            return jsonify({"active": False})
-        
-        return jsonify({
-            "active": True,
-            "id": cycle.cycle_id,
-            "name": cycle.name,
-            "end_date": cycle.end_date.strftime('%d %b %Y')
-        })
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/feedback/questions', methods=['GET'])
-def get_feedback_questions():
-    try:
-        qs = FeedbackQuestion.query.filter_by(is_active=True).all()
-        return jsonify({"questions": [{"id": q.question_id, "text": q.text, "category": q.category} for q in qs]})
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/feedback/pending_list', methods=['GET'])
-def get_student_pending_feedback():
-    try:
-        user_id = request.args.get('user_id')
-        
-        # 1. Check Active Cycle
-        today = date.today()
-        cycle = FeedbackCycle.query.filter(
-            FeedbackCycle.is_active == True,
-            FeedbackCycle.start_date <= today,
-            FeedbackCycle.end_date >= today
-        ).order_by(FeedbackCycle.cycle_id.desc()).first()
-        if not cycle:
-            return jsonify({"active": False, "subjects": []})
-
-        # 2. Get Enrolled Subjects
-        student = StudentProfile.query.get(user_id)
-        if not student or not student.current_section_id: return jsonify({"active": False, "subjects": []})
-        
-        allocations = SubjectAllocation.query.filter_by(section_id=student.current_section_id).all()
-        
-        pending_list = []
-        for alloc in allocations:
-            subject = db.session.get(Subject, alloc.subject_id)
-            
-            # Elective Check
-            if is_elective_type(subject.subject_type):
-                approved = StudentElective.query.filter_by(student_id=user_id, subject_id=subject.subject_id, status='Approved').first()
-                if not approved: continue
-
-            # Check if already submitted
-            done = StudentFeedbackStatus.query.filter_by(student_id=user_id, cycle_id=cycle.cycle_id, subject_id=subject.subject_id).first()
-            if not done:
-                teacher = db.session.get(StaffProfile, alloc.teacher_id)
-                pending_list.append({
-                    "subject_id": subject.subject_id,
-                    "subject_name": subject.name,
-                    "code": subject.code,
-                    "teacher_name": teacher.full_name if teacher else "Unassigned",
-                    "teacher_id": alloc.teacher_id
-                })
-        
-        return jsonify({"active": True, "cycle_name": cycle.name, "subjects": pending_list})
-
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/feedback/submit', methods=['POST'])
-def submit_feedback():
-    try:
-        data = request.json
-        student_id = data.get('student_id')
-        cycle_id = data.get('cycle_id')
-        subject_id = data.get('subject_id')
-        section_id = data.get('section_id')
-        teacher_id = data.get('teacher_id')
-        responses = data.get('responses') # {question_id: rating}
-
-        student = StudentProfile.query.get(student_id)
-        if not student or not student.current_section_id:
-             return jsonify({"error": "Student class not found"}), 400
-        section_id = student.current_section_id
-        
-        # 1. Save Anonymous Responses
-        for q_id, rating in responses.items():
-            db.session.add(FeedbackResponse(
-                cycle_id=cycle_id,
-                subject_id=subject_id,
-                teacher_id=teacher_id,
-                section_id=section_id,
-                question_id=int(q_id),
-                rating=int(rating)
-            ))
-        
-        # 2. Mark as Done for Student
-        db.session.add(StudentFeedbackStatus(student_id=student_id, cycle_id=cycle_id, subject_id=subject_id))
-        
-        db.session.commit()
-        return jsonify({"message": "Feedback Submitted"}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/admin/create_feedback_cycle', methods=['POST'])
-def create_feedback_cycle():
-    try:
-        data = request.json
-        name = (data.get('name') or '').strip()
-        start_raw = data.get('start_date')
-        end_raw = data.get('end_date')
-        is_active = bool(data.get('is_active', True))
-
-        if not name or not start_raw or not end_raw:
-            return jsonify({"error": "name, start_date, end_date are required"}), 400
-
-        try:
-            start_date = datetime.strptime(start_raw, '%Y-%m-%d').date()
-            end_date = datetime.strptime(end_raw, '%Y-%m-%d').date()
-        except Exception:
-            return jsonify({"error": "Invalid date format (expected YYYY-MM-DD)"}), 400
-
-        if start_date > end_date:
-            return jsonify({"error": "Start date must be before or equal to end date"}), 400
-
-        if is_active:
-            today = date.today()
-            if not (start_date <= today <= end_date):
-                return jsonify({"error": "To activate a cycle, today's date must fall between start and end dates."}), 400
-
-        if is_active:
-            FeedbackCycle.query.update({FeedbackCycle.is_active: False})
-            
-        new_cycle = FeedbackCycle(
-            name=name,
-            start_date=start_date,
-            end_date=end_date,
-            is_active=is_active
-        )
-        db.session.add(new_cycle)
-        
-        # Seed default questions if none exist
-        if FeedbackQuestion.query.count() == 0:
-            defaults = [
-                "The faculty covers the syllabus on time.",
-                "The faculty explains concepts clearly.",
-                "The faculty is punctual to class.",
-                "The faculty encourages questions and interaction.",
-                "Course materials/notes provided were helpful."
-            ]
-            for txt in defaults:
-                db.session.add(FeedbackQuestion(text=txt, category="Teaching"))
-        
-        db.session.commit()
-        return jsonify({"message": "Cycle Created"}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/admin/feedback_status', methods=['GET'])
-def get_admin_feedback_status():
-    """Class/division-wise feedback submission counts for the currently active feedback cycle."""
-    try:
-        from sqlalchemy import and_, func
-
-        today = date.today()
-        cycle = FeedbackCycle.query.filter(
-            FeedbackCycle.is_active == True,
-            FeedbackCycle.start_date <= today,
-            FeedbackCycle.end_date >= today
-        ).order_by(FeedbackCycle.cycle_id.desc()).first()
-
-        if not cycle:
-            return jsonify({"active": False, "sections": []})
-
-        q = (
-            db.session.query(
-                ClassSection.section_id,
-                ClassSection.class_level,
-                ClassSection.name,
-                func.count(StudentProfile.student_id).label('total_students'),
-                func.count(func.distinct(StudentFeedbackStatus.student_id)).label('submitted_students'),
-            )
-            .join(StudentProfile, StudentProfile.current_section_id == ClassSection.section_id)
-            .outerjoin(
-                StudentFeedbackStatus,
-                and_(
-                    StudentFeedbackStatus.student_id == StudentProfile.student_id,
-                    StudentFeedbackStatus.cycle_id == cycle.cycle_id,
-                ),
-            )
-            .filter(StudentProfile.academic_status == 'Active')
-            .group_by(ClassSection.section_id)
-            .order_by(ClassSection.class_level.asc(), ClassSection.name.asc())
-        )
-
-        rows = []
-        for section_id, class_level, division_name, total_students, submitted_students in q.all():
-            total_students = int(total_students or 0)
-            submitted_students = int(submitted_students or 0)
-            pct = round((submitted_students / total_students) * 100, 1) if total_students else 0
-            rows.append({
-                "section_id": section_id,
-                "class": f"{class_level}-{division_name}",
-                "submitted_students": submitted_students,
-                "total_students": total_students,
-                "percentage": pct,
-            })
-
-        return jsonify({
-            "active": True,
-            "cycle_id": cycle.cycle_id,
-            "cycle_name": cycle.name,
-            "start_date": cycle.start_date.strftime('%Y-%m-%d'),
-            "end_date": cycle.end_date.strftime('%Y-%m-%d'),
-            "sections": rows,
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# ==========================================
-# API: SYSTEM CONFIG & ROLLOVER
-# ==========================================
-
-@app.route('/api/admin/system_config', methods=['GET', 'POST'])
-def manage_system_config():
-    def _impl():
-        if request.method == 'POST':
-            data = request.json or {}
-            term = (data.get('current_term') or '').strip()
-            if not term:
-                return jsonify({"error": "current_term is required"}), 400
-
-            conf = SystemConfig.query.get('current_term')
-            if not conf:
-                conf = SystemConfig(key='current_term', value=term)
-                db.session.add(conf)
-            else:
-                conf.value = term
-
-            db.session.commit()
-            return jsonify({"message": "Term Updated"}), 200
-        else:
-            conf = SystemConfig.query.get('current_term')
-            return jsonify({"current_term": conf.value if conf else get_current_term_name()})
-
-    try:
-        return _impl()
-    except OperationalError as e:
-        if 'no such table' in str(e).lower():
-            db.create_all()
-            return _impl()
-        return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/admin/rollover_semester', methods=['POST'])
-def rollover_semester():
-    def _impl():
-        conf = SystemConfig.query.get('current_term')
-        old_term = conf.value if conf else get_current_term_name()
-
-        # Archive Allocations
-        allocs = (
-            db.session.query(SubjectAllocation, Subject, StaffProfile)
-            .join(Subject, Subject.subject_id == SubjectAllocation.subject_id)
-            .join(StaffProfile, StaffProfile.staff_id == SubjectAllocation.teacher_id)
-            .all()
-        )
-
-        for a, sub, staff in allocs:
-            db.session.add(
-                ArchivedAllocation(
-                    term_name=old_term,
-                    section_id=a.section_id,
-                    subject_code=sub.code,
-                    subject_name=sub.name,
-                    teacher_name=staff.full_name,
-                )
-            )
-
-        # Archive Schedule
-        slots = (
-            db.session.query(WeeklySchedule, ClassSection, Subject, StaffProfile)
-            .join(ClassSection, ClassSection.section_id == WeeklySchedule.section_id)
-            .join(Subject, Subject.subject_id == WeeklySchedule.subject_id)
-            .join(StaffProfile, StaffProfile.staff_id == WeeklySchedule.teacher_id)
-            .all()
-        )
-
-        for slot, sec, sub, staff in slots:
-            time_str = f"{slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')}"
-            db.session.add(
-                ArchivedSchedule(
-                    term_name=old_term,
-                    section_name=f"{sec.class_level}-{sec.name}",
-                    day=slot.day_of_week,
-                    time_slot=time_str,
-                    subject=sub.name,
-                    teacher=staff.full_name,
-                )
-            )
-
-        # FLUSH Active Tables
-        db.session.query(WeeklySchedule).delete()
-        db.session.query(SubjectAllocation).delete()
-        db.session.query(StudentElective).delete()
-        db.session.query(ElectiveOffering).delete()
-
-        db.session.commit()
-        log_activity("System Rollover", f"Archived {old_term} and reset for new term.")
-
-        return (
-            jsonify(
-                {
-                    "message": f"Rollover Complete. System reset for new term. Old data archived under '{old_term}'."
-                }
-            ),
-            200,
-        )
-
-    try:
-        return _impl()
-    except OperationalError as e:
-        if 'no such table' in str(e).lower():
-            db.create_all()
-            return _impl()
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-
-# ==========================================
-# API: HOD ANALYTICS
-# ==========================================
-
-@app.route('/api/hod/feedback_analysis', methods=['GET'])
-def get_hod_feedback_analysis():
-    try:
-        user_id = request.args.get('user_id')
-        
-        # 1. Identify HOD's Department
-        dept = Department.query.filter_by(hod_staff_id=user_id).first()
-        if not dept:
-            dept = Department.query.filter_by(name=FIXED_DEPT_NAME).first()
-            
-        if not dept: return jsonify({"error": "Unauthorized / No Dept Found"}), 403
-
-        # 2. Faculty Overall Scores (Group by Teacher)
-        fac_results = (db.session.query(
-                            StaffProfile.full_name, 
-                            db.func.avg(FeedbackResponse.rating).label('avg_rating'),
-                            db.func.count(FeedbackResponse.response_id).label('count')
-                       )
-                       .join(StaffProfile, FeedbackResponse.teacher_id == StaffProfile.staff_id)
-                       .filter(StaffProfile.primary_department_id == dept.dept_id)
-                       .group_by(StaffProfile.full_name)
-                       .all())
-
-        faculty_scores = []
-        dept_sum = 0
-        total_responses = 0
-
-        for name, avg, count in fac_results:
-            score = round(float(avg), 2)
-            faculty_scores.append({
-                "name": name,
-                "score": score,
-                "responses": count,
-                "status": "Excellent" if score >= 4.5 else ("Good" if score >= 3.5 else "Needs Improvement")
-            })
-            dept_sum += (float(avg) * count)
-            total_responses += count
-
-        dept_avg = round(dept_sum / total_responses, 2) if total_responses > 0 else 0
-
-        # 3. Subject-wise Analysis
-        sub_results = (db.session.query(
-                            ClassSection.class_level,
-                            ClassSection.name,
-                            Subject.name,
-                            Subject.code,
-                            StaffProfile.full_name, 
-                            db.func.avg(FeedbackResponse.rating).label('avg_rating')
-                       )
-                       .join(StaffProfile, FeedbackResponse.teacher_id == StaffProfile.staff_id)
-                       .join(Subject, FeedbackResponse.subject_id == Subject.subject_id)
-                       .join(ClassSection, FeedbackResponse.section_id == ClassSection.section_id)
-                       .filter(StaffProfile.primary_department_id == dept.dept_id)
-                       .group_by(ClassSection.class_level, ClassSection.name, Subject.name, Subject.code, StaffProfile.full_name)
-                       .order_by(ClassSection.class_level, ClassSection.name, Subject.name)
-                       .all())
-
-        subject_analysis = []
-        for lvl, sec_name, s_name, s_code, t_name, avg in sub_results:
-            subject_analysis.append({
-                "class": f"{lvl}-{sec_name}",
-                "subject": s_name,
-                "code": s_code,
-                "faculty": t_name,
-                "score": round(float(avg), 2)
-            })
-
-        faculty_scores.sort(key=lambda x: x['score'], reverse=True)
-
-        return jsonify({
-            "dept_avg": dept_avg,
-            "total_responses": total_responses,
-            "faculty_scores": faculty_scores,
-            "subject_analysis": subject_analysis
-        })
-
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/hod/syllabus_status', methods=['GET'])
-def get_hod_syllabus_status():
-    try:
-        section_id = request.args.get('section_id')
-        if not section_id: return jsonify({"error": "Section ID required"}), 400
-        
+        # Get subjects allocated to this section
         allocations = (db.session.query(SubjectAllocation, Subject, StaffProfile)
                        .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
                        .join(StaffProfile, SubjectAllocation.teacher_id == StaffProfile.staff_id)
                        .filter(SubjectAllocation.section_id == section_id)
                        .all())
-        
-        data = []
-        for alloc, sub, teacher in allocations:
-            total_topics = TeachingPlan.query.filter_by(
-                subject_id=sub.subject_id, 
-                created_by_id=teacher.staff_id
-            ).count()
-            
-            if total_topics == 0:
-                perc = 0
-                status_text = "Plan Not Uploaded"
-                color = "gray"
-            else:
-                completed_count = (db.session.query(LessonLog.plan_id)
-                                   .join(SessionLog, LessonLog.session_id == SessionLog.session_id)
-                                   .join(WeeklySchedule, SessionLog.schedule_id == WeeklySchedule.schedule_id)
-                                   .filter(WeeklySchedule.section_id == section_id)
-                                   .filter(WeeklySchedule.subject_id == sub.subject_id)
-                                   .filter(SessionLog.status == 'Conducted')
-                                   .distinct()
-                                   .count())
-                                   
-                perc = round((completed_count / total_topics) * 100)
-                status_text = f"{completed_count}/{total_topics} Topics"
-                
-                if perc < 40: color = "red"
-                elif perc < 70: color = "yellow"
-                else: color = "green"
 
-            data.append({
-                "subject": sub.name,
-                "code": sub.code,
-                "teacher": teacher.full_name,
-                "percentage": perc,
-                "status": status_text,
-                "color": color
+        subjects_data = []
+        for alloc, subject, teacher in allocations:
+            # Get total topics in target units
+            total_topics = (db.session.query(TeachingPlan)
+                            .filter(TeachingPlan.subject_id == subject.subject_id)
+                            .filter(TeachingPlan.unit_number.in_(target_units))
+                            .count())
+
+            # Get completed topics (those with lesson logs)
+            completed_topics = (db.session.query(LessonLog)
+                                .join(SessionLog, LessonLog.session_id == SessionLog.session_id)
+                                .join(WeeklySchedule, SessionLog.schedule_id == WeeklySchedule.schedule_id)
+                                .filter(WeeklySchedule.subject_id == subject.subject_id)
+                                .filter(WeeklySchedule.section_id == section_id)
+                                .filter(LessonLog.plan_id.isnot(None))
+                                .join(TeachingPlan, LessonLog.plan_id == TeachingPlan.plan_id)
+                                .filter(TeachingPlan.unit_number.in_(target_units))
+                                .count())
+
+            pending_topics = total_topics - completed_topics
+
+            # Last updated: most recent lesson log
+            last_log = (db.session.query(LessonLog.created_at)
+                        .join(SessionLog, LessonLog.session_id == SessionLog.session_id)
+                        .join(WeeklySchedule, SessionLog.schedule_id == WeeklySchedule.schedule_id)
+                        .filter(WeeklySchedule.subject_id == subject.subject_id)
+                        .filter(WeeklySchedule.section_id == section_id)
+                        .order_by(LessonLog.created_at.desc())
+                        .first())
+
+            last_updated = last_log.created_at if last_log else None
+
+            subjects_data.append({
+                "subject_name": subject.name,
+                "total_topics": total_topics,
+                "completed": completed_topics,
+                "pending": pending_topics,
+                "last_updated": last_updated.isoformat() if last_updated else None
             })
-            
-        return jsonify({"subjects": data})
-        
-    except Exception as e: return jsonify({"error": str(e)}), 500
 
-
-# ==========================================
-# API: ACADEMIC / LESSON PLANNING
-# ==========================================
-
-@app.route('/api/academic/create_plan', methods=['POST'])
-def create_teaching_plan():
-    try:
-        data = request.json
-        subject_id = data.get('subject_id')
-        teacher_id = data.get('teacher_id')
-        topics = data.get('topics') # List of {unit, topic, hours}
-        
-        count = 0
-        for item in topics:
-            plan = TeachingPlan(
-                subject_id=subject_id,
-                created_by_id=teacher_id,
-                unit_number=int(item['unit']),
-                topic_name=item['topic'],
-                planned_hours=int(item['hours'])
-            )
-            db.session.add(plan)
-            count += 1
-            
-        db.session.commit()
-        return jsonify({"message": f"Added {count} topics to syllabus."}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/upload/syllabus', methods=['POST'])
-def upload_syllabus_csv():
-    try:
-        file = get_db_file_handle(request)
-        subject_id = request.form.get('subject_id')
-        teacher_id = request.form.get('teacher_id')
-        
-        if not subject_id or not teacher_id:
-            return jsonify({"error": "Context missing (Subject/Teacher)"}), 400
-
-        try:
-            df = pd.read_csv(file, dtype=str)
-        except UnicodeDecodeError:
-            file.seek(0)
-            df = pd.read_csv(file, dtype=str, encoding='cp1252')
-        except Exception:
-            file.seek(0)
-            df = pd.read_csv(file, dtype=str, encoding='latin1')
-            
-        df = df.fillna('')
-        
-        count = 0
-        for index, row in df.iterrows():
-            unit = row.get('Unit', '').strip()
-            topic = row.get('Topic', '').strip()
-            hours = row.get('Hours', '1').strip()
-            sub_unit = row.get('Sub Unit', '').strip()
-            
-            if not unit or not topic: continue
-            
-            plan = TeachingPlan(
-                subject_id=subject_id,
-                created_by_id=teacher_id,
-                unit_number=int(unit),
-                sub_unit=sub_unit,
-                topic_name=topic,
-                planned_hours=int(hours) if hours.isdigit() else 1
-            )
-            db.session.add(plan)
-            count += 1
-            
-        db.session.commit()
-        return jsonify({"message": f"Successfully added {count} topics."}), 201
+        return jsonify({"subjects": subjects_data})
 
     except Exception as e: return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/academic/get_syllabus', methods=['GET'])
-def get_syllabus():
-    try:
-        subject_id = request.args.get('subject_id')
-        
-        plans = TeachingPlan.query.filter_by(subject_id=subject_id).order_by(TeachingPlan.unit_number, TeachingPlan.sub_unit).all()
-        
-        syllabus = []
-        total_topics = len(plans)
-        completed_topics = 0
-        
-        unit_hours = {}
-        for p in plans:
-            u = p.unit_number
-            unit_hours[u] = unit_hours.get(u, 0) + p.planned_hours
-
-        for p in plans:
-            log_entry = (db.session.query(LessonLog, SessionLog)
-                         .join(SessionLog, LessonLog.session_id == SessionLog.session_id)
-                         .filter(LessonLog.plan_id == p.plan_id)
-                         .first())
-            
-            conducted_date = None
-            status = "Pending"
-
-            if log_entry: 
-                lesson, session = log_entry
-                status = 'Completed'
-                conducted_date = session.session_date.strftime('%d %b %Y')
-                completed_topics += 1
-                
-            syllabus.append({
-                "id": p.plan_id,
-                "unit": p.unit_number,
-                "sub_unit": p.sub_unit,
-                "topic": p.topic_name,
-                "hours": p.planned_hours,
-                "unit_total_hours": unit_hours.get(p.unit_number, 0),
-                "status": status,
-                "conducted_date": conducted_date
-            })
-            
-        progress = round((completed_topics / total_topics) * 100) if total_topics > 0 else 0
-        
-        return jsonify({
-            "syllabus": syllabus,
-            "progress": progress
-        })
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
 
 if __name__ == '__main__':
     with app.app_context():

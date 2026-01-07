@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Super Admin{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+  <header class="bg-white border-b border-gray-200">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <img src="{{ url_for('static', filename='images/mit_logo.png') }}" class="h-9 w-auto" onerror="this.style.display='none'" />
+        <div>
+          <div class="text-xs font-bold tracking-widest text-gray-500">SUPER ADMIN</div>
+          <div class="text-lg font-bold">University Console</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <a href="/superadmin/dashboard" class="text-sm font-medium text-gray-700 hover:text-gray-900">Dashboard</a>
+        <a href="/superadmin/setup_hierarchy" class="text-sm font-medium text-gray-700 hover:text-gray-900">Setup</a>
+        <button onclick="logout()" class="px-3 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800">Sign Out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    lucide.createIcons();
+    async function logout() {
+      try { await fetch('/api/logout', { method: 'POST' }); } catch (e) {}
+      window.location.replace('/');
+    }
+  </script>
+</body>
+</html>

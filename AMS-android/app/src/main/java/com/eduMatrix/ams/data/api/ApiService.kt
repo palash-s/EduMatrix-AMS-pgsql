@@ -501,7 +501,7 @@ object ApiService {
 
     /**
      * Submit attendance for a session.
-     * Backend expects: schedule_id, date, students[{student_id, status, is_on_duty}], topic_id
+     * Backend expects: schedule_id, date, students[{student_id, status, is_on_duty}], topic_ids
      */
     fun submitAttendance(
         baseUrl: String,
@@ -521,7 +521,10 @@ object ApiService {
         val payload = JsonObject().apply {
             addProperty("schedule_id", submission.scheduleId)
             addProperty("date", submission.conductedDate)  // Backend expects "date" not "conducted_date"
-            submission.topicId?.let { addProperty("topic_id", it) }
+            // Send topic_ids array for multi-select lesson tracking
+            if (!submission.topicIds.isNullOrEmpty()) {
+                add("topic_ids", gson.toJsonTree(submission.topicIds))
+            }
             add("students", gson.toJsonTree(studentsArray))  // Backend expects "students" not "attendance"
         }
 

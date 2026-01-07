@@ -1,0 +1,53 @@
+{% extends "super_admin_layout.html" %}
+
+{% block title %}Super Admin Dashboard{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between mb-8">
+  <div>
+    <h1 class="text-2xl font-bold">Super Admin Dashboard</h1>
+    <p class="text-sm text-gray-500 mt-1">University-wide overview and administration.</p>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+  <div class="bg-white border border-gray-200 rounded-xl p-5">
+    <div class="text-xs font-bold text-gray-500 uppercase">Departments</div>
+    <div id="kpi-depts" class="text-3xl font-bold mt-2">--</div>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-xl p-5">
+    <div class="text-xs font-bold text-gray-500 uppercase">Programs</div>
+    <div id="kpi-programs" class="text-3xl font-bold mt-2">--</div>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-xl p-5">
+    <div class="text-xs font-bold text-gray-500 uppercase">Specializations</div>
+    <div id="kpi-specs" class="text-3xl font-bold mt-2">--</div>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-xl p-5">
+    <div class="text-xs font-bold text-gray-500 uppercase">Dept Admins</div>
+    <div id="kpi-dept-admins" class="text-3xl font-bold mt-2">--</div>
+  </div>
+</div>
+
+<div class="bg-white border border-gray-200 rounded-xl p-6">
+  <h2 class="text-lg font-bold">Next step</h2>
+  <p class="text-sm text-gray-600 mt-1">Go to Setup to define School → Program → Department → Specialization and create department admins.</p>
+  <div class="mt-4">
+    <a href="/superadmin/setup_hierarchy" class="inline-flex items-center px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800">Open Setup</a>
+  </div>
+</div>
+
+<script>
+(async function loadKpis() {
+  try {
+    const res = await fetch('/api/superadmin/kpis', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const data = await res.json();
+    document.getElementById('kpi-depts').textContent = data.departments;
+    document.getElementById('kpi-programs').textContent = data.programs;
+    document.getElementById('kpi-specs').textContent = data.specializations;
+    document.getElementById('kpi-dept-admins').textContent = data.department_admins;
+  } catch (e) {}
+})();
+</script>
+{% endblock %}

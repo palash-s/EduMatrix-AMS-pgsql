@@ -425,7 +425,15 @@
                     logContainer.innerHTML = dataLog.logs.map(log => `
                         <div class="p-4 flex gap-3 items-start hover:bg-gray-50 transition-colors">
                             <div class="w-8 h-8 rounded-full flex items-center justify-center mt-1 flex-shrink-0 ${log.color}"><i data-lucide="${log.icon}" class="w-4 h-4"></i></div>
-                            <div><p class="text-sm text-gray-800 font-medium leading-tight">${log.action}</p><p class="text-xs text-gray-500 mt-0.5 leading-snug">${log.desc}</p><p class="text-[10px] text-gray-400 mt-1">${log.time}</p></div>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm text-gray-800 font-medium leading-tight">${log.action}</p>
+                                <p class="text-xs text-gray-500 mt-0.5 leading-snug">${log.desc}</p>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <span class="text-[10px] text-gray-400">${log.time}</span>
+                                    <span class="text-[10px] text-gray-300">•</span>
+                                    <span class="text-[10px] text-gray-400">${log.timestamp || ''}</span>
+                                </div>
+                            </div>
                         </div>`).join('');
                     lucide.createIcons();
                 }
@@ -729,7 +737,7 @@
                 if (!meRes.ok) { window.location.replace('/'); return; }
                 const meData = await meRes.json();
                 if (meData.must_change_password) { window.location.replace('/change-password'); return; }
-                if (meData.role !== 'Admin') { window.location.replace('/'); return; }
+                if (meData.role !== 'Admin' && !meData.is_super_admin) { window.location.replace('/'); return; }
                 // Session valid - load dashboard
                 loadDashboard();
                 loadCurrentTermBadge();

@@ -60,9 +60,10 @@ fun StaffMarkAttendanceScreen(
     // Data states
     var attendanceSheet by remember { mutableStateOf<AttendanceSheet?>(null) }
     var studentAttendance by remember { mutableStateOf<Map<String, AttendanceStatus>>(emptyMap()) }
-    var selectedTopicId by rememberSaveable { mutableStateOf<Int?>(null) }
+    var selectedTopicIds by rememberSaveable { mutableStateOf<List<Int>>(emptyList()) }
     var showTopicDialog by rememberSaveable { mutableStateOf(false) }
     var showConfirmDialog by rememberSaveable { mutableStateOf(false) }
+    val maxTopics = 3  // Maximum topics per session
 
     // Load attendance sheet on first launch
     LaunchedEffect(scheduleId, date) {
@@ -118,7 +119,7 @@ fun StaffMarkAttendanceScreen(
                 val submission = AttendanceSubmission(
                     scheduleId = scheduleId,
                     conductedDate = date,
-                    topicId = selectedTopicId,
+                    topicIds = selectedTopicIds.ifEmpty { null },  // Multi-select topics
                     attendance = studentAttendance.map { (studentId, status) ->
                         StudentAttendanceRecord(
                             studentId = studentId,
@@ -336,7 +337,7 @@ fun StaffMarkAttendanceScreen(
                         item {
                             SessionInfoCard(
                                 sheet = attendanceSheet!!,
-                                selectedTopicId = selectedTopicId,
+                                selectedTopicIds = selectedTopicIds,
                                 onSelectTopic = { showTopicDialog = true }
                             )
                         }
@@ -428,14 +429,14 @@ fun StaffMarkAttendanceScreen(
         }
     }
 
-    // Topic selection dialog
+    // Topic selection dialog (multi-select)
     if (showTopicDialog && attendanceSheet != null) {
         TopicSelectionDialog(
-            topics = attendanceSheet!!.topics,
-            selectedTopicId = selectedTopicId,
-            onTopicSelected = { topicId ->
-                selectedTopicId = topicId
-                showTopicDialog = false
+            topics = attendanceSheet!!.topics.filter { !it.isCompleted },  // Only show pending topics
+            selectedTopicIds = selectedTopicIds,
+            maxTopics = maxTopics,
+            onTopicsChanged = { topicIds ->
+                selectedTopicIds = topicIds
             },
             onDismiss = { showTopicDialog = false }
         )
@@ -538,10 +539,10 @@ fun StaffMarkAttendanceScreen(
 @Composable
 private fun SessionInfoCard(
     sheet: AttendanceSheet,
-    selectedTopicId: Int?,
+    selectedTopicIds: List<Int>,
     onSelectTopic: () -> Unit
 ) {
-    val selectedTopic = sheet.topics.find { it.planId == selectedTopicId }
+    val selectedTopics = sheet.topics.filter { it.planId in selectedTopicIds }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -634,7 +635,7 @@ private fun SessionInfoCard(
                 }
             }
 
-            // Topic selection
+            // Topic selection (multi-select)
             if (sheet.topics.isNotEmpty()) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(
@@ -646,17 +647,39 @@ private fun SessionInfoCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Topics Covered",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (selectedTopics.isNotEmpty()) {
+                                Surface(
+                                    color = primaryAccent().copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "${selectedTopics.size} selected",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = primaryAccent(),
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                         Text(
-                            text = "Topic Covered",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = selectedTopic?.let {
-                                "${it.unitNumber}.${it.subUnitNumber ?: 0} ${it.subUnitTitle ?: it.unitTitle}"
-                            } ?: "Select topic (optional)",
+                            text = when {
+                                selectedTopics.isEmpty() -> "Select topics (optional, max 3)"
+                                selectedTopics.size == 1 -> selectedTopics.first().let {
+                                    "Unit ${it.unitNumber}: ${it.subUnitTitle ?: it.unitTitle}"
+                                }
+                                else -> selectedTopics.joinToString(", ") { "Unit ${it.unitNumber}" }
+                            },
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (selectedTopic != null)
+                            color = if (selectedTopics.isNotEmpty())
                                 MaterialTheme.colorScheme.onSurface
                             else
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
@@ -666,7 +689,7 @@ private fun SessionInfoCard(
                     }
                     Icon(
                         Icons.Default.ChevronRight,
-                        contentDescription = "Select topic",
+                        contentDescription = "Select topics",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -949,14 +972,15 @@ private fun AttendanceSummaryChip(
 }
 
 /**
- * Topic selection dialog.
+ * Topic selection dialog with multi-select checkboxes.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TopicSelectionDialog(
     topics: List<TopicForSelection>,
-    selectedTopicId: Int?,
-    onTopicSelected: (Int?) -> Unit,
+    selectedTopicIds: List<Int>,
+    maxTopics: Int,
+    onTopicsChanged: (List<Int>) -> Unit,
     onDismiss: () -> Unit
 ) {
     // Theme-aware alpha for selected backgrounds
@@ -964,99 +988,126 @@ private fun TopicSelectionDialog(
     val selectedBgAlpha = if (isDark) 0.2f else 0.1f
     val accentColor = primaryAccent()
 
+    // Local state for selections
+    var localSelection by remember { mutableStateOf(selectedTopicIds) }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            onTopicsChanged(localSelection)
+            onDismiss()
+        },
         title = {
-            Text("Select Topic Covered")
+            Column {
+                Text("Select Topics Covered")
+                Text(
+                    text = "Select up to $maxTopics topics (${localSelection.size} selected)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         },
         text = {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    // No topic option
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onTopicSelected(null) }
-                            .background(
-                                if (selectedTopicId == null)
-                                    accentColor.copy(alpha = selectedBgAlpha)
-                                else
-                                    Color.Transparent
-                            )
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        RadioButton(
-                            selected = selectedTopicId == null,
-                            onClick = { onTopicSelected(null) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = accentColor
-                            )
-                        )
-                        Text(
-                            text = "No topic (general session)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+            if (topics.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "All topics completed!",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(topics.size) { index ->
+                        val topic = topics[index]
+                        val isSelected = topic.planId in localSelection
+                        val canSelect = localSelection.size < maxTopics || isSelected
 
-                items(topics.size) { index ->
-                    val topic = topics[index]
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onTopicSelected(topic.planId) }
-                            .background(
-                                if (selectedTopicId == topic.planId)
-                                    accentColor.copy(alpha = selectedBgAlpha)
-                                else
-                                    Color.Transparent
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = canSelect) {
+                                    localSelection = if (isSelected) {
+                                        localSelection - topic.planId
+                                    } else {
+                                        localSelection + topic.planId
+                                    }
+                                }
+                                .background(
+                                    if (isSelected)
+                                        accentColor.copy(alpha = selectedBgAlpha)
+                                    else
+                                        Color.Transparent
+                                )
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    if (checked && localSelection.size < maxTopics) {
+                                        localSelection = localSelection + topic.planId
+                                    } else if (!checked) {
+                                        localSelection = localSelection - topic.planId
+                                    }
+                                },
+                                enabled = canSelect,
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = accentColor,
+                                    checkmarkColor = Color.White
+                                )
                             )
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        RadioButton(
-                            selected = selectedTopicId == topic.planId,
-                            onClick = { onTopicSelected(topic.planId) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = accentColor
-                            )
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "${topic.unitNumber}.${topic.subUnitNumber ?: 0} ${topic.subUnitTitle ?: topic.unitTitle}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "Unit ${topic.unitNumber}: ${topic.unitTitle}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (topic.isCompleted) {
-                            Icon(
-                                Icons.Default.CheckCircle,
-                                contentDescription = "Completed",
-                                tint = StatusGreen,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Unit ${topic.unitNumber}: ${topic.subUnitTitle ?: topic.unitTitle}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = if (canSelect)
+                                        MaterialTheme.colorScheme.onSurface
+                                    else
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                )
+                                if (topic.subUnitNumber != null) {
+                                    Text(
+                                        text = "${topic.unitNumber}.${topic.subUnitNumber}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            TextButton(
+                onClick = {
+                    onTopicsChanged(localSelection)
+                    onDismiss()
+                }
+            ) {
+                Text("Done")
+            }
+        },
+        dismissButton = {
+            if (localSelection.isNotEmpty()) {
+                TextButton(
+                    onClick = {
+                        localSelection = emptyList()
+                    }
+                ) {
+                    Text("Clear All")
+                }
             }
         }
     )

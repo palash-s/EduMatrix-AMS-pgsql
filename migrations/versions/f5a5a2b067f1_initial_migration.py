@@ -1,8 +1,8 @@
-"""Add must_change_password column
+"""Initial migration
 
-Revision ID: 2f64c4bd5778
-Revises: f582326554e5
-Create Date: 2025-12-23 20:27:26.227282
+Revision ID: f5a5a2b067f1
+Revises: 
+Create Date: 2026-01-06 08:51:03.202916
 
 """
 from alembic import op
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '2f64c4bd5778'
-down_revision = 'f582326554e5'
+revision = 'f5a5a2b067f1'
+down_revision = None
 branch_labels = None
 depends_on = None
 
@@ -38,14 +38,6 @@ def upgrade():
     sa.Column('teacher', sa.String(length=100), nullable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_archived_schedule'))
     )
-    op.create_table('department',
-    sa.Column('dept_id', sa.Integer(), nullable=False),
-    sa.Column('name', sa.String(length=100), nullable=False),
-    sa.Column('hod_staff_id', sa.String(length=36), nullable=True),
-    sa.ForeignKeyConstraint(['hod_staff_id'], ['staff_profile.staff_id'], name=op.f('fk_department_hod_staff_id_staff_profile'), use_alter=True),
-    sa.PrimaryKeyConstraint('dept_id', name=op.f('pk_department')),
-    sa.UniqueConstraint('name', name=op.f('uq_department_name'))
-    )
     op.create_table('feedback_cycle',
     sa.Column('cycle_id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(length=100), nullable=False),
@@ -60,6 +52,11 @@ def upgrade():
     sa.Column('category', sa.String(length=50), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.PrimaryKeyConstraint('question_id', name=op.f('pk_feedback_question'))
+    )
+    op.create_table('school',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=255), nullable=False),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_school'))
     )
     op.create_table('system_config',
     sa.Column('key', sa.String(length=50), nullable=False),
@@ -84,6 +81,16 @@ def upgrade():
     sa.Column('must_change_password', sa.Boolean(), nullable=True),
     sa.PrimaryKeyConstraint('user_id', name=op.f('pk_user_master')),
     sa.UniqueConstraint('username', name=op.f('uq_user_master_username'))
+    )
+    op.create_table('department',
+    sa.Column('dept_id', sa.Integer(), nullable=False),
+    sa.Column('school_id', sa.Integer(), nullable=True),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('hod_staff_id', sa.String(length=36), nullable=True),
+    sa.ForeignKeyConstraint(['hod_staff_id'], ['staff_profile.staff_id'], name=op.f('fk_department_hod_staff_id_staff_profile'), use_alter=True),
+    sa.ForeignKeyConstraint(['school_id'], ['school.id'], name=op.f('fk_department_school_id_school')),
+    sa.PrimaryKeyConstraint('dept_id', name=op.f('pk_department')),
+    sa.UniqueConstraint('name', name=op.f('uq_department_name'))
     )
     op.create_table('notification',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -139,6 +146,14 @@ def upgrade():
         batch_op.create_index(batch_op.f('ix_refresh_token_token_hash'), ['token_hash'], unique=True)
         batch_op.create_index(batch_op.f('ix_refresh_token_user_id'), ['user_id'], unique=False)
 
+    op.create_table('program',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('dept_id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('level', sa.String(length=50), nullable=False),
+    sa.ForeignKeyConstraint(['dept_id'], ['department.dept_id'], name=op.f('fk_program_dept_id_department')),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_program'))
+    )
     op.create_table('room_master',
     sa.Column('room_id', sa.Integer(), nullable=False),
     sa.Column('room_number', sa.String(length=50), nullable=False),
@@ -160,6 +175,8 @@ def upgrade():
     sa.Column('is_event_coordinator', sa.Boolean(), nullable=True),
     sa.Column('is_amc_member', sa.Boolean(), nullable=True),
     sa.Column('is_amc_head', sa.Boolean(), nullable=True),
+    sa.Column('admin_access_dept_id', sa.Integer(), nullable=True),
+    sa.ForeignKeyConstraint(['admin_access_dept_id'], ['department.dept_id'], name=op.f('fk_staff_profile_admin_access_dept_id_department')),
     sa.ForeignKeyConstraint(['primary_department_id'], ['department.dept_id'], name=op.f('fk_staff_profile_primary_department_id_department')),
     sa.ForeignKeyConstraint(['staff_id'], ['user_master.user_id'], name=op.f('fk_staff_profile_staff_id_user_master')),
     sa.PrimaryKeyConstraint('staff_id', name=op.f('pk_staff_profile')),
@@ -180,14 +197,6 @@ def upgrade():
     sa.PrimaryKeyConstraint('subject_id', name=op.f('pk_subject')),
     sa.UniqueConstraint('code', name=op.f('uq_subject_code'))
     )
-    op.create_table('class_section',
-    sa.Column('section_id', sa.Integer(), nullable=False),
-    sa.Column('name', sa.String(length=20), nullable=False),
-    sa.Column('class_level', sa.String(length=50), nullable=False),
-    sa.Column('class_teacher_id', sa.String(length=36), nullable=True),
-    sa.ForeignKeyConstraint(['class_teacher_id'], ['staff_profile.staff_id'], name=op.f('fk_class_section_class_teacher_id_staff_profile')),
-    sa.PrimaryKeyConstraint('section_id', name=op.f('pk_class_section'))
-    )
     op.create_table('event_master',
     sa.Column('event_id', sa.Integer(), nullable=False),
     sa.Column('event_name', sa.String(length=100), nullable=False),
@@ -199,6 +208,14 @@ def upgrade():
     sa.Column('description', sa.String(length=255), nullable=True),
     sa.ForeignKeyConstraint(['coordinator_id'], ['staff_profile.staff_id'], name=op.f('fk_event_master_coordinator_id_staff_profile')),
     sa.PrimaryKeyConstraint('event_id', name=op.f('pk_event_master'))
+    )
+    op.create_table('specialization',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('program_id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('code', sa.String(length=50), nullable=False),
+    sa.ForeignKeyConstraint(['program_id'], ['program.id'], name=op.f('fk_specialization_program_id_program')),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_specialization'))
     )
     op.create_table('teaching_plan',
     sa.Column('plan_id', sa.Integer(), nullable=False),
@@ -213,6 +230,16 @@ def upgrade():
     sa.ForeignKeyConstraint(['subject_id'], ['subject.subject_id'], name=op.f('fk_teaching_plan_subject_id_subject')),
     sa.PrimaryKeyConstraint('plan_id', name=op.f('pk_teaching_plan'))
     )
+    op.create_table('class_section',
+    sa.Column('section_id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=20), nullable=False),
+    sa.Column('class_level', sa.String(length=50), nullable=False),
+    sa.Column('spec_id', sa.Integer(), nullable=True),
+    sa.Column('class_teacher_id', sa.String(length=36), nullable=True),
+    sa.ForeignKeyConstraint(['class_teacher_id'], ['staff_profile.staff_id'], name=op.f('fk_class_section_class_teacher_id_staff_profile')),
+    sa.ForeignKeyConstraint(['spec_id'], ['specialization.id'], name=op.f('fk_class_section_spec_id_specialization')),
+    sa.PrimaryKeyConstraint('section_id', name=op.f('pk_class_section'))
+    )
     op.create_table('elective_window',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('section_id', sa.Integer(), nullable=False),
@@ -224,6 +251,23 @@ def upgrade():
     sa.Column('closed_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['section_id'], ['class_section.section_id'], name=op.f('fk_elective_window_section_id_class_section')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_elective_window'))
+    )
+    op.create_table('extra_session',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('subject_id', sa.Integer(), nullable=False),
+    sa.Column('section_id', sa.Integer(), nullable=False),
+    sa.Column('teacher_id', sa.String(length=36), nullable=False),
+    sa.Column('date', sa.Date(), nullable=False),
+    sa.Column('start_time', sa.Time(), nullable=False),
+    sa.Column('end_time', sa.Time(), nullable=False),
+    sa.Column('topic', sa.String(length=255), nullable=True),
+    sa.Column('meeting_link', sa.String(length=255), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['section_id'], ['class_section.section_id'], name=op.f('fk_extra_session_section_id_class_section')),
+    sa.ForeignKeyConstraint(['subject_id'], ['subject.subject_id'], name=op.f('fk_extra_session_subject_id_subject')),
+    sa.ForeignKeyConstraint(['teacher_id'], ['staff_profile.staff_id'], name=op.f('fk_extra_session_teacher_id_staff_profile')),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_extra_session'))
     )
     op.create_table('feedback_response',
     sa.Column('response_id', sa.Integer(), nullable=False),
@@ -268,23 +312,27 @@ def upgrade():
     sa.ForeignKeyConstraint(['teacher_id'], ['staff_profile.staff_id'], name=op.f('fk_subject_allocation_teacher_id_staff_profile')),
     sa.PrimaryKeyConstraint('allocation_id', name=op.f('pk_subject_allocation'))
     )
-    op.create_table('weekly_schedule',
-    sa.Column('schedule_id', sa.Integer(), nullable=False),
-    sa.Column('section_id', sa.Integer(), nullable=True),
-    sa.Column('subject_id', sa.Integer(), nullable=True),
-    sa.Column('teacher_id', sa.String(length=36), nullable=True),
-    sa.Column('day_of_week', sa.String(length=15), nullable=False),
-    sa.Column('start_time', sa.Time(), nullable=False),
-    sa.Column('end_time', sa.Time(), nullable=False),
-    sa.Column('session_type', sa.String(length=20), nullable=True),
-    sa.Column('target_batch', sa.String(length=20), nullable=True),
-    sa.Column('room_id', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['room_id'], ['room_master.room_id'], name=op.f('fk_weekly_schedule_room_id_room_master')),
-    sa.ForeignKeyConstraint(['section_id'], ['class_section.section_id'], name=op.f('fk_weekly_schedule_section_id_class_section')),
-    sa.ForeignKeyConstraint(['subject_id'], ['subject.subject_id'], name=op.f('fk_weekly_schedule_subject_id_subject')),
-    sa.ForeignKeyConstraint(['teacher_id'], ['staff_profile.staff_id'], name=op.f('fk_weekly_schedule_teacher_id_staff_profile')),
-    sa.PrimaryKeyConstraint('schedule_id', name=op.f('pk_weekly_schedule'))
+    op.create_table('timetable_version',
+    sa.Column('version_id', sa.Integer(), nullable=False),
+    sa.Column('section_id', sa.Integer(), nullable=False),
+    sa.Column('version_number', sa.Integer(), nullable=False),
+    sa.Column('version_label', sa.String(length=50), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('created_by_id', sa.String(length=36), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('published_at', sa.DateTime(), nullable=True),
+    sa.Column('archived_at', sa.DateTime(), nullable=True),
+    sa.Column('source_type', sa.String(length=20), nullable=True),
+    sa.Column('cloned_from_version_id', sa.Integer(), nullable=True),
+    sa.Column('notes', sa.Text(), nullable=True),
+    sa.ForeignKeyConstraint(['cloned_from_version_id'], ['timetable_version.version_id'], name=op.f('fk_timetable_version_cloned_from_version_id_timetable_version')),
+    sa.ForeignKeyConstraint(['created_by_id'], ['staff_profile.staff_id'], name=op.f('fk_timetable_version_created_by_id_staff_profile')),
+    sa.ForeignKeyConstraint(['section_id'], ['class_section.section_id'], name=op.f('fk_timetable_version_section_id_class_section')),
+    sa.PrimaryKeyConstraint('version_id', name=op.f('pk_timetable_version'))
     )
+    with op.batch_alter_table('timetable_version', schema=None) as batch_op:
+        batch_op.create_index('ix_timetable_version_section_status', ['section_id', 'status'], unique=False)
+
     op.create_table('elective_offering',
     sa.Column('offering_id', sa.Integer(), nullable=False),
     sa.Column('section_id', sa.Integer(), nullable=False),
@@ -296,23 +344,6 @@ def upgrade():
     sa.ForeignKeyConstraint(['window_id'], ['elective_window.id'], name=op.f('fk_elective_offering_window_id_elective_window')),
     sa.PrimaryKeyConstraint('offering_id', name=op.f('pk_elective_offering'))
     )
-    op.create_table('load_adjustment',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('requester_id', sa.String(length=36), nullable=False),
-    sa.Column('adjuster_id', sa.String(length=36), nullable=False),
-    sa.Column('req_date', sa.Date(), nullable=False),
-    sa.Column('req_schedule_id', sa.Integer(), nullable=False),
-    sa.Column('adj_date', sa.Date(), nullable=False),
-    sa.Column('adj_schedule_id', sa.Integer(), nullable=False),
-    sa.Column('status', sa.String(length=20), nullable=True),
-    sa.Column('reason', sa.String(length=255), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.ForeignKeyConstraint(['adj_schedule_id'], ['weekly_schedule.schedule_id'], name=op.f('fk_load_adjustment_adj_schedule_id_weekly_schedule')),
-    sa.ForeignKeyConstraint(['adjuster_id'], ['staff_profile.staff_id'], name=op.f('fk_load_adjustment_adjuster_id_staff_profile')),
-    sa.ForeignKeyConstraint(['req_schedule_id'], ['weekly_schedule.schedule_id'], name=op.f('fk_load_adjustment_req_schedule_id_weekly_schedule')),
-    sa.ForeignKeyConstraint(['requester_id'], ['staff_profile.staff_id'], name=op.f('fk_load_adjustment_requester_id_staff_profile')),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_load_adjustment'))
-    )
     op.create_table('mentor_meeting',
     sa.Column('meeting_id', sa.Integer(), nullable=False),
     sa.Column('mentor_id', sa.String(length=36), nullable=False),
@@ -320,20 +351,14 @@ def upgrade():
     sa.Column('date', sa.Date(), nullable=False),
     sa.Column('time', sa.Time(), nullable=False),
     sa.Column('agenda', sa.String(length=255), nullable=False),
+    sa.Column('venue', sa.String(length=100), nullable=True),
+    sa.Column('discussion_points', sa.Text(), nullable=True),
+    sa.Column('summary', sa.Text(), nullable=True),
+    sa.Column('completed_at', sa.DateTime(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
     sa.ForeignKeyConstraint(['batch_id'], ['mentor_batch.batch_id'], name=op.f('fk_mentor_meeting_batch_id_mentor_batch')),
     sa.ForeignKeyConstraint(['mentor_id'], ['staff_profile.staff_id'], name=op.f('fk_mentor_meeting_mentor_id_staff_profile')),
     sa.PrimaryKeyConstraint('meeting_id', name=op.f('pk_mentor_meeting'))
-    )
-    op.create_table('session_log',
-    sa.Column('session_id', sa.Integer(), nullable=False),
-    sa.Column('schedule_id', sa.Integer(), nullable=False),
-    sa.Column('session_date', sa.Date(), nullable=False),
-    sa.Column('status', sa.String(length=20), nullable=True),
-    sa.Column('actual_teacher_id', sa.String(length=36), nullable=True),
-    sa.ForeignKeyConstraint(['actual_teacher_id'], ['staff_profile.staff_id'], name=op.f('fk_session_log_actual_teacher_id_staff_profile')),
-    sa.ForeignKeyConstraint(['schedule_id'], ['weekly_schedule.schedule_id'], name=op.f('fk_session_log_schedule_id_weekly_schedule')),
-    sa.PrimaryKeyConstraint('session_id', name=op.f('pk_session_log'))
     )
     op.create_table('student_profile',
     sa.Column('student_id', sa.String(length=36), nullable=False),
@@ -351,15 +376,28 @@ def upgrade():
     sa.PrimaryKeyConstraint('student_id', name=op.f('pk_student_profile')),
     sa.UniqueConstraint('admission_number', name=op.f('uq_student_profile_admission_number'))
     )
-    op.create_table('attendance_transaction',
-    sa.Column('transaction_id', sa.Integer(), nullable=False),
-    sa.Column('session_id', sa.Integer(), nullable=False),
-    sa.Column('student_id', sa.String(length=36), nullable=False),
-    sa.Column('status', sa.String(length=20), nullable=False),
-    sa.ForeignKeyConstraint(['session_id'], ['session_log.session_id'], name=op.f('fk_attendance_transaction_session_id_session_log')),
-    sa.ForeignKeyConstraint(['student_id'], ['student_profile.student_id'], name=op.f('fk_attendance_transaction_student_id_student_profile')),
-    sa.PrimaryKeyConstraint('transaction_id', name=op.f('pk_attendance_transaction'))
+    op.create_table('weekly_schedule',
+    sa.Column('schedule_id', sa.Integer(), nullable=False),
+    sa.Column('section_id', sa.Integer(), nullable=True),
+    sa.Column('subject_id', sa.Integer(), nullable=True),
+    sa.Column('teacher_id', sa.String(length=36), nullable=True),
+    sa.Column('day_of_week', sa.String(length=15), nullable=False),
+    sa.Column('start_time', sa.Time(), nullable=False),
+    sa.Column('end_time', sa.Time(), nullable=False),
+    sa.Column('session_type', sa.String(length=20), nullable=True),
+    sa.Column('target_batch', sa.String(length=20), nullable=True),
+    sa.Column('room_id', sa.Integer(), nullable=True),
+    sa.Column('version_id', sa.Integer(), nullable=True),
+    sa.ForeignKeyConstraint(['room_id'], ['room_master.room_id'], name=op.f('fk_weekly_schedule_room_id_room_master')),
+    sa.ForeignKeyConstraint(['section_id'], ['class_section.section_id'], name=op.f('fk_weekly_schedule_section_id_class_section')),
+    sa.ForeignKeyConstraint(['subject_id'], ['subject.subject_id'], name=op.f('fk_weekly_schedule_subject_id_subject')),
+    sa.ForeignKeyConstraint(['teacher_id'], ['staff_profile.staff_id'], name=op.f('fk_weekly_schedule_teacher_id_staff_profile')),
+    sa.ForeignKeyConstraint(['version_id'], ['timetable_version.version_id'], name=op.f('fk_weekly_schedule_version_id_timetable_version')),
+    sa.PrimaryKeyConstraint('schedule_id', name=op.f('pk_weekly_schedule'))
     )
+    with op.batch_alter_table('weekly_schedule', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_weekly_schedule_version_id'), ['version_id'], unique=False)
+
     op.create_table('ca_marks',
     sa.Column('mark_id', sa.Integer(), nullable=False),
     sa.Column('student_id', sa.String(length=36), nullable=False),
@@ -419,15 +457,46 @@ def upgrade():
     sa.ForeignKeyConstraint(['student_id'], ['student_profile.student_id'], name=op.f('fk_leave_application_student_id_student_profile')),
     sa.PrimaryKeyConstraint('leave_id', name=op.f('pk_leave_application'))
     )
-    op.create_table('lesson_log',
-    sa.Column('log_id', sa.Integer(), nullable=False),
-    sa.Column('session_id', sa.Integer(), nullable=False),
-    sa.Column('plan_id', sa.Integer(), nullable=False),
-    sa.Column('completion_percentage', sa.Integer(), nullable=True),
+    op.create_table('load_adjustment',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('requester_id', sa.String(length=36), nullable=False),
+    sa.Column('adjuster_id', sa.String(length=36), nullable=False),
+    sa.Column('req_date', sa.Date(), nullable=False),
+    sa.Column('req_schedule_id', sa.Integer(), nullable=False),
+    sa.Column('adj_date', sa.Date(), nullable=False),
+    sa.Column('adj_schedule_id', sa.Integer(), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('reason', sa.String(length=255), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['adj_schedule_id'], ['weekly_schedule.schedule_id'], name=op.f('fk_load_adjustment_adj_schedule_id_weekly_schedule')),
+    sa.ForeignKeyConstraint(['adjuster_id'], ['staff_profile.staff_id'], name=op.f('fk_load_adjustment_adjuster_id_staff_profile')),
+    sa.ForeignKeyConstraint(['req_schedule_id'], ['weekly_schedule.schedule_id'], name=op.f('fk_load_adjustment_req_schedule_id_weekly_schedule')),
+    sa.ForeignKeyConstraint(['requester_id'], ['staff_profile.staff_id'], name=op.f('fk_load_adjustment_requester_id_staff_profile')),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_load_adjustment'))
+    )
+    op.create_table('meeting_attendance',
+    sa.Column('attendance_id', sa.Integer(), nullable=False),
+    sa.Column('meeting_id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.String(length=36), nullable=False),
+    sa.Column('attended', sa.Boolean(), nullable=True),
     sa.Column('remarks', sa.String(length=255), nullable=True),
-    sa.ForeignKeyConstraint(['plan_id'], ['teaching_plan.plan_id'], name=op.f('fk_lesson_log_plan_id_teaching_plan')),
-    sa.ForeignKeyConstraint(['session_id'], ['session_log.session_id'], name=op.f('fk_lesson_log_session_id_session_log')),
-    sa.PrimaryKeyConstraint('log_id', name=op.f('pk_lesson_log'))
+    sa.ForeignKeyConstraint(['meeting_id'], ['mentor_meeting.meeting_id'], name=op.f('fk_meeting_attendance_meeting_id_mentor_meeting')),
+    sa.ForeignKeyConstraint(['student_id'], ['student_profile.student_id'], name=op.f('fk_meeting_attendance_student_id_student_profile')),
+    sa.PrimaryKeyConstraint('attendance_id', name=op.f('pk_meeting_attendance'))
+    )
+    op.create_table('meeting_issue',
+    sa.Column('issue_id', sa.Integer(), nullable=False),
+    sa.Column('meeting_id', sa.Integer(), nullable=False),
+    sa.Column('raised_by_student_id', sa.String(length=36), nullable=True),
+    sa.Column('issue_description', sa.Text(), nullable=False),
+    sa.Column('category', sa.String(length=50), nullable=True),
+    sa.Column('action_taken', sa.Text(), nullable=True),
+    sa.Column('action_status', sa.String(length=20), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('resolved_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['meeting_id'], ['mentor_meeting.meeting_id'], name=op.f('fk_meeting_issue_meeting_id_mentor_meeting')),
+    sa.ForeignKeyConstraint(['raised_by_student_id'], ['student_profile.student_id'], name=op.f('fk_meeting_issue_raised_by_student_id_student_profile')),
+    sa.PrimaryKeyConstraint('issue_id', name=op.f('pk_meeting_issue'))
     )
     op.create_table('mentor_log',
     sa.Column('log_id', sa.Integer(), nullable=False),
@@ -443,6 +512,16 @@ def upgrade():
     sa.ForeignKeyConstraint(['mentor_id'], ['staff_profile.staff_id'], name=op.f('fk_mentor_log_mentor_id_staff_profile')),
     sa.ForeignKeyConstraint(['student_id'], ['student_profile.student_id'], name=op.f('fk_mentor_log_student_id_student_profile')),
     sa.PrimaryKeyConstraint('log_id', name=op.f('pk_mentor_log'))
+    )
+    op.create_table('session_log',
+    sa.Column('session_id', sa.Integer(), nullable=False),
+    sa.Column('schedule_id', sa.Integer(), nullable=False),
+    sa.Column('session_date', sa.Date(), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('actual_teacher_id', sa.String(length=36), nullable=True),
+    sa.ForeignKeyConstraint(['actual_teacher_id'], ['staff_profile.staff_id'], name=op.f('fk_session_log_actual_teacher_id_staff_profile')),
+    sa.ForeignKeyConstraint(['schedule_id'], ['weekly_schedule.schedule_id'], name=op.f('fk_session_log_schedule_id_weekly_schedule')),
+    sa.PrimaryKeyConstraint('session_id', name=op.f('pk_session_log'))
     )
     op.create_table('student_elective',
     sa.Column('map_id', sa.Integer(), nullable=False),
@@ -481,6 +560,15 @@ def upgrade():
     sa.ForeignKeyConstraint(['student_id'], ['student_profile.student_id'], name=op.f('fk_term_grant_record_student_id_student_profile')),
     sa.PrimaryKeyConstraint('record_id', name=op.f('pk_term_grant_record'))
     )
+    op.create_table('attendance_transaction',
+    sa.Column('transaction_id', sa.Integer(), nullable=False),
+    sa.Column('session_id', sa.Integer(), nullable=False),
+    sa.Column('student_id', sa.String(length=36), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.ForeignKeyConstraint(['session_id'], ['session_log.session_id'], name=op.f('fk_attendance_transaction_session_id_session_log')),
+    sa.ForeignKeyConstraint(['student_id'], ['student_profile.student_id'], name=op.f('fk_attendance_transaction_student_id_student_profile')),
+    sa.PrimaryKeyConstraint('transaction_id', name=op.f('pk_attendance_transaction'))
+    )
     op.create_table('leave_workflow_log',
     sa.Column('log_id', sa.Integer(), nullable=False),
     sa.Column('leave_id', sa.Integer(), nullable=False),
@@ -491,39 +579,61 @@ def upgrade():
     sa.ForeignKeyConstraint(['leave_id'], ['leave_application.leave_id'], name=op.f('fk_leave_workflow_log_leave_id_leave_application')),
     sa.PrimaryKeyConstraint('log_id', name=op.f('pk_leave_workflow_log'))
     )
+    op.create_table('lesson_log',
+    sa.Column('log_id', sa.Integer(), nullable=False),
+    sa.Column('session_id', sa.Integer(), nullable=False),
+    sa.Column('plan_id', sa.Integer(), nullable=False),
+    sa.Column('completion_percentage', sa.Integer(), nullable=True),
+    sa.Column('remarks', sa.String(length=255), nullable=True),
+    sa.ForeignKeyConstraint(['plan_id'], ['teaching_plan.plan_id'], name=op.f('fk_lesson_log_plan_id_teaching_plan')),
+    sa.ForeignKeyConstraint(['session_id'], ['session_log.session_id'], name=op.f('fk_lesson_log_session_id_session_log')),
+    sa.PrimaryKeyConstraint('log_id', name=op.f('pk_lesson_log'))
+    )
     # ### end Alembic commands ###
 
 
 def downgrade():
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_table('lesson_log')
     op.drop_table('leave_workflow_log')
+    op.drop_table('attendance_transaction')
     op.drop_table('term_grant_record')
     op.drop_table('student_feedback_status')
     op.drop_table('student_elective')
+    op.drop_table('session_log')
     op.drop_table('mentor_log')
-    op.drop_table('lesson_log')
+    op.drop_table('meeting_issue')
+    op.drop_table('meeting_attendance')
+    op.drop_table('load_adjustment')
     op.drop_table('leave_application')
     op.drop_table('event_participation')
     op.drop_table('detention_record')
     op.drop_table('ca_marks')
-    op.drop_table('attendance_transaction')
-    op.drop_table('student_profile')
-    op.drop_table('session_log')
-    op.drop_table('mentor_meeting')
-    op.drop_table('load_adjustment')
-    op.drop_table('elective_offering')
+    with op.batch_alter_table('weekly_schedule', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_weekly_schedule_version_id'))
+
     op.drop_table('weekly_schedule')
+    op.drop_table('student_profile')
+    op.drop_table('mentor_meeting')
+    op.drop_table('elective_offering')
+    with op.batch_alter_table('timetable_version', schema=None) as batch_op:
+        batch_op.drop_index('ix_timetable_version_section_status')
+
+    op.drop_table('timetable_version')
     op.drop_table('subject_allocation')
     op.drop_table('semester_course_structure')
     op.drop_table('mentor_batch')
     op.drop_table('feedback_response')
+    op.drop_table('extra_session')
     op.drop_table('elective_window')
-    op.drop_table('teaching_plan')
-    op.drop_table('event_master')
     op.drop_table('class_section')
+    op.drop_table('teaching_plan')
+    op.drop_table('specialization')
+    op.drop_table('event_master')
     op.drop_table('subject')
     op.drop_table('staff_profile')
     op.drop_table('room_master')
+    op.drop_table('program')
     with op.batch_alter_table('refresh_token', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_refresh_token_user_id'))
         batch_op.drop_index(batch_op.f('ix_refresh_token_token_hash'))
@@ -536,12 +646,13 @@ def downgrade():
     op.drop_table('push_device')
     op.drop_table('parent_profile')
     op.drop_table('notification')
+    op.drop_table('department')
     op.drop_table('user_master')
     op.drop_table('system_log')
     op.drop_table('system_config')
+    op.drop_table('school')
     op.drop_table('feedback_question')
     op.drop_table('feedback_cycle')
-    op.drop_table('department')
     op.drop_table('archived_schedule')
     op.drop_table('archived_allocation')
     # ### end Alembic commands ###
