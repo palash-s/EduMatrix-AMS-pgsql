@@ -23,6 +23,9 @@
         (async function() {
             try {
                 const res = await fetch('/api/me', { credentials: 'same-origin' });
+                // Only process if user is authenticated (ignore 401 errors)
+                if (res.status === 401) return; // Not logged in - stay on login page
+                
                 if (res.ok) {
                     const data = await res.json();
                     if (data.must_change_password) {
@@ -34,7 +37,7 @@
                         window.location.replace(paths[data.role]);
                     }
                 }
-            } catch (e) { /* Not logged in or network error - stay on login */ }
+            } catch (e) { /* Network error - stay on login */ }
         })();
     </script>
 </head>
@@ -42,7 +45,7 @@
 
     <!-- LEFT SIDE -->
     <div class="hidden lg:flex w-[55%] relative bg-gray-900 items-center justify-center overflow-hidden">
-        <img src="{{ url_for('static', filename='images/campus_bg.jpg') }}" class="absolute inset-0 w-full h-full object-cover opacity-40 mix-blend-overlay" onerror="this.src='https://images.unsplash.com/photo-1541339907198-e08756dedf3f?q=80&w=2070&auto=format&fit=crop'">
+        <img src="{{ url_for('static', filename='images/campus_bg.jpeg') }}" class="absolute inset-0 w-full h-full object-cover opacity-40 mix-blend-overlay" onerror="this.src='https://images.unsplash.com/photo-1541339907198-e08756dedf3f?q=80&w=2070&auto=format&fit=crop'">
         <div class="absolute inset-0 bg-gradient-to-br from-[#48166d] via-[#48166d]/90 to-[#2d0d45] mix-blend-multiply"></div>
         <div class="relative z-10 max-w-xl px-12 text-white">
             <div class="mb-8">

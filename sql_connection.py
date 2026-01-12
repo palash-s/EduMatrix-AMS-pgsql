@@ -92,6 +92,7 @@ class StaffProfile(db.Model):
     is_event_coordinator = db.Column(db.Boolean, default=False)
     is_amc_member = db.Column(db.Boolean, default=False)
     is_amc_head = db.Column(db.Boolean, default=False)
+    is_mdm_oe_coordinator = db.Column(db.Boolean, default=False)
 
 
 class Department(db.Model):
@@ -187,6 +188,11 @@ class Subject(db.Model):
     credits = db.Column(db.Integer, default=0) # Total Credits
 
     target_class = db.Column(db.String(10))
+    
+    # MDM/OE Integration - Treat MDM courses as "special subjects"
+    is_mdm_oe = db.Column(db.Boolean, default=False)  # True if this subject is from MDM/OE pool
+    mdm_pool_id = db.Column(db.Integer, db.ForeignKey('mdm_offering_pool.id'), nullable=True)  # Link back to pool
+    mdm_direction = db.Column(db.String(10), nullable=True)  # 'Inbound' or 'Outbound' (for quick filtering)
 
 class ClassSection(db.Model):
     __tablename__ = 'class_section'
@@ -196,6 +202,10 @@ class ClassSection(db.Model):
     # NEW (Hierarchy Overlay): optional link to Specialization
     spec_id = db.Column(db.Integer, db.ForeignKey('specialization.id'), nullable=True)
     class_teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    
+    # MDM/OE: Virtual sections for external students
+    is_virtual = db.Column(db.Boolean, default=False)  # True = virtual section for MDM inbound
+    mdm_pool_id = db.Column(db.Integer, db.ForeignKey('mdm_offering_pool.id'), nullable=True)  # Links to pool for virtual sections
 
 class SubjectAllocation(db.Model):
     __tablename__ = 'subject_allocation'
@@ -307,7 +317,10 @@ class EventParticipation(db.Model):
 class SessionLog(db.Model):
     __tablename__ = 'session_log'
     session_id = db.Column(db.Integer, primary_key=True)
-    schedule_id = db.Column(db.Integer, db.ForeignKey('weekly_schedule.schedule_id'), nullable=False)
+    schedule_id = db.Column(db.Integer, db.ForeignKey('weekly_schedule.schedule_id'), nullable=True)  # Made nullable for MDM/Extra
+    extra_session_id = db.Column(db.Integer, db.ForeignKey('extra_session.id'), nullable=True)  # For extra sessions
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=True)  # For MDM sessions (no schedule_id)
+    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=True)  # For MDM sessions
     session_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(20), default='Conducted')
     actual_teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
@@ -316,7 +329,8 @@ class AttendanceTransaction(db.Model):
     __tablename__ = 'attendance_transaction'
     transaction_id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.Integer, db.ForeignKey('session_log.session_id'), nullable=False)
-    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=False)
+    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=True)  # Made nullable for external students
+    external_student_id = db.Column(db.Integer, db.ForeignKey('external_student_profile.external_id'), nullable=True)  # NEW: For MDM/OE inbound students
     status = db.Column(db.String(20), nullable=False)
 
 class LeaveApplication(db.Model):
@@ -387,6 +401,68 @@ class ElectiveWindow(db.Model):
     min_batch_size = db.Column(db.Integer, default=12)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
     closed_at = db.Column(db.DateTime, nullable=True)
+    # NEW: Deadline & automation fields
+    deadline_at = db.Column(db.DateTime, nullable=True)  # Auto-close after this
+    reminder_sent_at = db.Column(db.DateTime, nullable=True)  # Track reminders
+    rollout_batch_id = db.Column(db.String(36), nullable=True)  # Group windows from same bulk operation
+
+
+class ElectiveSubjectPool(db.Model):
+    """Elective subjects available for rollout - independent of SemesterCourseStructure.
+    This allows rolling out electives BEFORE the full course structure is uploaded."""
+    __tablename__ = 'elective_subject_pool'
+    id = db.Column(db.Integer, primary_key=True)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=False)
+    target_class_level = db.Column(db.String(2), nullable=False)  # FY, SY, TY, LY
+    target_semester_no = db.Column(db.Integer, nullable=False)
+    bucket = db.Column(db.String(50), nullable=False)  # 'Elective-I', 'Open Elective', etc.
+    academic_year = db.Column(db.String(20), nullable=False)  # '2025-26'
+    
+    # Academic Load Structure (Hours per Week) - for load calculation
+    l_count = db.Column(db.Integer, default=0)  # Lecture Hours
+    t_count = db.Column(db.Integer, default=0)  # Tutorial Hours
+    p_count = db.Column(db.Integer, default=0)  # Practical/Lab Hours
+    credits = db.Column(db.Integer, default=3)  # Total Credits
+    
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    created_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+
+    # Unique constraint: same subject can't be in same bucket twice for same level/sem/year
+    __table_args__ = (
+        db.UniqueConstraint('subject_id', 'target_class_level', 'target_semester_no', 'bucket', 'academic_year',
+                            name='uq_elective_pool_subject'),
+    )
+
+
+class ElectiveAuditLog(db.Model):
+    """Audit trail for all elective-related actions - enables recovery and debugging"""
+    __tablename__ = 'elective_audit_log'
+    id = db.Column(db.Integer, primary_key=True)
+    action_type = db.Column(db.String(50), nullable=False)  # 'POOL_UPLOAD', 'ROLLOUT_START', 'STUDENT_SELECT', 'ADMIN_MOVE', 'WINDOW_CLOSE', 'ROLLOVER'
+    window_id = db.Column(db.Integer, db.ForeignKey('elective_window.id'), nullable=True)
+    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=True)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=True)
+    old_value = db.Column(db.JSON, nullable=True)  # Previous state for recovery
+    new_value = db.Column(db.JSON, nullable=True)  # New state
+    details = db.Column(db.Text, nullable=True)  # Human-readable description
+    performed_by_id = db.Column(db.String(36), db.ForeignKey('user_master.user_id'), nullable=True)
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+
+class ElectiveRolloutTemplate(db.Model):
+    """Templates for quickly creating elective windows across sections"""
+    __tablename__ = 'elective_rollout_template'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)  # e.g., "SY Sem 4 Standard"
+    dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=True)
+    class_level = db.Column(db.String(10), nullable=False)  # FY, SY, TY, LY
+    target_semester_no = db.Column(db.Integer, nullable=False)
+    buckets_config = db.Column(db.JSON, nullable=False)  # [{bucket, subject_ids}]
+    min_batch_size = db.Column(db.Integer, default=12)
+    default_duration_days = db.Column(db.Integer, default=7)  # Default window duration
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    created_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
 
 
 
@@ -520,9 +596,11 @@ class PushDevice(db.Model):
 class CAMarks(db.Model):
     __tablename__ = 'ca_marks'
     mark_id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=False)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=False)
-    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=False)
+    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=True)  # Made nullable for external students
+    external_student_id = db.Column(db.Integer, db.ForeignKey('external_student_profile.external_id'), nullable=True)  # NEW: For MDM/OE inbound students
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=True)  # Nullable for cross-school offerings
+    cross_school_offering_id = db.Column(db.Integer, db.ForeignKey('cross_school_offering.offering_id'), nullable=True)  # NEW: For MDM/OE courses
+    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=True)  # Nullable for external students
     
     # Raw Marks
     ta1 = db.Column(db.Float, default=0)
@@ -712,5 +790,259 @@ class ExtraSession(db.Model):
     # Status: Scheduled, Completed, Cancelled
     status = db.Column(db.String(20), default='Scheduled')
 
+
+# ==========================================
+# 16. CROSS-SCHOOL COURSES (MDM/OE)
+# ==========================================
+class CrossSchoolOffering(db.Model):
+    """MDM (Multidisciplinary Minor) and OE (Open Elective) course catalog.
+    
+    Supports both:
+    - Inbound: External students come to us (we host the course)
+    - Outbound: Our students go to other schools (they host the course)
+    """
+    __tablename__ = 'cross_school_offering'
+    offering_id = db.Column(db.Integer, primary_key=True)
+    
+    # Course Details
+    name = db.Column(db.String(100), nullable=False)
+    code = db.Column(db.String(20), nullable=True)
+    type = db.Column(db.String(20), nullable=False)  # 'MDM' or 'OE'
+    direction = db.Column(db.String(20), nullable=False)  # 'Inbound' or 'Outbound'
+    credits = db.Column(db.Integer, default=0)
+    
+    # Host Information
+    host_school_id = db.Column(db.Integer, nullable=True)
+    host_school_name = db.Column(db.String(100), nullable=True)  # For Outbound display
+    
+    # Inbound-specific (when we host)
+    assigned_faculty_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    capacity = db.Column(db.Integer, nullable=True)
+    
+    # Timeline
+    start_date = db.Column(db.Date, nullable=True)
+    end_date = db.Column(db.Date, nullable=True)
+    schedule_pattern = db.Column(db.String(255), nullable=True)  # "Mon-Fri, 4 PM - 6 PM"
+    
+    # Status: Draft, Open, Closed, Archived
+    status = db.Column(db.String(20), default='Draft')
+    
+    # Description
+    description = db.Column(db.Text, nullable=True)
+    
+    # Metadata
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    
+    # Exclude from regular faculty load calculation
+    exclude_from_load = db.Column(db.Boolean, default=True)
+
+
+class ExternalStudentProfile(db.Model):
+    """Lightweight profile for guest students attending our Inbound MDM/OE courses.
+    
+    These students belong to other schools and are NOT in our main StudentProfile table.
+    No login credentials - used only for attendance and marks tracking.
+    """
+    __tablename__ = 'external_student_profile'
+    external_id = db.Column(db.Integer, primary_key=True)
+    
+    # Basic Info
+    full_name = db.Column(db.String(100), nullable=False)
+    roll_number = db.Column(db.String(50), nullable=False)
+    email = db.Column(db.String(100), nullable=True)
+    
+    # Home School
+    home_school_id = db.Column(db.Integer, db.ForeignKey('school.id'), nullable=True)
+    home_school_name = db.Column(db.String(100), nullable=False)
+    department_name = db.Column(db.String(100), nullable=True)
+    
+    # Enrollment
+    enrolled_offering_id = db.Column(db.Integer, db.ForeignKey('cross_school_offering.offering_id'), nullable=False)
+    
+    # Status: Active, Completed, Dropped
+    status = db.Column(db.String(20), default='Active')
+    
+    # Metadata
+    enrolled_on = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+
+class CrossSchoolEnrollment(db.Model):
+    """Tracks our students enrolled in Outbound MDM/OE courses (hosted by other schools)."""
+    __tablename__ = 'cross_school_enrollment'
+    enrollment_id = db.Column(db.Integer, primary_key=True)
+    
+    # Our Student
+    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=False)
+    
+    # Outbound Course
+    offering_id = db.Column(db.Integer, db.ForeignKey('cross_school_offering.offering_id'), nullable=False)
+    
+    # Status: Pending, Confirmed, Completed, Dropped
+    status = db.Column(db.String(20), default='Pending')
+    
+    # Marks from external school (imported via CSV)
+    external_marks = db.Column(db.Float, nullable=True)
+    external_grade = db.Column(db.String(5), nullable=True)
+    
+    # Metadata
+    enrolled_on = db.Column(db.DateTime, default=db.func.current_timestamp())
+    completed_on = db.Column(db.DateTime, nullable=True)
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+
+# ==========================================
+# 17. MDM/OE REVAMPED - Pool & Selection System
+# ==========================================
+
+class MDMOfferingPool(db.Model):
+    """Pool of MDM/OE courses available for rollout - handles BOTH Inbound and Outbound.
+    
+    Inbound (we host): Our faculty teaches external students
+    Outbound (they host): Partner school teaches our students
+    """
+    __tablename__ = 'mdm_offering_pool'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Core identity
+    code = db.Column(db.String(30), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    type = db.Column(db.String(10), nullable=False)       # 'MDM' or 'OE'
+    direction = db.Column(db.String(10), nullable=False)  # 'Inbound' or 'Outbound'
+    
+    # Academic Load Structure (Hours per Week) - for load calculation
+    l_count = db.Column(db.Integer, default=0)   # Lecture Hours
+    t_count = db.Column(db.Integer, default=0)   # Tutorial Hours
+    p_count = db.Column(db.Integer, default=0)   # Practical/Lab Hours
+    credits = db.Column(db.Integer, default=3)   # Total Credits
+    
+    # Inbound-specific (we host)
+    assigned_faculty_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    
+    # Outbound-specific (partner hosts)
+    host_school_name = db.Column(db.String(200), nullable=True)
+    host_contact_email = db.Column(db.String(100), nullable=True)
+    
+    # Common fields
+    capacity = db.Column(db.Integer, nullable=True)  # NULL = unlimited
+    schedule_pattern = db.Column(db.String(100), nullable=True)
+    start_date = db.Column(db.Date, nullable=True)
+    end_date = db.Column(db.Date, nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    
+    # Scoping
+    academic_year = db.Column(db.String(20), nullable=False)  # '2025-26'
+    target_class_levels = db.Column(db.String(50), nullable=True)  # 'SY,TY' or NULL for all
+    dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=True)  # Department scope
+
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    created_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    
+    # Unique constraint
+    __table_args__ = (
+        db.UniqueConstraint('code', 'academic_year', name='uq_mdm_pool_code_year'),
+    )
+
+
+class MDMOutboundWindow(db.Model):
+    """Selection window for OUR students to choose Outbound MDM/OE courses.
+    
+    Similar to ElectiveWindow but specifically for outbound cross-school courses.
+    Inbound courses don't need windows - external students are assigned via CSV upload.
+    """
+    __tablename__ = 'mdm_outbound_window'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Target audience (our students)
+    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=True)
+    class_level = db.Column(db.String(10), nullable=True)  # FY, SY, TY, LY - if NULL, uses section
+    dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=True)
+    
+    course_type = db.Column(db.String(10), nullable=False)  # 'MDM', 'OE', or 'BOTH'
+    academic_year = db.Column(db.String(20), nullable=False)
+    
+    # Window lifecycle
+    status = db.Column(db.String(20), default='Open')  # Open, Extension, Closed
+    min_batch_size = db.Column(db.Integer, default=15)
+    
+    # Timeline
+    deadline_at = db.Column(db.DateTime, nullable=True)
+    extension_deadline_at = db.Column(db.DateTime, nullable=True)
+    reminder_sent_at = db.Column(db.DateTime, nullable=True)
+    
+    # Metadata
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    closed_at = db.Column(db.DateTime, nullable=True)
+    rollout_batch_id = db.Column(db.String(36), nullable=True)  # Group windows from same operation
+    created_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+
+
+class MDMWindowOffering(db.Model):
+    """Links pool courses to outbound selection windows.
+    
+    Defines which courses from the pool are available in a specific window.
+    """
+    __tablename__ = 'mdm_window_offering'
+    id = db.Column(db.Integer, primary_key=True)
+    window_id = db.Column(db.Integer, db.ForeignKey('mdm_outbound_window.id'), nullable=False)
+    pool_id = db.Column(db.Integer, db.ForeignKey('mdm_offering_pool.id'), nullable=False)
+    
+    # Override capacity for this specific window (NULL = use pool capacity)
+    window_capacity = db.Column(db.Integer, nullable=True)
+    
+    # Status after window closes: Pending, Confirmed, Cancelled (if < min_batch)
+    final_status = db.Column(db.String(20), default='Pending')
+    
+    __table_args__ = (
+        db.UniqueConstraint('window_id', 'pool_id', name='uq_mdm_window_offering'),
+    )
+
+
+class MDMOutboundSelection(db.Model):
+    """Our student's selection for an Outbound MDM/OE course.
+    
+    Similar to StudentElective but for cross-school outbound courses.
+    """
+    __tablename__ = 'mdm_outbound_selection'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=False)
+    window_id = db.Column(db.Integer, db.ForeignKey('mdm_outbound_window.id'), nullable=False)
+    pool_id = db.Column(db.Integer, db.ForeignKey('mdm_offering_pool.id'), nullable=False)
+    
+    # Status: Selected, Confirmed, Dropped, Reassigned
+    status = db.Column(db.String(20), default='Selected')
+    selected_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    confirmed_at = db.Column(db.DateTime, nullable=True)
+    
+    # Marks imported from partner school (after course completion)
+    external_marks = db.Column(db.Float, nullable=True)
+    external_grade = db.Column(db.String(5), nullable=True)
+    marks_imported_at = db.Column(db.DateTime, nullable=True)
+    
+    __table_args__ = (
+        db.UniqueConstraint('student_id', 'window_id', 'pool_id', name='uq_mdm_student_selection'),
+    )
+
+
+class MDMAuditLog(db.Model):
+    """Audit trail for all MDM/OE actions - enables recovery and debugging."""
+    __tablename__ = 'mdm_audit_log'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    action_type = db.Column(db.String(50), nullable=False)  
+    # Actions: POOL_UPLOAD, POOL_DELETE, WINDOW_OPEN, WINDOW_CLOSE, STUDENT_SELECT, 
+    #          STUDENT_DROP, COURSE_CANCEL, MARKS_IMPORT, EXTERNAL_UPLOAD, MARKS_EXPORT
+    
+    window_id = db.Column(db.Integer, db.ForeignKey('mdm_outbound_window.id'), nullable=True)
+    student_id = db.Column(db.String(36), db.ForeignKey('student_profile.student_id'), nullable=True)
+    pool_id = db.Column(db.Integer, db.ForeignKey('mdm_offering_pool.id'), nullable=True)
+    
+    old_value = db.Column(db.JSON, nullable=True)  # Previous state
+    new_value = db.Column(db.JSON, nullable=True)  # New state
+    details = db.Column(db.Text, nullable=True)    # Human-readable description
+    
+    performed_by_id = db.Column(db.String(36), db.ForeignKey('user_master.user_id'), nullable=True)
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())

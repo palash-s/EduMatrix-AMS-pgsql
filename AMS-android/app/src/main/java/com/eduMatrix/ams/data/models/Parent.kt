@@ -18,7 +18,8 @@ data class ParentDashboardData(
     val leaves: List<ParentLeaveInfo>,
     val logs: List<ParentCounselingLog>,
     val results: List<ParentCAResult>,
-    val termGrant: ParentTermGrantInfo?
+    val termGrant: ParentTermGrantInfo?,
+    val mdmOeCourses: List<MDMEnrolledCourse> = emptyList()  // Cross-school courses
 )
 
 /**

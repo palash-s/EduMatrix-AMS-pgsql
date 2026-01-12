@@ -62,3 +62,6 @@ Thumbs.db
 .claude/
 nul
 AMS-android/app/src/main/res/nul
+\n# Ignore documentation drafts and analysis files
+ANDROID_FEATURE_GAP_ANALYSIS.md
+MDM_OE_NEXT_STEPS.md

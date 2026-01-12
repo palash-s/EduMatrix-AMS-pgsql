@@ -1,0 +1,1531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MDM/OE Coordinator - EduMatrix AMS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'mit-purple': '#48166d',
+                        'mit-purple-light': '#5c1d8a',
+                        'mit-purple-dark': '#3a1258',
+                        'mit-gold': '#bf9d55',
+                        'mit-gold-light': '#d4b46a',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .serif { font-family: 'Merriweather', serif; }
+
+        /* Scrollbar */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+
+        /* Progress bar animation */
+        .progress-bar { transition: width 0.5s ease-out; }
+
+        /* Dropdown menu */
+        .dropdown-menu {
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px);
+            transition: all 0.2s ease;
+        }
+        .dropdown:hover .dropdown-menu,
+        .dropdown-menu.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        /* Status pipeline */
+        .status-step { position: relative; }
+        .status-step::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            right: -20px;
+            width: 16px;
+            height: 2px;
+            background: #e5e7eb;
+        }
+        .status-step:last-child::after { display: none; }
+        .status-step.active::after { background: #48166d; }
+
+        /* Card hover effect */
+        .card-hover { transition: all 0.2s ease; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(72, 22, 109, 0.1); }
+
+        /* Toast animations */
+        @keyframes toast-slide-in {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes toast-slide-out {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+        .toast-enter { animation: toast-slide-in 0.3s ease-out forwards; }
+        .toast-exit { animation: toast-slide-out 0.3s ease-in forwards; }
+
+        /* Modal animations */
+        @keyframes modal-fade-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes modal-scale-in {
+            from { transform: scale(0.95); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .modal-backdrop { animation: modal-fade-in 0.2s ease-out forwards; }
+        .modal-content { animation: modal-scale-in 0.2s ease-out forwards; }
+
+        /* Progress ring for loading */
+        .progress-ring { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen">
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed top-5 right-5 z-[100] flex flex-col gap-3 pointer-events-none max-w-sm w-full"></div>
+
+    <!-- Custom Confirmation Modal -->
+    <div id="confirm-modal" class="fixed inset-0 z-[200] hidden">
+        <div class="fixed inset-0 bg-black/50 modal-backdrop backdrop-blur-sm" onclick="closeConfirmModal(false)"></div>
+        <div class="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full pointer-events-auto modal-content">
+                <div class="p-6">
+                    <div class="flex items-start gap-4">
+                        <div id="confirm-icon-container" class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <i id="confirm-icon" class="w-6 h-6"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3 id="confirm-title" class="text-lg font-bold text-gray-900 mb-1">Confirm Action</h3>
+                            <p id="confirm-message" class="text-sm text-gray-600 leading-relaxed"></p>
+                            <ul id="confirm-details" class="hidden mt-3 text-sm text-gray-500 space-y-1"></ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-3 px-6 pb-6">
+                    <button id="confirm-cancel-btn" onclick="closeConfirmModal(false)" class="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors">
+                        Cancel
+                    </button>
+                    <button id="confirm-action-btn" onclick="closeConfirmModal(true)" class="flex-1 px-4 py-2.5 rounded-xl font-medium transition-colors">
+                        Confirm
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Prompt Modal -->
+    <div id="prompt-modal" class="fixed inset-0 z-[200] hidden">
+        <div class="fixed inset-0 bg-black/50 modal-backdrop backdrop-blur-sm" onclick="closePromptModal(null)"></div>
+        <div class="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full pointer-events-auto modal-content">
+                <div class="p-6">
+                    <div class="flex items-start gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-mit-purple/10 flex items-center justify-center flex-shrink-0">
+                            <i data-lucide="edit-3" class="w-6 h-6 text-mit-purple"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3 id="prompt-title" class="text-lg font-bold text-gray-900 mb-1">Enter Value</h3>
+                            <p id="prompt-message" class="text-sm text-gray-600 mb-4"></p>
+                            <input type="text" id="prompt-input" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none text-gray-900">
+                            <p id="prompt-hint" class="text-xs text-gray-500 mt-2 hidden"></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-3 px-6 pb-6">
+                    <button onclick="closePromptModal(null)" class="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors">
+                        Cancel
+                    </button>
+                    <button onclick="submitPromptModal()" class="flex-1 px-4 py-2.5 bg-mit-purple hover:bg-mit-purple-light text-white rounded-xl font-medium transition-colors">
+                        Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <button onclick="history.back()" class="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors">
+                    <i data-lucide="arrow-left" class="w-5 h-5"></i>
+                </button>
+                <div class="h-8 w-px bg-gray-200"></div>
+                <img src="{{ url_for('static', filename='images/mit_logo.png') }}" alt="EduMatrix AMS" class="h-9 w-auto" onerror="this.style.display='none'">
+                <div>
+                    <h1 class="font-bold text-lg text-gray-900">MDM / OE Coordinator</h1>
+                    <p class="text-xs text-gray-500">Cross-School Course Management</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="loadCurrentTab()" class="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Refresh">
+                    <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                </button>
+                <a href="/admin/dashboard" class="px-4 py-2 text-sm text-mit-purple hover:bg-purple-50 rounded-lg transition-colors flex items-center gap-2">
+                    <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+                    Dashboard
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 space-y-6">
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100 card-hover">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">Inbound Courses</p>
+                        <h3 class="text-3xl font-bold text-mit-purple mt-1" id="stat-inbound">0</h3>
+                        <p class="text-xs text-gray-400 mt-1">We host for partners</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
+                        <i data-lucide="download" class="w-6 h-6 text-blue-600"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100 card-hover">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">Outbound Courses</p>
+                        <h3 class="text-3xl font-bold text-mit-purple mt-1" id="stat-outbound">0</h3>
+                        <p class="text-xs text-gray-400 mt-1">Partners host for us</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center">
+                        <i data-lucide="upload" class="w-6 h-6 text-green-600"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100 card-hover">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">External Students</p>
+                        <h3 class="text-3xl font-bold text-mit-purple mt-1" id="stat-external">0</h3>
+                        <p class="text-xs text-gray-400 mt-1">Enrolled in our courses</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
+                        <i data-lucide="users" class="w-6 h-6 text-mit-purple"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100 card-hover">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">Active Windows</p>
+                        <h3 class="text-3xl font-bold text-mit-purple mt-1" id="stat-windows">0</h3>
+                        <p class="text-xs text-gray-400 mt-1">Selection in progress</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center">
+                        <i data-lucide="calendar-check" class="w-6 h-6 text-amber-600"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Card -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <!-- Tabs -->
+            <div class="border-b border-gray-200 bg-gray-50/50">
+                <nav class="flex p-2 gap-1" role="tablist">
+                    <button onclick="switchTab('pool')" id="tab-pool" class="tab-btn px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 bg-mit-purple text-white shadow-sm">
+                        <i data-lucide="database" class="w-4 h-4"></i>
+                        Course Pool
+                        <span id="badge-pool" class="hidden px-2 py-0.5 rounded-full text-xs bg-white/20"></span>
+                    </button>
+                    <button onclick="switchTab('inbound')" id="tab-inbound" class="tab-btn px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 text-gray-600 hover:bg-gray-100">
+                        <i data-lucide="inbox" class="w-4 h-4"></i>
+                        Inbound Mgmt
+                        <span id="badge-inbound" class="hidden px-2 py-0.5 rounded-full text-xs bg-purple-100 text-mit-purple"></span>
+                    </button>
+                    <button onclick="switchTab('outbound')" id="tab-outbound" class="tab-btn px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 text-gray-600 hover:bg-gray-100">
+                        <i data-lucide="send" class="w-4 h-4"></i>
+                        Outbound Rollout
+                        <span id="badge-outbound" class="hidden px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700"></span>
+                    </button>
+                    <button onclick="switchTab('reports')" id="tab-reports" class="tab-btn px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 text-gray-600 hover:bg-gray-100">
+                        <i data-lucide="file-text" class="w-4 h-4"></i>
+                        Reports
+                    </button>
+                </nav>
+            </div>
+
+            <!-- TAB: Course Pool -->
+            <div id="content-pool" class="p-6">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900">Course Pool</h2>
+                        <p class="text-sm text-gray-500 mt-1">Master list of all MDM/OE courses available for selection</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <a href="/api/admin/mdm_rollout/pool/template" download class="px-4 py-2 bg-gray-100 text-gray-700 border border-gray-200 rounded-lg text-sm hover:bg-gray-200 flex items-center gap-2 transition-colors">
+                            <i data-lucide="download" class="w-4 h-4"></i> Template
+                        </a>
+                        <button onclick="showUploadPoolModal()" class="px-4 py-2 bg-mit-purple text-white rounded-lg hover:bg-mit-purple-light flex items-center gap-2 transition-colors shadow-sm">
+                            <i data-lucide="upload" class="w-4 h-4"></i> Upload Courses
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="flex flex-wrap gap-3 mb-6 p-4 bg-gray-50 rounded-lg">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="filter" class="w-4 h-4 text-gray-400"></i>
+                        <span class="text-sm text-gray-500">Filter:</span>
+                    </div>
+                    <select id="pool-filter-direction" onchange="loadPool()" class="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                        <option value="">All Directions</option>
+                        <option value="Inbound">Inbound</option>
+                        <option value="Outbound">Outbound</option>
+                    </select>
+                    <select id="pool-filter-type" onchange="loadPool()" class="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                        <option value="">All Types</option>
+                        <option value="MDM">MDM</option>
+                        <option value="OE">OE</option>
+                    </select>
+                </div>
+
+                <div id="pool-list" class="space-y-4"></div>
+            </div>
+
+            <!-- TAB: Inbound Management -->
+            <div id="content-inbound" class="p-6 hidden">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900">Inbound Courses</h2>
+                        <p class="text-sm text-gray-500 mt-1">Courses we host for students from partner schools</p>
+                    </div>
+                </div>
+                <div id="inbound-list" class="space-y-4"></div>
+            </div>
+
+            <!-- TAB: Outbound Rollout -->
+            <div id="content-outbound" class="p-6 hidden">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900">Outbound Selection Windows</h2>
+                        <p class="text-sm text-gray-500 mt-1">Allow our students to select courses at partner schools</p>
+                    </div>
+                    <button onclick="showOutboundWizard()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 transition-colors shadow-sm">
+                        <i data-lucide="plus" class="w-4 h-4"></i> Start Selection Window
+                    </button>
+                </div>
+
+                <!-- Status Legend -->
+                <div class="flex flex-wrap gap-6 mb-6 p-4 bg-gradient-to-r from-purple-50 to-amber-50 rounded-lg border border-purple-100">
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                        <span class="text-gray-600">Open - Accepting selections</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+                        <span class="text-gray-600">Extension - Extended period</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="w-3 h-3 rounded-full bg-orange-500"></span>
+                        <span class="text-gray-600">Closed - Awaiting conclusion</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm">
+                        <span class="w-3 h-3 rounded-full bg-blue-500"></span>
+                        <span class="text-gray-600">Concluded - Finalized</span>
+                    </div>
+                </div>
+
+                <div id="outbound-windows-list" class="space-y-4"></div>
+            </div>
+
+            <!-- TAB: Reports -->
+            <div id="content-reports" class="p-6 hidden">
+                <div class="mb-6">
+                    <h2 class="text-xl font-bold text-gray-900">MDM/OE Reports</h2>
+                    <p class="text-sm text-gray-500 mt-1">Export data for analysis and partner communication</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Inbound Reports -->
+                    <div class="border border-gray-200 rounded-xl p-6 bg-gradient-to-br from-blue-50/50 to-white">
+                        <h3 class="font-bold text-lg mb-2 flex items-center gap-2 text-gray-900">
+                            <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                                <i data-lucide="download" class="w-5 h-5 text-blue-600"></i>
+                            </div>
+                            Inbound Course Reports
+                        </h3>
+                        <p class="text-sm text-gray-600 mb-4">Export attendance and marks for external students in our courses</p>
+                        <div id="report-inbound-list" class="space-y-2 max-h-64 overflow-y-auto custom-scroll">
+                            <p class="text-gray-400 text-sm">Loading...</p>
+                        </div>
+                    </div>
+                    <!-- Outbound Reports -->
+                    <div class="border border-gray-200 rounded-xl p-6 bg-gradient-to-br from-green-50/50 to-white">
+                        <h3 class="font-bold text-lg mb-2 flex items-center gap-2 text-gray-900">
+                            <div class="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                                <i data-lucide="upload" class="w-5 h-5 text-green-600"></i>
+                            </div>
+                            Outbound Selection Report
+                        </h3>
+                        <p class="text-sm text-gray-600 mb-4">Export our students' selections and partner school marks</p>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Course Type</label>
+                                <select id="report-outbound-type" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                                    <option value="">All Types</option>
+                                    <option value="MDM">MDM Only</option>
+                                    <option value="OE">OE Only</option>
+                                </select>
+                            </div>
+                            <button onclick="downloadOutboundReport()" class="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-2 transition-colors font-medium">
+                                <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
+                                Download Outbound Report (CSV)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ============== MODALS ============== -->
+
+    <!-- Assign Faculty Modal -->
+    <div id="assign-faculty-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                    <i data-lucide="user-plus" class="w-5 h-5 text-mit-purple"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-gray-900">Assign Faculty</h3>
+                    <p class="text-sm text-gray-500" id="assign-faculty-course-info">-</p>
+                </div>
+            </div>
+            <form id="assign-faculty-form" class="space-y-4">
+                <input type="hidden" id="assign-faculty-pool-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Select Faculty</label>
+                    <select id="assign-faculty-select" class="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none" required>
+                        <option value="">Loading faculty...</option>
+                    </select>
+                </div>
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+                    <strong class="block mb-1">What happens when you assign:</strong>
+                    <ul class="list-disc list-inside space-y-0.5 text-blue-700">
+                        <li>Subject record created for this course</li>
+                        <li>Virtual section created for external students</li>
+                        <li>Course appears in faculty's dashboard</li>
+                    </ul>
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="submit" class="flex-1 px-4 py-2.5 bg-mit-purple text-white rounded-lg hover:bg-mit-purple-light transition-colors font-medium">Assign Faculty</button>
+                    <button type="button" onclick="closeAssignFacultyModal()" class="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Upload Pool Modal -->
+    <div id="upload-pool-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                    <i data-lucide="upload-cloud" class="w-5 h-5 text-mit-purple"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-gray-900">Upload Courses</h3>
+                    <p class="text-sm text-gray-500">Add courses to the pool</p>
+                </div>
+            </div>
+            <form id="upload-pool-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">CSV File</label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-mit-purple transition-colors cursor-pointer" onclick="document.getElementById('pool-file').click()">
+                        <i data-lucide="file-plus" class="w-8 h-8 text-gray-400 mx-auto mb-2"></i>
+                        <p class="text-sm text-gray-600">Click to select or drag & drop</p>
+                        <p class="text-xs text-gray-400 mt-1" id="pool-file-name">code, name, type, direction, L, T, P, credits...</p>
+                    </div>
+                    <input type="file" id="pool-file" accept=".csv" class="hidden" required onchange="document.getElementById('pool-file-name').textContent = this.files[0]?.name || 'No file selected'">
+                </div>
+                <div class="flex gap-3">
+                    <button type="submit" class="flex-1 px-4 py-2.5 bg-mit-purple text-white rounded-lg hover:bg-mit-purple-light transition-colors font-medium">Upload</button>
+                    <button type="button" onclick="closeUploadPoolModal()" class="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Upload Students Modal -->
+    <div id="upload-students-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                    <i data-lucide="users-plus" class="w-5 h-5 text-blue-600"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-gray-900">Upload External Students</h3>
+                    <p class="text-sm text-gray-500" id="upload-course-info">-</p>
+                </div>
+            </div>
+            <form id="upload-students-form" class="space-y-4">
+                <input type="hidden" id="upload-pool-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">CSV File</label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors cursor-pointer" onclick="document.getElementById('students-file').click()">
+                        <i data-lucide="file-plus" class="w-8 h-8 text-gray-400 mx-auto mb-2"></i>
+                        <p class="text-sm text-gray-600">Click to select or drag & drop</p>
+                        <p class="text-xs text-gray-400 mt-1" id="students-file-name">full_name, roll_number, email, home_school_name, department_name</p>
+                    </div>
+                    <input type="file" id="students-file" accept=".csv" class="hidden" required onchange="document.getElementById('students-file-name').textContent = this.files[0]?.name || 'No file selected'">
+                </div>
+                <div class="flex gap-3">
+                    <button type="submit" class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">Upload Students</button>
+                    <button type="button" onclick="closeUploadStudentsModal()" class="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Window Settings Modal -->
+    <div id="window-settings-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <i data-lucide="settings" class="w-5 h-5 text-gray-600"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-gray-900">Window Settings</h3>
+                    <p class="text-sm text-gray-500">Configure selection parameters</p>
+                </div>
+            </div>
+            <form id="window-settings-form" onsubmit="saveWindowSettings(event)" class="space-y-4">
+                <input type="hidden" id="settings-window-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Minimum Batch Size</label>
+                    <input type="number" id="settings-min-batch" min="1" max="100" class="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none" required>
+                    <p class="text-xs text-gray-500 mt-1">Min students for a course to run (can be 1 for small schools)</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Deadline (Optional)</label>
+                    <input type="datetime-local" id="settings-deadline" class="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                    <p class="text-xs text-gray-500 mt-1">Leave empty for no deadline</p>
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="submit" class="flex-1 px-4 py-2.5 bg-mit-purple text-white rounded-lg hover:bg-mit-purple-light transition-colors font-medium">Save Changes</button>
+                    <button type="button" onclick="closeSettingsModal()" class="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Outbound Wizard Modal -->
+    <div id="outbound-wizard-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 overflow-y-auto backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-6 max-w-2xl w-full mx-4 my-8 relative shadow-2xl">
+            <div class="flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                    <i data-lucide="rocket" class="w-5 h-5 text-green-600"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-gray-900">Start Selection Window</h3>
+                    <p class="text-sm text-gray-500">Configure a new outbound selection rollout</p>
+                </div>
+            </div>
+
+            <!-- Progress Steps -->
+            <div class="flex items-center justify-center gap-2 mb-8">
+                <div id="wizard-step-indicator-1" class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-full bg-mit-purple text-white flex items-center justify-center text-sm font-bold">1</div>
+                    <span class="text-sm font-medium text-mit-purple hidden sm:inline">Sections</span>
+                </div>
+                <div class="w-8 h-px bg-gray-300"></div>
+                <div id="wizard-step-indicator-2" class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center text-sm font-bold">2</div>
+                    <span class="text-sm font-medium text-gray-400 hidden sm:inline">Courses</span>
+                </div>
+                <div class="w-8 h-px bg-gray-300"></div>
+                <div id="wizard-step-indicator-3" class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center text-sm font-bold">3</div>
+                    <span class="text-sm font-medium text-gray-400 hidden sm:inline">Settings</span>
+                </div>
+            </div>
+
+            <div id="wizard-step-1">
+                <h4 class="font-semibold text-gray-900 mb-3">Select Target Sections</h4>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Class Level</label>
+                    <select id="wizard-class-level" onchange="loadWizardSections()" class="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                        <option value="">Select Level</option>
+                        <option value="FY">First Year (FY)</option>
+                        <option value="SY">Second Year (SY)</option>
+                        <option value="TY">Third Year (TY)</option>
+                        <option value="LY">Last Year (LY)</option>
+                    </select>
+                </div>
+                <div id="wizard-sections" class="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-4 bg-gray-50 custom-scroll"></div>
+                <div class="flex justify-end mt-6">
+                    <button onclick="wizardNext(2)" class="px-6 py-2.5 bg-mit-purple text-white rounded-lg hover:bg-mit-purple-light transition-colors font-medium flex items-center gap-2">
+                        Next <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="wizard-step-2" class="hidden">
+                <h4 class="font-semibold text-gray-900 mb-3">Select Outbound Courses</h4>
+                <div class="mb-4">
+                    <select id="wizard-course-type" onchange="loadWizardCourses()" class="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                        <option value="BOTH">Both MDM & OE</option>
+                        <option value="MDM">MDM Only</option>
+                        <option value="OE">OE Only</option>
+                    </select>
+                </div>
+                <div id="wizard-courses" class="space-y-2 max-h-56 overflow-y-auto border border-gray-200 rounded-lg p-4 bg-gray-50 custom-scroll"></div>
+                <div class="flex justify-between mt-6">
+                    <button onclick="wizardNext(1)" class="px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium flex items-center gap-2">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i> Back
+                    </button>
+                    <button onclick="wizardNext(3)" class="px-6 py-2.5 bg-mit-purple text-white rounded-lg hover:bg-mit-purple-light transition-colors font-medium flex items-center gap-2">
+                        Next <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="wizard-step-3" class="hidden">
+                <h4 class="font-semibold text-gray-900 mb-3">Configure Parameters</h4>
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Deadline Date</label>
+                        <input type="date" id="wizard-deadline-date" class="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Deadline Time</label>
+                        <input type="time" id="wizard-deadline-time" value="17:00" class="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                    </div>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Minimum Batch Size</label>
+                    <input type="number" id="wizard-min-batch" value="3" min="1" max="100" class="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-mit-purple/20 focus:border-mit-purple outline-none">
+                    <p class="text-xs text-gray-500 mt-1">Minimum students required for a course to run (can be as low as 1)</p>
+                </div>
+                <div class="flex justify-between">
+                    <button onclick="wizardNext(2)" class="px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium flex items-center gap-2">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i> Back
+                    </button>
+                    <button onclick="submitOutboundWizard()" class="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2">
+                        <i data-lucide="rocket" class="w-4 h-4"></i> Start Rollout
+                    </button>
+                </div>
+            </div>
+
+            <button onclick="closeOutboundWizard()" class="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // ============================================
+        // ENHANCED TOAST NOTIFICATION SYSTEM
+        // ============================================
+        function showToast(msg, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+
+            const configs = {
+                success: {
+                    bg: 'bg-green-50',
+                    border: 'border-green-200',
+                    text: 'text-green-800',
+                    iconBg: 'bg-green-100',
+                    iconColor: 'text-green-600',
+                    icon: 'check-circle'
+                },
+                error: {
+                    bg: 'bg-red-50',
+                    border: 'border-red-200',
+                    text: 'text-red-800',
+                    iconBg: 'bg-red-100',
+                    iconColor: 'text-red-600',
+                    icon: 'x-circle'
+                },
+                warning: {
+                    bg: 'bg-amber-50',
+                    border: 'border-amber-200',
+                    text: 'text-amber-800',
+                    iconBg: 'bg-amber-100',
+                    iconColor: 'text-amber-600',
+                    icon: 'alert-triangle'
+                },
+                info: {
+                    bg: 'bg-blue-50',
+                    border: 'border-blue-200',
+                    text: 'text-blue-800',
+                    iconBg: 'bg-blue-100',
+                    iconColor: 'text-blue-600',
+                    icon: 'info'
+                }
+            };
+
+            const config = configs[type] || configs.success;
+
+            toast.className = `${config.bg} ${config.border} ${config.text} border px-4 py-3 rounded-xl shadow-lg pointer-events-auto flex items-center gap-3 toast-enter`;
+            toast.innerHTML = `
+                <div class="w-8 h-8 ${config.iconBg} rounded-lg flex items-center justify-center flex-shrink-0">
+                    <i data-lucide="${config.icon}" class="w-4 h-4 ${config.iconColor}"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium leading-tight">${msg}</p>
+                </div>
+                <button onclick="this.closest('div').classList.add('toast-exit'); setTimeout(() => this.closest('div').remove(), 300)" class="p-1 hover:bg-black/5 rounded-lg transition-colors flex-shrink-0">
+                    <i data-lucide="x" class="w-4 h-4 opacity-60"></i>
+                </button>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            // Auto-dismiss after 5 seconds
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.classList.remove('toast-enter');
+                    toast.classList.add('toast-exit');
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, 5000);
+        }
+
+        // ============================================
+        // CUSTOM CONFIRM MODAL SYSTEM
+        // ============================================
+        let confirmResolve = null;
+
+        function showConfirmModal(options) {
+            return new Promise((resolve) => {
+                confirmResolve = resolve;
+
+                const modal = document.getElementById('confirm-modal');
+                const iconContainer = document.getElementById('confirm-icon-container');
+                const icon = document.getElementById('confirm-icon');
+                const title = document.getElementById('confirm-title');
+                const message = document.getElementById('confirm-message');
+                const details = document.getElementById('confirm-details');
+                const actionBtn = document.getElementById('confirm-action-btn');
+
+                // Configure based on type
+                const typeConfigs = {
+                    danger: {
+                        iconBg: 'bg-red-100',
+                        iconColor: 'text-red-600',
+                        icon: 'alert-triangle',
+                        btnClass: 'bg-red-600 hover:bg-red-700 text-white'
+                    },
+                    warning: {
+                        iconBg: 'bg-amber-100',
+                        iconColor: 'text-amber-600',
+                        icon: 'alert-circle',
+                        btnClass: 'bg-amber-600 hover:bg-amber-700 text-white'
+                    },
+                    info: {
+                        iconBg: 'bg-blue-100',
+                        iconColor: 'text-blue-600',
+                        icon: 'help-circle',
+                        btnClass: 'bg-blue-600 hover:bg-blue-700 text-white'
+                    },
+                    success: {
+                        iconBg: 'bg-green-100',
+                        iconColor: 'text-green-600',
+                        icon: 'check-circle',
+                        btnClass: 'bg-green-600 hover:bg-green-700 text-white'
+                    }
+                };
+
+                const config = typeConfigs[options.type || 'warning'] || typeConfigs.warning;
+
+                iconContainer.className = `w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${config.iconBg}`;
+                icon.setAttribute('data-lucide', options.icon || config.icon);
+                icon.className = `w-6 h-6 ${config.iconColor}`;
+
+                title.textContent = options.title || 'Confirm Action';
+                message.textContent = options.message || 'Are you sure you want to proceed?';
+
+                // Handle details list
+                if (options.details && options.details.length > 0) {
+                    details.innerHTML = options.details.map(d => `<li class="flex items-start gap-2"><i data-lucide="chevron-right" class="w-4 h-4 mt-0.5 flex-shrink-0"></i><span>${d}</span></li>`).join('');
+                    details.classList.remove('hidden');
+                } else {
+                    details.classList.add('hidden');
+                }
+
+                actionBtn.textContent = options.confirmText || 'Confirm';
+                actionBtn.className = `flex-1 px-4 py-2.5 rounded-xl font-medium transition-colors ${config.btnClass}`;
+
+                modal.classList.remove('hidden');
+                lucide.createIcons();
+            });
+        }
+
+        function closeConfirmModal(result) {
+            document.getElementById('confirm-modal').classList.add('hidden');
+            if (confirmResolve) {
+                confirmResolve(result);
+                confirmResolve = null;
+            }
+        }
+
+        // Handle Escape key for confirm modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (!document.getElementById('confirm-modal').classList.contains('hidden')) {
+                    closeConfirmModal(false);
+                }
+                if (!document.getElementById('prompt-modal').classList.contains('hidden')) {
+                    closePromptModal(null);
+                }
+            }
+        });
+
+        // ============================================
+        // CUSTOM PROMPT MODAL SYSTEM
+        // ============================================
+        let promptResolve = null;
+
+        function showPromptModal(options) {
+            return new Promise((resolve) => {
+                promptResolve = resolve;
+
+                const modal = document.getElementById('prompt-modal');
+                const title = document.getElementById('prompt-title');
+                const message = document.getElementById('prompt-message');
+                const input = document.getElementById('prompt-input');
+                const hint = document.getElementById('prompt-hint');
+
+                title.textContent = options.title || 'Enter Value';
+                message.textContent = options.message || '';
+                input.value = options.defaultValue || '';
+                input.type = options.inputType || 'text';
+                input.placeholder = options.placeholder || '';
+
+                if (options.hint) {
+                    hint.textContent = options.hint;
+                    hint.classList.remove('hidden');
+                } else {
+                    hint.classList.add('hidden');
+                }
+
+                modal.classList.remove('hidden');
+                lucide.createIcons();
+
+                // Focus input
+                setTimeout(() => input.focus(), 100);
+
+                // Handle Enter key
+                input.onkeydown = (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitPromptModal();
+                    } else if (e.key === 'Escape') {
+                        closePromptModal(null);
+                    }
+                };
+            });
+        }
+
+        function submitPromptModal() {
+            const value = document.getElementById('prompt-input').value;
+            closePromptModal(value);
+        }
+
+        function closePromptModal(result) {
+            document.getElementById('prompt-modal').classList.add('hidden');
+            if (promptResolve) {
+                promptResolve(result);
+                promptResolve = null;
+            }
+        }
+
+        // ============================================
+        // MAIN APPLICATION STATE
+        // ============================================
+        let currentTab = 'pool', poolData = {};
+
+        function switchTab(tab) {
+            currentTab = tab;
+            ['pool', 'inbound', 'outbound', 'reports'].forEach(t => {
+                const btn = document.getElementById(`tab-${t}`);
+                const content = document.getElementById(`content-${t}`);
+                if (t === tab) {
+                    btn.className = 'tab-btn px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 bg-mit-purple text-white shadow-sm';
+                } else {
+                    btn.className = 'tab-btn px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 text-gray-600 hover:bg-gray-100';
+                }
+                content.classList.toggle('hidden', t !== tab);
+            });
+            loadCurrentTab();
+        }
+
+        function loadCurrentTab() {
+            if (currentTab === 'pool') loadPool();
+            if (currentTab === 'inbound') loadInbound();
+            if (currentTab === 'outbound') loadOutboundWindows();
+            if (currentTab === 'reports') loadReportsTab();
+        }
+
+        async function loadPool() {
+            const direction = document.getElementById('pool-filter-direction').value;
+            const type = document.getElementById('pool-filter-type').value;
+            const res = await fetch(`/api/admin/mdm_rollout/pool?direction=${direction}&type=${type}`);
+            const data = await res.json();
+            poolData = data.pool || {};
+            let inCount = 0, outCount = 0;
+            const container = document.getElementById('pool-list');
+            let html = '';
+
+            for (const dir of ['Inbound', 'Outbound']) {
+                for (const t of ['MDM', 'OE']) {
+                    const items = poolData[dir]?.[t] || [];
+                    if (items.length === 0) continue;
+                    if (dir === 'Inbound') inCount += items.length; else outCount += items.length;
+
+                    const dirColor = dir === 'Inbound' ? 'blue' : 'green';
+                    const typeColor = t === 'MDM' ? 'purple' : 'amber';
+
+                    html += `<div class="border border-gray-200 rounded-xl overflow-hidden">
+                        <div class="flex items-center gap-3 p-4 bg-gray-50 border-b border-gray-200">
+                            <span class="px-3 py-1 text-xs font-bold rounded-full bg-${dirColor}-100 text-${dirColor}-700">${dir}</span>
+                            <span class="px-3 py-1 text-xs font-bold rounded-full bg-${typeColor}-100 text-${typeColor}-700">${t}</span>
+                            <span class="text-sm text-gray-500">${items.length} course${items.length > 1 ? 's' : ''}</span>
+                        </div>
+                        <div class="divide-y divide-gray-100">`;
+
+                    for (const c of items) {
+                        html += `<div class="flex justify-between items-center p-4 hover:bg-gray-50 transition-colors">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-semibold text-gray-900">${c.code}</span>
+                                    <span class="text-gray-400">|</span>
+                                    <span class="text-gray-700">${c.name}</span>
+                                </div>
+                                <div class="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                    <span class="flex items-center gap-1"><i data-lucide="book-open" class="w-3 h-3"></i> L-T-P: ${c.L || 0}-${c.T || 0}-${c.P || 0}</span>
+                                    <span class="flex items-center gap-1"><i data-lucide="star" class="w-3 h-3"></i> ${c.credits} Credits</span>
+                                    ${c.host_school_name ? `<span class="flex items-center gap-1 text-green-600"><i data-lucide="building" class="w-3 h-3"></i> ${c.host_school_name}</span>` : ''}
+                                </div>
+                            </div>
+                            <button onclick="deletePoolEntry(${c.id})" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Remove">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>`;
+                    }
+                    html += '</div></div>';
+                }
+            }
+
+            container.innerHTML = html || `
+                <div class="text-center py-16 px-4">
+                    <div class="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+                        <i data-lucide="database" class="w-8 h-8 text-gray-400"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">No Courses in Pool</h3>
+                    <p class="text-gray-500 mb-4 max-w-sm mx-auto">Upload courses to create your MDM/OE course catalog for selection windows.</p>
+                    <button onclick="showUploadPoolModal()" class="px-4 py-2 bg-mit-purple text-white rounded-lg hover:bg-mit-purple-light transition-colors inline-flex items-center gap-2">
+                        <i data-lucide="upload" class="w-4 h-4"></i> Upload Courses
+                    </button>
+                </div>`;
+
+            document.getElementById('stat-inbound').textContent = inCount;
+            document.getElementById('stat-outbound').textContent = outCount;
+
+            // Update tab badge
+            const totalPool = inCount + outCount;
+            const poolBadge = document.getElementById('badge-pool');
+            if (totalPool > 0) {
+                poolBadge.textContent = totalPool;
+                poolBadge.classList.remove('hidden');
+            } else {
+                poolBadge.classList.add('hidden');
+            }
+
+            lucide.createIcons();
+        }
+
+        async function loadInbound() {
+            const res = await fetch('/api/admin/mdm_rollout/inbound/courses');
+            const data = await res.json();
+            const courses = data.courses || [];
+            const container = document.getElementById('inbound-list');
+
+            // Update tab badge
+            const inboundBadge = document.getElementById('badge-inbound');
+            if (courses.length > 0) {
+                inboundBadge.textContent = courses.length;
+                inboundBadge.classList.remove('hidden');
+            } else {
+                inboundBadge.classList.add('hidden');
+            }
+
+            if (courses.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-16 px-4">
+                        <div class="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center mx-auto mb-4">
+                            <i data-lucide="inbox" class="w-8 h-8 text-blue-400"></i>
+                        </div>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">No Inbound Courses</h3>
+                        <p class="text-gray-500 max-w-sm mx-auto">Add Inbound courses to the pool first, then they'll appear here for faculty assignment.</p>
+                    </div>`;
+                return;
+            }
+
+            let extTotal = 0;
+            container.innerHTML = courses.map(c => {
+                extTotal += c.external_students_count;
+                const hasF = !!c.assigned_faculty_name;
+                return `<div class="border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow card-hover">
+                    <div class="flex flex-col lg:flex-row justify-between gap-4">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3 mb-2">
+                                <span class="px-2.5 py-1 text-xs font-bold rounded-full ${c.type === 'MDM' ? 'bg-purple-100 text-mit-purple' : 'bg-amber-100 text-amber-700'}">${c.type}</span>
+                                <h3 class="font-bold text-gray-900">${c.code}: ${c.name}</h3>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-4 text-sm">
+                                <span class="text-gray-500">${c.credits} Credits | L-T-P: ${c.L || 0}-${c.T || 0}-${c.P || 0}</span>
+                                <span class="flex items-center gap-1.5 ${hasF ? 'text-green-600' : 'text-orange-500'}">
+                                    <i data-lucide="${hasF ? 'user-check' : 'user-x'}" class="w-4 h-4"></i>
+                                    ${hasF ? c.assigned_faculty_name : 'No faculty assigned'}
+                                </span>
+                                <span class="flex items-center gap-1.5 text-gray-600">
+                                    <i data-lucide="users" class="w-4 h-4"></i>
+                                    ${c.external_students_count} external student${c.external_students_count !== 1 ? 's' : ''}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="showAssignFacultyModal(${c.id}, '${c.code}', '${c.assigned_faculty_id || ''}')" class="px-3 py-2 ${hasF ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-mit-purple text-white hover:bg-mit-purple-light'} text-sm rounded-lg transition-colors flex items-center gap-1.5">
+                                <i data-lucide="${hasF ? 'user-cog' : 'user-plus'}" class="w-4 h-4"></i>
+                                ${hasF ? 'Change' : 'Assign'}
+                            </button>
+                            <button onclick="showUploadStudentsModal(${c.id}, '${c.code}')" class="px-3 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 text-sm rounded-lg transition-colors flex items-center gap-1.5">
+                                <i data-lucide="upload" class="w-4 h-4"></i> Students
+                            </button>
+                            <button onclick="exportInboundMarks(${c.id})" class="px-3 py-2 bg-green-50 text-green-700 hover:bg-green-100 text-sm rounded-lg transition-colors flex items-center gap-1.5">
+                                <i data-lucide="download" class="w-4 h-4"></i> Export
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            document.getElementById('stat-external').textContent = extTotal;
+            lucide.createIcons();
+        }
+
+        async function loadOutboundWindows() {
+            const res = await fetch('/api/admin/mdm_rollout/outbound/windows');
+            const data = await res.json();
+            const windows = data.windows || [];
+            const activeCount = windows.filter(w => !['Closed', 'Concluded'].includes(w.status)).length;
+            document.getElementById('stat-windows').textContent = activeCount;
+
+            // Update tab badge
+            const outboundBadge = document.getElementById('badge-outbound');
+            if (activeCount > 0) {
+                outboundBadge.textContent = activeCount;
+                outboundBadge.classList.remove('hidden');
+            } else {
+                outboundBadge.classList.add('hidden');
+            }
+
+            const container = document.getElementById('outbound-windows-list');
+
+            if (windows.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-16 px-4">
+                        <div class="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+                            <i data-lucide="calendar-plus" class="w-8 h-8 text-amber-400"></i>
+                        </div>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">No Selection Windows</h3>
+                        <p class="text-gray-500 mb-4 max-w-sm mx-auto">Start a selection window to allow students to choose cross-school courses.</p>
+                        <button onclick="showOutboundWizard()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors inline-flex items-center gap-2">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Start Selection Window
+                        </button>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = windows.map(w => {
+                const statusConfig = {
+                    'Open': { color: 'green', bg: 'bg-green-100', text: 'text-green-700', dot: 'bg-green-500' },
+                    'Extension': { color: 'amber', bg: 'bg-amber-100', text: 'text-amber-700', dot: 'bg-amber-500' },
+                    'Closed': { color: 'orange', bg: 'bg-orange-100', text: 'text-orange-700', dot: 'bg-orange-500' },
+                    'Concluded': { color: 'blue', bg: 'bg-blue-100', text: 'text-blue-700', dot: 'bg-blue-500' }
+                }[w.status] || { color: 'gray', bg: 'bg-gray-100', text: 'text-gray-700', dot: 'bg-gray-500' };
+
+                // Calculate progress
+                const progress = w.student_count > 0 ? Math.round((w.selected_count / w.student_count) * 100) : 0;
+                const progressColor = progress >= 75 ? 'bg-green-500' : progress >= 50 ? 'bg-amber-500' : progress >= 25 ? 'bg-orange-500' : 'bg-red-500';
+
+                const canEdit = w.status !== 'Concluded';
+                const minBatch = w.min_batch_size || 3;
+
+                // Build action menu
+                let actions = [];
+                actions.push({ label: 'View Students', icon: 'users', onclick: `showSelectionsModal(${w.id})`, color: 'purple' });
+
+                if (w.status === 'Open' || w.status === 'Extension') {
+                    actions.push({ label: 'Close Rollout', icon: 'pause-circle', onclick: `closeWindow(${w.id})`, color: 'yellow' });
+                } else if (w.status === 'Closed') {
+                    actions.push({ label: 'Reopen', icon: 'play-circle', onclick: `reopenWindow(${w.id})`, color: 'green' });
+                    actions.push({ label: 'Conclude', icon: 'check-circle', onclick: `concludeWindow(${w.id})`, color: 'red' });
+                }
+
+                if (w.status === 'Closed' || w.status === 'Concluded') {
+                    actions.push({ label: 'Export CSV', icon: 'download', onclick: `exportSelections(${w.id})`, color: 'blue' });
+                }
+
+                if (canEdit) {
+                    actions.push({ label: 'Settings', icon: 'settings', onclick: `showSettingsModal(${w.id}, ${minBatch}, '${w.deadline_at || ''}')`, color: 'gray' });
+                }
+
+                return `<div class="border border-gray-200 rounded-xl overflow-hidden card-hover">
+                    <div class="p-5">
+                        <div class="flex flex-col lg:flex-row justify-between gap-4">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <span class="flex items-center gap-2 px-3 py-1 rounded-full ${statusConfig.bg} ${statusConfig.text} text-xs font-bold">
+                                        <span class="w-2 h-2 rounded-full ${statusConfig.dot} ${w.status === 'Open' ? 'animate-pulse' : ''}"></span>
+                                        ${w.status}
+                                    </span>
+                                    <h3 class="font-bold text-gray-900 text-lg">${w.section_name || w.class_level} - ${w.course_type}</h3>
+                                </div>
+
+                                <!-- Progress Bar -->
+                                <div class="mb-4">
+                                    <div class="flex justify-between text-sm mb-1">
+                                        <span class="text-gray-600">${w.selected_count} of ${w.student_count} students selected</span>
+                                        <span class="font-semibold ${progress >= 50 ? 'text-green-600' : 'text-orange-600'}">${progress}%</span>
+                                    </div>
+                                    <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                        <div class="h-full ${progressColor} progress-bar rounded-full" style="width: ${progress}%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="flex flex-wrap gap-4 text-sm text-gray-600">
+                                    <span class="flex items-center gap-1.5">
+                                        <i data-lucide="users" class="w-4 h-4 text-gray-400"></i>
+                                        Min batch: <span class="${canEdit ? 'cursor-pointer text-mit-purple hover:underline' : ''}" ${canEdit ? `onclick="editMinBatch(${w.id}, ${minBatch})"` : ''}>${minBatch}</span>
+                                    </span>
+                                    <span class="flex items-center gap-1.5">
+                                        <i data-lucide="book-open" class="w-4 h-4 text-gray-400"></i>
+                                        ${w.courses.length} course${w.courses.length > 1 ? 's' : ''}
+                                    </span>
+                                    ${w.deadline_at ? `<span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-4 h-4 text-gray-400"></i> ${new Date(w.deadline_at).toLocaleDateString()} ${new Date(w.deadline_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>` : ''}
+                                </div>
+                            </div>
+
+                            <!-- Actions -->
+                            <div class="flex flex-wrap gap-2 items-start">
+                                ${actions.map(a => `<button onclick="${a.onclick}" class="px-3 py-2 bg-${a.color}-50 text-${a.color}-700 hover:bg-${a.color}-100 text-sm rounded-lg transition-colors flex items-center gap-1.5" title="${a.label}">
+                                    <i data-lucide="${a.icon}" class="w-4 h-4"></i>
+                                    <span class="hidden sm:inline">${a.label}</span>
+                                </button>`).join('')}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Expandable selections table -->
+                    <div id="selections-table-${w.id}" class="hidden border-t border-gray-200 bg-gray-50"></div>
+                </div>`;
+            }).join('');
+
+            lucide.createIcons();
+        }
+
+        // Modal functions
+        function showUploadPoolModal() { document.getElementById('upload-pool-modal').classList.remove('hidden'); document.getElementById('upload-pool-modal').classList.add('flex'); }
+        function closeUploadPoolModal() { document.getElementById('upload-pool-modal').classList.add('hidden'); document.getElementById('pool-file').value = ''; document.getElementById('pool-file-name').textContent = 'code, name, type, direction, L, T, P, credits...'; }
+
+        document.getElementById('upload-pool-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = document.getElementById('pool-file').files[0];
+            if (!file) return showToast('Please select a file', 'error');
+            const formData = new FormData(); formData.append('file', file);
+            const res = await fetch('/api/admin/mdm_rollout/pool/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok) { showToast(data.message); closeUploadPoolModal(); loadPool(); } else { showToast(data.error, 'error'); }
+        });
+
+        async function deletePoolEntry(id) {
+            const confirmed = await showConfirmModal({
+                type: 'danger',
+                title: 'Remove Course',
+                message: 'Are you sure you want to remove this course from the pool?',
+                confirmText: 'Remove',
+                icon: 'trash-2'
+            });
+            if (!confirmed) return;
+            const res = await fetch(`/api/admin/mdm_rollout/pool/${id}`, { method: 'DELETE' });
+            if (res.ok) { showToast('Course removed from pool'); loadPool(); } else { showToast('Failed to remove course', 'error'); }
+        }
+
+        // Assign Faculty
+        async function showAssignFacultyModal(poolId, code, currentFacultyId) {
+            document.getElementById('assign-faculty-pool-id').value = poolId;
+            document.getElementById('assign-faculty-course-info').textContent = `Course: ${code}`;
+            document.getElementById('assign-faculty-modal').classList.remove('hidden');
+            document.getElementById('assign-faculty-modal').classList.add('flex');
+
+            const select = document.getElementById('assign-faculty-select');
+            select.innerHTML = '<option value="">Loading...</option>';
+            try {
+                const res = await fetch('/api/admin/faculty_list');
+                const data = await res.json();
+                select.innerHTML = '<option value="">-- Select Faculty --</option>' +
+                    (data.faculty || []).map(f => `<option value="${f.id}" ${f.id === currentFacultyId ? 'selected' : ''}>${f.name} (${f.dept || 'No Dept'})</option>`).join('');
+            } catch(e) {
+                select.innerHTML = '<option value="">Error loading faculty</option>';
+            }
+        }
+        function closeAssignFacultyModal() { document.getElementById('assign-faculty-modal').classList.add('hidden'); }
+
+        document.getElementById('assign-faculty-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const poolId = document.getElementById('assign-faculty-pool-id').value;
+            const facultyId = document.getElementById('assign-faculty-select').value;
+            if (!facultyId) return showToast('Please select a faculty member', 'error');
+            try {
+                const res = await fetch(`/api/admin/mdm_rollout/inbound/${poolId}/assign_faculty`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ faculty_id: facultyId })
+                });
+                const data = await res.json();
+                if (res.ok) { showToast(data.message || 'Faculty assigned'); closeAssignFacultyModal(); loadInbound(); }
+                else { showToast(data.error || 'Failed to assign', 'error'); }
+            } catch(e) { showToast('Error assigning faculty', 'error'); }
+        });
+
+        // Upload Students
+        function showUploadStudentsModal(poolId, code) {
+            document.getElementById('upload-pool-id').value = poolId;
+            document.getElementById('upload-course-info').textContent = `Course: ${code}`;
+            document.getElementById('upload-students-modal').classList.remove('hidden');
+            document.getElementById('upload-students-modal').classList.add('flex');
+        }
+        function closeUploadStudentsModal() { document.getElementById('upload-students-modal').classList.add('hidden'); document.getElementById('students-file').value = ''; document.getElementById('students-file-name').textContent = 'full_name, roll_number, email, home_school_name, department_name'; }
+
+        document.getElementById('upload-students-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const poolId = document.getElementById('upload-pool-id').value;
+            const file = document.getElementById('students-file').files[0];
+            if (!file) return showToast('Please select a file', 'error');
+            const formData = new FormData(); formData.append('file', file);
+            const res = await fetch(`/api/admin/mdm_rollout/inbound/${poolId}/upload_students`, { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok) { showToast(data.message); closeUploadStudentsModal(); loadInbound(); } else { showToast(data.error, 'error'); }
+        });
+
+        function exportInboundMarks(poolId) { window.location.href = `/api/admin/mdm_rollout/inbound/${poolId}/export_marks`; }
+
+        // Outbound Wizard
+        function showOutboundWizard() { document.getElementById('outbound-wizard-modal').classList.remove('hidden'); document.getElementById('outbound-wizard-modal').classList.add('flex'); wizardNext(1); }
+        function closeOutboundWizard() { document.getElementById('outbound-wizard-modal').classList.add('hidden'); }
+
+        function wizardNext(step) {
+            [1,2,3].forEach(s => {
+                document.getElementById(`wizard-step-${s}`).classList.toggle('hidden', s !== step);
+                const indicator = document.getElementById(`wizard-step-indicator-${s}`);
+                const circle = indicator.querySelector('div');
+                const label = indicator.querySelector('span');
+                if (s < step) {
+                    circle.className = 'w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center text-sm font-bold';
+                    if (label) label.className = 'text-sm font-medium text-green-600 hidden sm:inline';
+                } else if (s === step) {
+                    circle.className = 'w-8 h-8 rounded-full bg-mit-purple text-white flex items-center justify-center text-sm font-bold';
+                    if (label) label.className = 'text-sm font-medium text-mit-purple hidden sm:inline';
+                } else {
+                    circle.className = 'w-8 h-8 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center text-sm font-bold';
+                    if (label) label.className = 'text-sm font-medium text-gray-400 hidden sm:inline';
+                }
+            });
+            if (step === 2) loadWizardCourses();
+        }
+
+        async function loadWizardSections() {
+            const level = document.getElementById('wizard-class-level').value;
+            if (!level) { document.getElementById('wizard-sections').innerHTML = '<p class="text-gray-400 text-sm">Select a class level first</p>'; return; }
+            const res = await fetch(`/api/admin/mdm_rollout/outbound/sections?class_level=${level}`);
+            const data = await res.json();
+            const sections = data.sections || [];
+            document.getElementById('wizard-sections').innerHTML = sections.length ? sections.map(s =>
+                `<label class="flex items-center gap-3 p-2 rounded-lg hover:bg-white cursor-pointer ${s.has_active_window ? 'opacity-50' : ''}">
+                    <input type="checkbox" name="wizard-section" value="${s.id}" ${s.has_active_window ? 'disabled' : ''} class="w-4 h-4 rounded text-mit-purple focus:ring-mit-purple">
+                    <span class="flex-1">${s.name}</span>
+                    <span class="text-xs text-gray-500">${s.student_count} students</span>
+                    ${s.has_active_window ? '<span class="px-2 py-0.5 text-xs rounded-full bg-orange-100 text-orange-700">Active</span>' : ''}
+                </label>`
+            ).join('') : '<p class="text-gray-400 text-sm">No sections found</p>';
+        }
+
+        async function loadWizardCourses() {
+            const level = document.getElementById('wizard-class-level').value;
+            const type = document.getElementById('wizard-course-type').value;
+            const res = await fetch(`/api/admin/mdm_rollout/outbound/courses?class_level=${level}&type=${type === 'BOTH' ? '' : type}`);
+            const data = await res.json();
+            const courses = data.courses || [];
+            document.getElementById('wizard-courses').innerHTML = courses.length ? courses.map(c =>
+                `<label class="flex items-center gap-3 p-2 rounded-lg hover:bg-white cursor-pointer">
+                    <input type="checkbox" name="wizard-course" value="${c.id}" class="w-4 h-4 rounded text-mit-purple focus:ring-mit-purple">
+                    <div class="flex-1">
+                        <span class="font-medium">${c.code}: ${c.name}</span>
+                        <span class="text-xs text-gray-500 block">${c.type} @ ${c.host_school_name}</span>
+                    </div>
+                </label>`
+            ).join('') : '<p class="text-gray-400 text-sm">No outbound courses available</p>';
+        }
+
+        async function submitOutboundWizard() {
+            const sectionIds = [...document.querySelectorAll('input[name="wizard-section"]:checked')].map(el => parseInt(el.value));
+            const courseIds = [...document.querySelectorAll('input[name="wizard-course"]:checked')].map(el => parseInt(el.value));
+            const classLevel = document.getElementById('wizard-class-level').value;
+            const courseType = document.getElementById('wizard-course-type').value;
+            const deadlineDate = document.getElementById('wizard-deadline-date').value;
+            const deadlineTime = document.getElementById('wizard-deadline-time').value;
+            const minBatch = parseInt(document.getElementById('wizard-min-batch').value) || 3;
+
+            if (!sectionIds.length) return showToast('Please select at least one section', 'error');
+            if (!courseIds.length) return showToast('Please select at least one course', 'error');
+
+            const deadline = deadlineDate && deadlineTime ? `${deadlineDate}T${deadlineTime}:00` : null;
+            const res = await fetch('/api/admin/mdm_rollout/outbound/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ section_ids: sectionIds, class_level: classLevel, course_type: courseType, course_ids: courseIds, deadline_at: deadline, min_batch_size: minBatch })
+            });
+            const data = await res.json();
+            if (res.ok) { showToast(data.message); closeOutboundWizard(); loadOutboundWindows(); } else { showToast(data.error, 'error'); }
+        }
+
+        // Window Actions
+        async function closeWindow(windowId) {
+            const confirmed = await showConfirmModal({
+                type: 'warning',
+                title: 'Close Selection Rollout',
+                message: 'Students will no longer be able to select or change their courses.',
+                details: [
+                    'Current selections will be preserved',
+                    'You can reopen this window later if needed'
+                ],
+                confirmText: 'Close Rollout',
+                icon: 'pause-circle'
+            });
+            if (!confirmed) return;
+            const res = await fetch(`/api/admin/mdm_rollout/outbound/windows/${windowId}/close`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) { showToast(data.message); loadOutboundWindows(); } else { showToast(data.error, 'error'); }
+        }
+
+        async function reopenWindow(windowId) {
+            const confirmed = await showConfirmModal({
+                type: 'success',
+                title: 'Reopen Selection Window',
+                message: 'Students will be able to select or change their course selection again.',
+                details: [
+                    'The window status will change to Extension',
+                    'All previous selections remain intact'
+                ],
+                confirmText: 'Reopen Window',
+                icon: 'play-circle'
+            });
+            if (!confirmed) return;
+            const res = await fetch(`/api/admin/mdm_rollout/outbound/windows/${windowId}/reopen`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) { showToast(data.message); loadOutboundWindows(); } else { showToast(data.error, 'error'); }
+        }
+
+        async function concludeWindow(windowId) {
+            const confirmed = await showConfirmModal({
+                type: 'danger',
+                title: 'Conclude & Finalize Selections',
+                message: 'This will permanently finalize all student selections. This action cannot be undone.',
+                details: [
+                    'Courses meeting minimum batch size will be CONFIRMED',
+                    'Courses below minimum batch size will be DROPPED',
+                    'Affected students will be notified'
+                ],
+                confirmText: 'Conclude Window',
+                icon: 'check-circle'
+            });
+            if (!confirmed) return;
+            const res = await fetch(`/api/admin/mdm_rollout/outbound/windows/${windowId}/conclude`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                let msg = data.message;
+                if (data.cancelled_courses?.length) {
+                    showToast(msg, 'success');
+                    showToast('Cancelled courses: ' + data.cancelled_courses.join(', '), 'warning');
+                } else {
+                    showToast(msg);
+                }
+                loadOutboundWindows();
+            } else { showToast(data.error, 'error'); }
+        }
+
+        function exportSelections(windowId) { window.location.href = `/api/admin/mdm_rollout/outbound/windows/${windowId}/export`; }
+
+        // Settings Modal
+        function showSettingsModal(windowId, minBatch, deadline) {
+            document.getElementById('settings-window-id').value = windowId;
+            document.getElementById('settings-min-batch').value = minBatch;
+            document.getElementById('settings-deadline').value = deadline ? new Date(deadline).toISOString().slice(0, 16) : '';
+            document.getElementById('window-settings-modal').classList.remove('hidden');
+            document.getElementById('window-settings-modal').classList.add('flex');
+        }
+        function closeSettingsModal() { document.getElementById('window-settings-modal').classList.add('hidden'); document.getElementById('window-settings-modal').classList.remove('flex'); }
+
+        async function saveWindowSettings(event) {
+            event.preventDefault();
+            const windowId = document.getElementById('settings-window-id').value;
+            const minBatch = parseInt(document.getElementById('settings-min-batch').value);
+            const deadline = document.getElementById('settings-deadline').value;
+            const body = { min_batch_size: minBatch, deadline_at: deadline ? new Date(deadline).toISOString() : null };
+            try {
+                const res = await fetch(`/api/admin/mdm_rollout/outbound/windows/${windowId}/settings`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (res.ok) { showToast(data.message); closeSettingsModal(); loadOutboundWindows(); }
+                else { showToast(data.error, 'error'); }
+            } catch (e) { showToast('Failed to save settings', 'error'); }
+        }
+
+        async function editMinBatch(windowId, currentValue) {
+            const newValue = await showPromptModal({
+                title: 'Edit Minimum Batch Size',
+                message: 'Enter the minimum number of students required for a course to run:',
+                defaultValue: currentValue.toString(),
+                inputType: 'number',
+                placeholder: 'e.g., 3',
+                hint: 'Courses with fewer students than this will be cancelled when the window is concluded.'
+            });
+            if (newValue === null || newValue === '') return;
+            const minBatch = parseInt(newValue);
+            if (isNaN(minBatch) || minBatch < 1) {
+                showToast('Invalid value. Must be at least 1.', 'error');
+                return;
+            }
+            try {
+                const res = await fetch(`/api/admin/mdm_rollout/outbound/windows/${windowId}/settings`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ min_batch_size: minBatch })
+                });
+                if (res.ok) { showToast(`Minimum batch size updated to ${minBatch}`, 'success'); loadOutboundWindows(); }
+                else { showToast((await res.json()).error, 'error'); }
+            } catch (e) { showToast('Failed to update settings', 'error'); }
+        }
+
+        // View Selections
+        async function showSelectionsModal(windowId) {
+            const container = document.getElementById(`selections-table-${windowId}`);
+            const isHidden = container.classList.contains('hidden');
+
+            if (isHidden) {
+                container.innerHTML = '<div class="p-6 text-center"><div class="animate-spin w-6 h-6 border-2 border-mit-purple border-t-transparent rounded-full mx-auto"></div><p class="text-sm text-gray-500 mt-2">Loading...</p></div>';
+                container.classList.remove('hidden');
+
+                try {
+                    const res = await fetch(`/api/admin/mdm_rollout/outbound/windows/${windowId}/selections`);
+                    const data = await res.json();
+                    if (!res.ok) { container.innerHTML = `<p class="p-4 text-red-500 text-sm">${data.error || 'Failed to load'}</p>`; return; }
+
+                    const selections = data.selections || [];
+                    if (!selections.length) { container.innerHTML = '<p class="p-6 text-gray-500 text-sm text-center">No selections yet.</p>'; return; }
+
+                    const statusColor = (s) => ({ 'Selected': 'bg-amber-100 text-amber-700', 'Confirmed': 'bg-green-100 text-green-700', 'Dropped': 'bg-red-100 text-red-600' })[s] || 'bg-gray-100 text-gray-700';
+
+                    container.innerHTML = `<div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-100 border-b border-gray-200">
+                                <tr>
+                                    <th class="text-left p-3 font-semibold text-gray-700">Course</th>
+                                    <th class="text-left p-3 font-semibold text-gray-700">Host School</th>
+                                    <th class="text-left p-3 font-semibold text-gray-700">Student</th>
+                                    <th class="text-left p-3 font-semibold text-gray-700">Roll No</th>
+                                    <th class="text-left p-3 font-semibold text-gray-700">Dept</th>
+                                    <th class="text-left p-3 font-semibold text-gray-700">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                ${selections.map(s => `<tr class="hover:bg-white">
+                                    <td class="p-3"><span class="font-medium text-gray-900">${s.course_code}</span><br><span class="text-xs text-gray-500">${s.course_name}</span></td>
+                                    <td class="p-3 text-gray-600">${s.host_school || '-'}</td>
+                                    <td class="p-3 font-medium text-gray-900">${s.student_name}</td>
+                                    <td class="p-3 font-mono text-xs text-gray-600">${s.roll_number}</td>
+                                    <td class="p-3 text-gray-600">${s.department || '-'}</td>
+                                    <td class="p-3"><span class="px-2.5 py-1 text-xs font-bold rounded-full ${statusColor(s.status)}">${s.status}</span></td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="p-3 bg-gray-100 border-t border-gray-200 text-xs text-gray-500">Total: ${selections.length} selections</div>`;
+                } catch(e) { container.innerHTML = `<p class="p-4 text-red-500 text-sm">Error: ${e.message}</p>`; }
+            } else {
+                container.classList.add('hidden');
+            }
+        }
+
+        // Reports
+        async function loadReportsTab() {
+            const res = await fetch('/api/admin/mdm_rollout/inbound/courses');
+            const data = await res.json();
+            const courses = data.courses || [];
+            const container = document.getElementById('report-inbound-list');
+
+            if (!courses.length) {
+                container.innerHTML = '<p class="text-gray-400 text-sm text-center py-4">No inbound courses available</p>';
+                return;
+            }
+
+            container.innerHTML = courses.map(c => `
+                <div class="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100 hover:border-gray-300 transition-colors">
+                    <div>
+                        <span class="font-medium text-gray-900">${c.code}</span>: ${c.name}
+                        <p class="text-xs text-gray-500 mt-0.5">${c.type} | ${c.external_students_count} students</p>
+                    </div>
+                    <button onclick="downloadInboundReport(${c.id}, '${c.code}')" class="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs rounded-lg transition-colors flex items-center gap-1.5 font-medium">
+                        <i data-lucide="download" class="w-3.5 h-3.5"></i> CSV
+                    </button>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function downloadInboundReport(poolId, code) {
+            window.location.href = `/api/admin/mdm_rollout/report/inbound/${poolId}?format=csv`;
+            showToast(`Downloading report for ${code}...`);
+        }
+
+        function downloadOutboundReport() {
+            const type = document.getElementById('report-outbound-type').value;
+            let url = '/api/admin/mdm_rollout/report/outbound?format=csv';
+            if (type) url += `&type=${type}`;
+            window.location.href = url;
+            showToast('Downloading outbound report...');
+        }
+
+        // Initialize
+        loadPool();
+    </script>
+</body>
+</html>

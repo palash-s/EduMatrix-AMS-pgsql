@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-server-fetch"],
+      "env": {
+        "BASE_URL": "http://localhost:5000",
+        "ALLOW_LOCALHOST": "true"
+      }
+    }
+  }
+}
