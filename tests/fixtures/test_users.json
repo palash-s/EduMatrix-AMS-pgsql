@@ -1,0 +1,75 @@
+{
+  "superadmin": {
+    "username": "superadmin",
+    "password": "Super@Admin123",
+    "user_type": "SuperAdmin",
+    "description": "Global system administrator"
+  },
+  "admin": {
+    "username": "admin_it",
+    "password": "Admin@IT2024",
+    "user_type": "Admin",
+    "department": "Information Technology",
+    "description": "Department administrator for IT"
+  },
+  "hod": {
+    "username": "EMP1001",
+    "password": "Hod@Pass123",
+    "user_type": "Staff",
+    "roles": ["hod"],
+    "department": "Information Technology",
+    "description": "Head of IT Department"
+  },
+  "class_teacher": {
+    "username": "EMP1002",
+    "password": "Teacher@Pass123",
+    "user_type": "Staff",
+    "roles": ["class_teacher"],
+    "class_section": "SY-DA",
+    "description": "Class Teacher for SY-DA"
+  },
+  "mentor": {
+    "username": "EMP1003",
+    "password": "Mentor@Pass123",
+    "user_type": "Staff",
+    "roles": ["mentor"],
+    "batch": "SY-DA-Batch1",
+    "description": "Mentor for SY-DA Batch 1"
+  },
+  "event_coordinator": {
+    "username": "EMP1004",
+    "password": "Event@Pass123",
+    "user_type": "Staff",
+    "roles": ["event_coordinator"],
+    "description": "Event Coordinator"
+  },
+  "amc_member": {
+    "username": "EMP1005",
+    "password": "AMC@Pass123",
+    "user_type": "Staff",
+    "roles": ["amc_member"],
+    "description": "AMC Committee Member"
+  },
+  "mdm_coordinator": {
+    "username": "EMP1006",
+    "password": "MDM@Pass123",
+    "user_type": "Staff",
+    "roles": ["mdm_oe_coordinator"],
+    "description": "MDM/OE Coordinator"
+  },
+  "student": {
+    "username": "STU2024001",
+    "password": "Student@Pass123",
+    "user_type": "Student",
+    "class_section": "SY-DA",
+    "admission_number": "2024001",
+    "description": "Test student in SY-DA"
+  },
+  "parent": {
+    "username": "PAR2024001",
+    "password": "Parent@Pass123",
+    "user_type": "Parent",
+    "linked_student": "STU2024001",
+    "description": "Parent of test student"
+  }
+}

@@ -7,10 +7,11 @@ import uuid
 import secrets
 import hashlib
 import json
+import re
 from functools import wraps
 from datetime import timedelta, timezone
 from datetime import datetime, date
-from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, g
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, g, send_file, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_migrate import Migrate
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -20,6 +21,17 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy import func
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+
+# Security utilities (OWASP compliant input validation)
+from security_utils import (
+    ValidationError, Schema, validate_request,
+    sanitize_string, validate_email, validate_string, validate_integer,
+    validate_date, validate_list, validate_uuid, validate_password_strength,
+    validate_file_upload, log_security_event, get_rate_limit_key,
+    create_rate_limit_exceeded_response,
+    LOGIN_SCHEMA, CHANGE_PASSWORD_SCHEMA, LEAVE_APPLICATION_SCHEMA,
+    MAX_STRING_LENGTH, MAX_NAME_LENGTH, MAX_TEXT_LENGTH, MAX_CODE_LENGTH
+)
 
 try:
     import firebase_admin
@@ -42,8 +54,11 @@ from sql_connection import (
     RoomMaster, MentorLog, MentorMeeting, MeetingAttendance, MeetingIssue, Notification, get_db_uri,CAMarks, TermGrantRecord,
     FeedbackCycle, FeedbackResponse, StudentFeedbackStatus, SystemConfig, ArchivedAllocation, ArchivedSchedule
 
-    , SemesterCourseStructure, ElectiveWindow
+    , SemesterCourseStructure, ElectiveWindow, ElectiveRolloutTemplate
     , RefreshToken, PushDevice, LoadAdjustment
+    , ElectiveSubjectPool, ElectiveAuditLog
+    , MDMOfferingPool, MDMOutboundWindow, MDMWindowOffering, MDMOutboundSelection, MDMAuditLog
+    , CrossSchoolOffering, ExternalStudentProfile
 )
 
 
@@ -232,11 +247,25 @@ app = Flask(__name__)
 # ==========================================
 # SECURITY CONFIGURATION
 # ==========================================
-# CRITICAL: In production, set SECRET_KEY env var to a strong random value (min 32 chars)
+# CRITICAL: SECRET_KEY must be set in production environments
+# Generate a strong key: python -c "import secrets; print(secrets.token_hex(32))"
 _secret_key = os.environ.get('SECRET_KEY')
+_flask_env = os.environ.get('FLASK_ENV', 'development')
+
 if not _secret_key:
-    logging.warning("⚠️  SECRET_KEY not set! Using insecure default. Set SECRET_KEY env var in production.")
-    _secret_key = 'dev-secret-key-change-me'
+    if _flask_env == 'production':
+        # FAIL HARD in production - never use default keys
+        raise RuntimeError(
+            "CRITICAL: SECRET_KEY environment variable is required in production! "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    else:
+        # Only allow insecure default in development
+        logging.warning("⚠️  SECRET_KEY not set! Using insecure default. Set SECRET_KEY env var before deploying.")
+        _secret_key = 'dev-secret-key-change-me-' + secrets.token_hex(8)  # Add some randomness even in dev
+elif len(_secret_key) < 32:
+    logging.warning("⚠️  SECRET_KEY is too short (min 32 chars recommended). Consider using a stronger key.")
+
 app.config['SECRET_KEY'] = _secret_key
 
 # Session security settings
@@ -374,16 +403,77 @@ def handle_csrf_error(e):
 # RATE LIMITING
 # ==========================================
 # Use Redis in production for distributed rate limiting across workers
+# Set RATE_LIMIT_STORAGE_URI=redis://redis:6379 in production
 _rate_limit_storage = os.environ.get('RATE_LIMIT_STORAGE_URI', 'memory://')
-if os.environ.get('FLASK_ENV') == 'production' and _rate_limit_storage == 'memory://':
+if _flask_env == 'production' and _rate_limit_storage == 'memory://':
     logging.warning("⚠️  RATE_LIMIT_STORAGE_URI not set in production. Using in-memory storage (not shared across workers).")
 
+
+def _combined_rate_limit_key():
+    """
+    Generate rate limit key combining IP address and user ID.
+    This provides both IP-based and user-based rate limiting.
+    """
+    # Get client IP (handle X-Forwarded-For for proxied requests)
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if client_ip:
+        client_ip = client_ip.split(',')[0].strip()
+
+    # Add user ID if authenticated for user-specific limits
+    user_part = ''
+    try:
+        if current_user and current_user.is_authenticated:
+            user_part = f':u:{current_user.user_id}'
+    except Exception:
+        pass
+
+    return f'{client_ip}{user_part}'
+
+
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=_combined_rate_limit_key,
     app=app,
-    default_limits=["200 per minute"],  # Global default
-    storage_uri=_rate_limit_storage,  # Set RATE_LIMIT_STORAGE_URI=redis://redis:6379 in prod
+    default_limits=["200 per minute", "1000 per hour"],  # Global defaults
+    storage_uri=_rate_limit_storage,
+    default_limits_per_method=True,  # Apply limits per HTTP method
+    default_limits_exempt_when=lambda: False,  # Never exempt by default
 )
+
+
+@app.errorhandler(429)
+def rate_limit_exceeded(e):
+    """
+    Handle rate limit exceeded with graceful 429 response.
+    OWASP: Proper rate limiting response with Retry-After header.
+    """
+    log_security_event('rate_limit_exceeded', {
+        'endpoint': request.endpoint,
+        'method': request.method,
+        'path': request.path
+    })
+    return jsonify({
+        "error": "Too many requests",
+        "message": "Rate limit exceeded. Please wait before retrying.",
+        "retry_after": 60
+    }), 429, {'Retry-After': '60'}
+
+
+# ==============================================================================
+# RATE LIMIT CONSTANTS (sensible defaults per endpoint type)
+# ==============================================================================
+# Authentication: Strict limits to prevent brute force
+RATE_LIMIT_AUTH = "10 per minute"
+RATE_LIMIT_AUTH_STRICT = "5 per minute"  # For password reset, etc.
+
+# Standard API operations: Moderate limits
+RATE_LIMIT_API_STANDARD = "60 per minute"
+RATE_LIMIT_API_WRITE = "30 per minute"  # For POST/PUT/DELETE operations
+
+# Bulk operations: Lower limits due to server load
+RATE_LIMIT_BULK = "5 per minute"
+
+# Read-only operations: Higher limits
+RATE_LIMIT_READ = "120 per minute"
 
 
 # ==========================================
@@ -719,22 +809,30 @@ def api_superadmin_list_dept_admins():
 @app.route('/api/superadmin/dept_admin/reset_password', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_AUTH_STRICT)  # Strict limit for password operations
 def api_superadmin_reset_dept_admin_password():
-    """Reset password for a department admin and return the new password."""
+    """
+    Reset password for a department admin.
+    SECURITY: Rate limited, input validated, secure logging.
+    Note: New password is returned for display - should be communicated securely.
+    """
     deny = _require_superadmin_json()
     if deny:
         return deny
     try:
         data = request.json or {}
-        dept_name = (data.get('department') or '').strip()
-        
-        if not dept_name:
-            return jsonify({"error": "Department name is required"}), 400
-        
+
+        # Input validation
+        try:
+            dept_name = validate_string(data.get('department'), 'department',
+                                       required=True, max_length=MAX_NAME_LENGTH)
+        except ValidationError as e:
+            return jsonify({"error": e.message}), 400
+
         dept = Department.query.filter_by(name=dept_name).first()
         if not dept:
             return jsonify({"error": f"Department '{dept_name}' not found"}), 404
-        
+
         if not dept.dept_admin_id:
             return jsonify({"error": f"No admin assigned to department '{dept_name}'"}), 400
         
@@ -1743,6 +1841,29 @@ def get_current_term_name():
         return f"{start_year}-{(start_year + 1) % 100:02d} Sem {sem}"
 
 
+def get_current_academic_year():
+    """Returns the current academic year in YYYY-YY format (e.g., 2024-25)."""
+    try:
+        term = get_current_term_name()
+        year, _, _ = parse_term_parts(term)
+        if year:
+            return year
+        # Fallback: Calculate from date
+        today = date.today()
+        if 7 <= today.month <= 12:
+            start_year = today.year
+        else:
+            start_year = today.year - 1
+        return f"{start_year}-{(start_year + 1) % 100:02d}"
+    except Exception:
+        today = date.today()
+        if 7 <= today.month <= 12:
+            start_year = today.year
+        else:
+            start_year = today.year - 1
+        return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
 def parse_term_parts(term: str):
     """Parse a term like 'YYYY-YY Sem 1' into (academic_year, semester_number, semester_label)."""
     try:
@@ -1913,6 +2034,9 @@ def render_admin_allocations(): return render_template('admin_allocations.html')
 @app.route('/admin/manage_electives') # <--- THIS WAS MISSING
 def render_admin_electives(): return render_template('admin_electives.html')
 
+@app.route('/admin/mdm_rollout')
+def render_mdm_rollout(): return render_template('coordinator_mdm_oe.html')
+
 @app.route('/admin/historical_reports')
 def render_historical_reports():
     # Legacy page (department performance). Redirect to dashboard now that
@@ -2070,17 +2194,33 @@ def get_students_by_section():
 # API: AUTHENTICATION
 # ==========================================
 @app.route('/api/login', methods=['POST'])
-@limiter.limit("10 per minute")  # Prevent brute force
+@limiter.limit(RATE_LIMIT_AUTH)  # Strict rate limit to prevent brute force
 @csrf.exempt  # Login form handles this differently
 def login():
+    """
+    Web login endpoint.
+    SECURITY: Rate limited, input validated, secure logging (no passwords).
+    """
     data = request.get_json(silent=True) or {}
-    username = (data.get('username') or '').strip()  # This could be Email OR Employee Code
-    password = data.get('password')
-    
-    app.logger.info(f"Login attempt for username: {username}")
+
+    # Input validation and sanitization
+    try:
+        username = sanitize_string(data.get('username'), max_length=100)
+        password = data.get('password', '')  # Don't sanitize password (could contain special chars)
+
+        if not username:
+            raise ValidationError("Username is required", "username")
+        if not password or len(password) > 128:
+            raise ValidationError("Valid password is required", "password")
+    except ValidationError as e:
+        log_security_event('login_validation_failure', {'field': e.field})
+        return jsonify({"error": "Invalid input"}), 400
+
+    # Security: Log attempt without exposing password
+    log_security_event('login_attempt', {'username': username}, level='info')
 
     if not username or not password:
-        app.logger.warning(f"Login failed: missing credentials for {username}")
+        log_security_event('login_failure', {'reason': 'missing_credentials', 'username': username})
         return jsonify({"error": "username and password are required"}), 400
 
     try:
@@ -2199,31 +2339,46 @@ def render_change_password():
 
 @app.route('/api/change-password', methods=['POST'])
 @login_required
-@limiter.limit("5 per minute")
+@limiter.limit(RATE_LIMIT_AUTH_STRICT)  # Strict limit for password operations
 def api_change_password():
-    """Change current user's password."""
+    """
+    Change current user's password.
+    SECURITY: Rate limited, password strength validated, secure logging.
+    """
     data = request.get_json(silent=True) or {}
     current_password = data.get('current_password', '')
     new_password = data.get('new_password', '')
     confirm_password = data.get('confirm_password', '')
-    
+
+    # Input validation
     if not current_password or not new_password:
         return jsonify({"error": "Current and new password are required"}), 400
-    
+
+    if len(current_password) > 128 or len(new_password) > 128:
+        return jsonify({"error": "Password exceeds maximum length"}), 400
+
     if new_password != confirm_password:
         return jsonify({"error": "New passwords do not match"}), 400
-    
-    if len(new_password) < 8:
-        return jsonify({"error": "Password must be at least 8 characters"}), 400
-    
+
+    # Password strength validation
+    is_strong, strength_error = validate_password_strength(new_password)
+    if not is_strong:
+        return jsonify({"error": strength_error}), 400
+
     # Verify current password
     if not check_password_hash(current_user.password_hash, current_password):
+        log_security_event('password_change_failure', {
+            'reason': 'invalid_current_password',
+            'user_id': current_user.user_id
+        })
         return jsonify({"error": "Current password is incorrect"}), 401
-    
+
     # Update password
     current_user.password_hash = generate_password_hash(new_password)
     current_user.must_change_password = False
     db.session.commit()
+
+    log_security_event('password_changed', {'user_id': current_user.user_id}, level='info')
     
     # Determine redirect based on role
     role = (current_user.user_type or '').capitalize()
@@ -2605,21 +2760,40 @@ def api_superadmin_import_hierarchy_csv():
 # MOBILE API v1: AUTH + PROFILE (NEW)
 # ==========================================
 @app.route('/api/v1/auth/login', methods=['POST'])
-@limiter.limit("10 per minute")  # Prevent brute force on mobile too
+@limiter.limit(RATE_LIMIT_AUTH)  # Prevent brute force on mobile too
 @csrf.exempt
 def api_v1_auth_login():
+    """
+    Mobile app login endpoint.
+    SECURITY: Rate limited, input validated, secure logging.
+    """
     data = request.json or {}
-    username = (data.get('username') or '').strip()
-    password = data.get('password')
-    device_id = (data.get('device_id') or '').strip() or None
+
+    # Input validation and sanitization
+    try:
+        username = sanitize_string(data.get('username'), max_length=100)
+        password = data.get('password', '')  # Don't sanitize password
+        device_id = sanitize_string(data.get('device_id'), max_length=100) or None
+
+        if not username:
+            raise ValidationError("Username is required", "username")
+        if not password or len(password) > 128:
+            raise ValidationError("Valid password is required", "password")
+    except ValidationError as e:
+        log_security_event('mobile_login_validation_failure', {'field': e.field})
+        return jsonify({"error": "Invalid input"}), 400
+
+    log_security_event('mobile_login_attempt', {'username': username, 'device_id': device_id}, level='info')
 
     if not username or not password:
         return jsonify({"error": "username and password are required"}), 400
 
     user = _find_user_for_login(username)
     if not user or not check_password_hash(user.password_hash, password):
+        log_security_event('mobile_login_failure', {'username': username, 'reason': 'invalid_credentials'})
         return jsonify({"error": "Invalid credentials"}), 401
     if not user.is_active:
+        log_security_event('mobile_login_failure', {'username': username, 'reason': 'account_deactivated'})
         return jsonify({"error": "Account Deactivated."}), 403
     
     # Check for forced password change (mobile can handle this differently)
@@ -3534,12 +3708,14 @@ def staff_dashboard():
                    .filter(SubjectAllocation.teacher_id == staff.staff_id))
 
         # Enforce department isolation for staff dashboards when we can resolve a scope.
+        # BUT always include MDM/OE subjects (is_mdm_oe=True) regardless of department
         if scope_dept_ids is not None and scope_dept_ids:
             from sqlalchemy import or_
             alloc_q = (alloc_q.outerjoin(Specialization, ClassSection.spec_id == Specialization.id)
                              .filter(or_(
                                  Subject.dept_id.in_(scope_dept_ids),
                                  Specialization.dept_id.in_(scope_dept_ids),
+                                 Subject.is_mdm_oe == True,  # Always include MDM/OE subjects
                              )))
 
         allocations = alloc_q.all()
@@ -3553,13 +3729,30 @@ def staff_dashboard():
                 teacher_id=staff.staff_id
             ).count()
             
+            # Check if this is an MDM/OE subject
+            is_mdm_oe = getattr(subj, 'is_mdm_oe', False) or False
+            mdm_info = None
+            if is_mdm_oe and subj.mdm_pool_id:
+                pool = db.session.get(MDMOfferingPool, subj.mdm_pool_id)
+                if pool:
+                    mdm_info = {
+                        "type": pool.type,  # MDM or OE
+                        "direction": pool.direction,  # Inbound
+                        "schedule_pattern": pool.schedule_pattern,
+                        "l_count": pool.l_count,
+                        "t_count": pool.t_count,
+                        "p_count": pool.p_count
+                    }
+            
             my_subjects_list.append({
                 "subject_id": subj.subject_id, 
                 "subject_name": subj.name, 
                 "section_id": sec.section_id, 
                 "class_name": f"{sec.class_level}-{sec.name}", 
                 "sessions_per_week": slots_count,
-                "status": "Scheduled" if slots_count > 0 else "Not Scheduled"
+                "status": "Scheduled" if slots_count > 0 else "Not Scheduled",
+                "is_mdm_oe": is_mdm_oe,
+                "mdm_info": mdm_info
             })
 
 
@@ -3589,6 +3782,7 @@ def staff_dashboard():
                              .filter(or_(
                                  Subject.dept_id.in_(scope_dept_ids),
                                  Specialization.dept_id.in_(scope_dept_ids),
+                                 Subject.is_mdm_oe == True,  # Always include MDM/OE subjects
                              )))
 
         all_slots = slots_q.all()
@@ -3961,6 +4155,9 @@ def staff_dashboard():
                 days_from_today = (es.date - today_date).days
                 sort_key = days_from_today * 10000 + int(es.start_time.strftime('%H%M'))
 
+                # Check if MDM/OE subject
+                is_mdm_oe = getattr(subj, 'is_mdm_oe', False) or False
+
                 es_data = {
                     "id": f"extra_{es.id}",
                     "extra_session_id": es.id,
@@ -3978,7 +4175,8 @@ def staff_dashboard():
                     "duration_float": end_float - start_float,
                     "status": "Done" if session_log else "Pending",
                     "is_extra_session": True,
-                    "section_id": sec.section_id
+                    "section_id": sec.section_id,
+                    "is_mdm_oe": is_mdm_oe
                 }
 
                 if es.date == today_date:
@@ -3992,6 +4190,171 @@ def staff_dashboard():
             upcoming_schedule.sort(key=lambda x: x['sort_key'])
         except Exception as ex:
             print(f"Error loading extra sessions: {ex}")
+
+        # --- 10. MDM/OE SCHEDULED SESSIONS (Based on MDMOfferingPool date range) ---
+        # MDM courses have defined start_date, end_date and schedule_pattern
+        # They should appear automatically in the schedule during their active period
+        try:
+            # Get all MDM pools assigned to this faculty that are active in the upcoming window
+            mdm_pools = (MDMOfferingPool.query
+                         .filter(MDMOfferingPool.assigned_faculty_id == staff.staff_id)
+                         .filter(MDMOfferingPool.is_active == True)
+                         .filter(MDMOfferingPool.start_date <= window_end)
+                         .filter(MDMOfferingPool.end_date >= today_date)
+                         .all())
+
+            # Helper to parse schedule_pattern into day/time info
+            # Examples: "Sat 10-12 AM", "MWF 3-5 PM", "Tue-Thu 2-4 PM"
+            def parse_schedule_pattern(pattern):
+                """Parse schedule pattern into list of (day_name, start_time, end_time)"""
+                if not pattern:
+                    return []
+                
+                day_map = {
+                    'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday', 
+                    'Thu': 'Thursday', 'Fri': 'Friday', 'Sat': 'Saturday', 'Sun': 'Sunday',
+                    'M': 'Monday', 'T': 'Tuesday', 'W': 'Wednesday', 
+                    'Th': 'Thursday', 'F': 'Friday', 'S': 'Saturday'
+                }
+                
+                results = []
+                pattern = pattern.strip()
+                
+                # Extract days part and time part
+                import re
+                # Match patterns like "MWF 3-5 PM" or "Sat 10-12 AM" or "Tue-Thu 2-4 PM"
+                time_match = re.search(r'(\d{1,2})-(\d{1,2})\s*(AM|PM)', pattern, re.IGNORECASE)
+                if not time_match:
+                    return results
+                
+                start_hr = int(time_match.group(1))
+                end_hr = int(time_match.group(2))
+                ampm = time_match.group(3).upper()
+                
+                # Convert to 24-hour format
+                # For AM: 12 AM = 0, 1-11 AM stay same
+                # For PM: 12 PM = 12, 1-11 PM add 12
+                if ampm == 'AM':
+                    if start_hr == 12:
+                        start_hr = 0
+                    if end_hr == 12:
+                        end_hr = 12  # 12 as end in AM context typically means noon
+                else:  # PM
+                    if start_hr != 12:
+                        start_hr += 12
+                    if end_hr != 12:
+                        end_hr += 12
+                    
+                start_time_obj = time(start_hr, 0)
+                end_time_obj = time(end_hr, 0)
+                
+                days_part = pattern[:time_match.start()].strip()
+                
+                # Handle different day formats
+                if '-' in days_part:
+                    # Range like "Tue-Thu"
+                    parts = days_part.split('-')
+                    if len(parts) == 2:
+                        start_day = day_map.get(parts[0].strip(), parts[0].strip())
+                        end_day = day_map.get(parts[1].strip(), parts[1].strip())
+                        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                        try:
+                            start_idx = day_order.index(start_day)
+                            end_idx = day_order.index(end_day)
+                            for i in range(start_idx, end_idx + 1):
+                                results.append((day_order[i], start_time_obj, end_time_obj))
+                        except ValueError:
+                            pass
+                elif len(days_part) <= 5 and all(c in 'MTWThFS' for c in days_part.replace('Th', 'X')):
+                    # Compact format like "MWF" or "MTWThF"
+                    i = 0
+                    while i < len(days_part):
+                        if i+1 < len(days_part) and days_part[i:i+2] == 'Th':
+                            results.append(('Thursday', start_time_obj, end_time_obj))
+                            i += 2
+                        elif days_part[i] in day_map:
+                            results.append((day_map[days_part[i]], start_time_obj, end_time_obj))
+                            i += 1
+                        else:
+                            i += 1
+                else:
+                    # Single day like "Sat" or "Saturday"
+                    day_name = day_map.get(days_part, days_part)
+                    if day_name in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']:
+                        results.append((day_name, start_time_obj, end_time_obj))
+                
+                return results
+
+            for pool in mdm_pools:
+                schedule_slots = parse_schedule_pattern(pool.schedule_pattern)
+                if not schedule_slots:
+                    continue
+                
+                # Get the linked Subject and Section for this MDM pool
+                mdm_subject = Subject.query.filter_by(mdm_pool_id=pool.id, is_mdm_oe=True).first()
+                mdm_section = ClassSection.query.filter_by(mdm_pool_id=pool.id, is_virtual=True).first()
+                
+                if not mdm_subject or not mdm_section:
+                    continue
+                
+                # Generate sessions for each scheduled day within the window
+                for day_name, start_t, end_t in schedule_slots:
+                    day_idx = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6}.get(day_name, 7)
+                    
+                    # Find all occurrences of this day within the MDM active period and upcoming window
+                    check_date = today_date
+                    while check_date <= window_end:
+                        if check_date.weekday() == day_idx:
+                            # Check if within MDM pool's date range
+                            if pool.start_date <= check_date <= pool.end_date:
+                                start_float = start_t.hour + (start_t.minute / 60.0)
+                                end_float = end_t.hour + (end_t.minute / 60.0)
+                                days_from_today = (check_date - today_date).days
+                                sort_key = days_from_today * 10000 + int(start_t.strftime('%H%M'))
+                                
+                                # Check if session already logged
+                                session_exists = SessionLog.query.filter(
+                                    SessionLog.schedule_id.is_(None),
+                                    SessionLog.extra_session_id.is_(None),
+                                    SessionLog.actual_teacher_id == staff.staff_id,
+                                    SessionLog.subject_id == mdm_subject.subject_id,
+                                    SessionLog.session_date == check_date
+                                ).first()
+                                
+                                mdm_slot_data = {
+                                    "id": f"mdm_{pool.id}_{check_date.isoformat()}",
+                                    "time": f"{start_t.strftime('%I:%M %p')} - {end_t.strftime('%I:%M %p')}",
+                                    "class": f"MDM-{pool.code}",
+                                    "subject": pool.name,
+                                    "subject_id": mdm_subject.subject_id,
+                                    "section_id": mdm_section.section_id,
+                                    "day": day_name,
+                                    "date_iso": check_date.strftime('%Y-%m-%d'),
+                                    "date_display": check_date.strftime('%d %b'),
+                                    "type": pool.type,  # MDM or OE
+                                    "sort_key": sort_key,
+                                    "start_float": start_float,
+                                    "duration_float": end_float - start_float,
+                                    "status": "Done" if session_exists else "Pending",
+                                    "is_mdm_oe": True,
+                                    "mdm_pool_id": pool.id,
+                                    "mdm_code": pool.code
+                                }
+                                
+                                if check_date == today_date:
+                                    today_schedule.append(mdm_slot_data)
+                                elif check_date > today_date:
+                                    upcoming_schedule.append(mdm_slot_data)
+                        
+                        check_date += timedelta(days=1)
+                
+            # Re-sort after adding MDM sessions
+            today_schedule.sort(key=lambda x: x['sort_key'])
+            upcoming_schedule.sort(key=lambda x: x['sort_key'])
+        except Exception as ex:
+            print(f"Error loading MDM scheduled sessions: {ex}")
+            import traceback
+            traceback.print_exc()
 
         return jsonify({
             "profile": {
@@ -4352,6 +4715,7 @@ def get_student_leaves():
 
 @app.route('/api/leave/apply', methods=['POST'])
 @login_required
+@limiter.limit(RATE_LIMIT_API_WRITE)  # Moderate limit for state-changing operations
 def apply_leave():
     try:
         data = request.json
@@ -5114,13 +5478,72 @@ def get_attendance_sheet():
     try:
         schedule_id = request.args.get('schedule_id')
         date_str = request.args.get('date')
+        # MDM sessions use subject_id + section_id instead of schedule_id
+        mdm_subject_id = request.args.get('subject_id')
+        mdm_section_id = request.args.get('section_id')
+        
         if date_str: target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         else: target_date = date.today()
 
         # Check if this is an extra session (ID starts with "extra_")
         is_extra_session = schedule_id and schedule_id.startswith('extra_')
+        # Check if this is an MDM session (subject_id + section_id provided)
+        is_mdm_session = mdm_subject_id and mdm_section_id and not schedule_id
 
-        if is_extra_session:
+        if is_mdm_session:
+            # Handle MDM/OE Session (based on subject_id + section_id + date)
+            subject = Subject.query.get(int(mdm_subject_id))
+            section = ClassSection.query.get(int(mdm_section_id))
+            if not subject or not section:
+                return jsonify({"error": "Invalid MDM Subject or Section"}), 404
+            
+            # Verify this is an MDM/OE subject
+            if not getattr(subject, 'is_mdm_oe', False):
+                return jsonify({"error": "Not an MDM/OE subject"}), 400
+            
+            # Get MDM pool info for time display
+            pool = db.session.get(MDMOfferingPool, subject.mdm_pool_id) if subject.mdm_pool_id else None
+            
+            # Load external students for MDM Inbound
+            students = []
+            is_mdm_virtual = getattr(section, 'is_virtual', False)
+            
+            if is_mdm_virtual and pool:
+                # MDM/OE Inbound: Load external students
+                offering = CrossSchoolOffering.query.filter_by(code=pool.code).first()
+                if offering:
+                    external_students = ExternalStudentProfile.query.filter_by(
+                        enrolled_offering_id=offering.offering_id,
+                        status='Enrolled'
+                    ).order_by(ExternalStudentProfile.full_name).all()
+                    students = [{'external': True, 'obj': es} for es in external_students]
+            else:
+                # Regular section with MDM subject
+                students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
+            
+            # Check existing session log for MDM (no schedule_id, use subject_id + section_id + date)
+            existing_session = SessionLog.query.filter(
+                SessionLog.schedule_id.is_(None),
+                SessionLog.extra_session_id.is_(None),
+                SessionLog.subject_id == subject.subject_id,
+                SessionLog.section_id == section.section_id,
+                SessionLog.session_date == target_date
+            ).first()
+            is_locked = True if existing_session else False
+            saved_status_map = {}
+            if existing_session:
+                for t in AttendanceTransaction.query.filter_by(session_id=existing_session.session_id).all():
+                    if t.external_student_id:
+                        saved_status_map[f"ext_{t.external_student_id}"] = t.status
+                    elif t.student_id:
+                        saved_status_map[t.student_id] = t.status
+            
+            # Parse schedule_pattern for time display
+            time_str = pool.schedule_pattern if pool and pool.schedule_pattern else "MDM Session"
+            display_class_name = f"MDM-{pool.code}" if pool else f"{section.class_level}-{section.name}"
+            slot = None  # No slot for MDM
+            
+        elif is_extra_session:
             # Handle Extra Session
             extra_session_id = int(schedule_id.replace('extra_', ''))
             extra_session = ExtraSession.query.get(extra_session_id)
@@ -5159,9 +5582,27 @@ def get_attendance_sheet():
             subject = Subject.query.get(slot.subject_id)
             section = ClassSection.query.get(slot.section_id)
 
-            # 1. Fetch Students (Batch, Elective, or Class)
+            # 1. Fetch Students (Batch, Elective, MDM External, or Class)
             students = []
-            if is_elective_type(subject.subject_type):
+            is_mdm_virtual = getattr(section, 'is_virtual', False) and getattr(subject, 'is_mdm_oe', False)
+            
+            if is_mdm_virtual:
+                # MDM/OE Inbound: Load external students from ExternalStudentProfile
+                # External students are linked via the pool -> offering -> enrollment
+                pool_id = getattr(subject, 'mdm_pool_id', None)
+                if pool_id:
+                    pool = db.session.get(MDMOfferingPool, pool_id)
+                    if pool:
+                        # Find the CrossSchoolOffering linked to this pool
+                        offering = CrossSchoolOffering.query.filter_by(code=pool.code).first()
+                        if offering:
+                            external_students = ExternalStudentProfile.query.filter_by(
+                                enrolled_offering_id=offering.offering_id,
+                                status='Enrolled'
+                            ).order_by(ExternalStudentProfile.full_name).all()
+                            # Convert to student-like format for compatibility
+                            students = [{'external': True, 'obj': es} for es in external_students]
+            elif is_elective_type(subject.subject_type):
                 # Elective subject = only students with approved selection
                 base_query = (db.session.query(StudentProfile)
                               .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
@@ -5225,49 +5666,85 @@ def get_attendance_sheet():
 
         # 4. Build Student List
         student_list = []
-        for s in students:
-            # Determine Status Priority:
-            # 1. Saved Status (if locked)
-            # 2. Event OD
-            # 3. Approved Leave (ML/CL)
-            # 4. Default "Present"
-            
-            status = "Present"
-            is_od = False
-            status_label = ""
+        
+        # Check if we're dealing with MDM external students
+        is_mdm_external = any(isinstance(s, dict) and s.get('external') for s in students) if students else False
+        
+        if is_mdm_external:
+            # MDM/OE External Students - simplified (no leaves/events tracking for external)
+            for s_entry in students:
+                if isinstance(s_entry, dict) and s_entry.get('external'):
+                    es = s_entry['obj']  # ExternalStudentProfile object
+                    # Check saved status for external students
+                    ext_student_id = f"ext_{es.external_id}"
+                    status = "Present"
+                    if is_locked:
+                        # For external students, we use external_student_id in transactions
+                        ext_txn = AttendanceTransaction.query.filter_by(
+                            session_id=existing_session.session_id,
+                            external_student_id=es.external_id
+                        ).first() if existing_session else None
+                        status = ext_txn.status if ext_txn else "Present"
+                    
+                    student_list.append({
+                        "student_id": ext_student_id,
+                        "external_student_id": es.external_id,
+                        "is_external": True,
+                        "name": es.full_name,
+                        "roll_no": es.roll_number or f"EXT-{es.external_id}",
+                        "status": status,
+                        "is_on_duty": False,
+                        "status_label": f"From: {es.home_school_name}" if es.home_school_name else ""
+                    })
+        else:
+            # Regular internal students
+            for s in students:
+                # Determine Status Priority:
+                # 1. Saved Status (if locked)
+                # 2. Event OD
+                # 3. Approved Leave (ML/CL)
+                # 4. Default "Present"
+                
+                status = "Present"
+                is_od = False
+                status_label = ""
 
-            if is_locked:
-                status = saved_status_map.get(s.student_id, "Present")
-            else:
-                if s.student_id in event_map:
-                    status = 'OnDuty'
-                    is_od = True
-                    status_label = "Event OD"
-                elif s.student_id in leave_map:
-                    # Auto-mark as ML/CL/OD based on leave type
-                    # In our DB we store 'OnDuty', 'Present', 'Absent'. 
-                    # We can store 'ML' or 'CL' directly if the system supports it, 
-                    # OR map them to 'OnDuty'/Absent with a label.
-                    # Let's store the specific code for better reporting.
-                    status = leave_map[s.student_id] 
-                    status_label = f"Approved {status}"
+                if is_locked:
+                    status = saved_status_map.get(s.student_id, "Present")
+                else:
+                    if s.student_id in event_map:
+                        status = 'OnDuty'
+                        is_od = True
+                        status_label = "Event OD"
+                    elif s.student_id in leave_map:
+                        # Auto-mark as ML/CL/OD based on leave type
+                        # In our DB we store 'OnDuty', 'Present', 'Absent'. 
+                        # We can store 'ML' or 'CL' directly if the system supports it, 
+                        # OR map them to 'OnDuty'/Absent with a label.
+                        # Let's store the specific code for better reporting.
+                        status = leave_map[s.student_id] 
+                        status_label = f"Approved {status}"
 
-            student_list.append({
-                "student_id": s.student_id,
-                "name": s.full_name,
-                "roll_no": s.admission_number,
-                "status": status,
-                "is_on_duty": is_od,
-                "status_label": status_label # Hint for UI
-            })
+                student_list.append({
+                    "student_id": s.student_id,
+                    "name": s.full_name,
+                    "roll_no": s.admission_number,
+                    "status": status,
+                    "is_on_duty": is_od,
+                    "status_label": status_label # Hint for UI
+                })
         
         student_list.sort(key=lambda x: x['name'])
+        
+        # Check if MDM/OE subject
+        is_mdm_oe = getattr(subject, 'is_mdm_oe', False) or False
 
         return jsonify({
             "subject_name": subject.name, "class_name": display_class_name,
             "time": time_str, "date_display": target_date.strftime('%d %b %Y'),
             "is_locked": is_locked, "students": student_list, "subject_id": subject.subject_id,
-            "is_extra_session": is_extra_session
+            "is_extra_session": is_extra_session,
+            "is_mdm_oe": is_mdm_oe
         })
 
     except Exception as e:
@@ -5278,6 +5755,7 @@ def get_attendance_sheet():
 
 @app.route('/api/attendance/submit', methods=['POST'])
 @login_required
+@limiter.limit(RATE_LIMIT_API_WRITE)  # Moderate limit for state-changing operations
 def submit_attendance():
     try:
         data = request.json
@@ -5285,6 +5763,10 @@ def submit_attendance():
         txn_date = datetime.strptime(data.get('date'), '%Y-%m-%d').date()
 
         submitted_by = data.get('submitted_by')
+        
+        # MDM sessions use subject_id + section_id instead of schedule_id
+        mdm_subject_id = data.get('subject_id')
+        mdm_section_id = data.get('section_id')
 
         # 1. Lesson Data - Support both single topic_id (legacy) and topic_ids array (new)
         topic_ids = data.get('topic_ids') or []  # New: array of topic IDs
@@ -5294,8 +5776,50 @@ def submit_attendance():
 
         # Check if this is an extra session (ID starts with "extra_")
         is_extra_session = schedule_id and str(schedule_id).startswith('extra_')
+        # Check if this is an MDM session (subject_id + section_id provided)
+        is_mdm_session = mdm_subject_id and mdm_section_id and not schedule_id
 
-        if is_extra_session:
+        if is_mdm_session:
+            # Handle MDM/OE Session
+            subject = Subject.query.get(int(mdm_subject_id))
+            section = ClassSection.query.get(int(mdm_section_id))
+            if not subject or not section:
+                return jsonify({"error": "Invalid MDM Subject or Section"}), 404
+            
+            # Check if already marked
+            existing_session = SessionLog.query.filter(
+                SessionLog.schedule_id.is_(None),
+                SessionLog.extra_session_id.is_(None),
+                SessionLog.subject_id == subject.subject_id,
+                SessionLog.section_id == section.section_id,
+                SessionLog.session_date == txn_date
+            ).first()
+            if existing_session:
+                return jsonify({"error": "Attendance locked."}), 403
+            
+            # Verify the teacher is assigned to this MDM subject
+            allocation = SubjectAllocation.query.filter_by(
+                subject_id=subject.subject_id,
+                section_id=section.section_id,
+                teacher_id=submitted_by
+            ).first()
+            if not allocation:
+                return jsonify({"error": "Not assigned to this MDM course."}), 403
+            
+            # Create session log for MDM
+            session = SessionLog(
+                schedule_id=None,
+                extra_session_id=None,
+                subject_id=subject.subject_id,
+                section_id=section.section_id,
+                session_date=txn_date,
+                status="Conducted",
+                actual_teacher_id=submitted_by
+            )
+            db.session.add(session)
+            db.session.flush()
+
+        elif is_extra_session:
             # Handle Extra Session
             extra_session_id = int(str(schedule_id).replace('extra_', ''))
             extra_session = ExtraSession.query.get(extra_session_id)
@@ -5359,9 +5883,23 @@ def submit_attendance():
             db.session.flush()
 
         for s in data.get('students'):
-            final_status = "OnDuty" if s['is_on_duty'] else s['status']
-            new_txn = AttendanceTransaction(session_id=session.session_id, student_id=s['student_id'], status=final_status)
-            db.session.add(new_txn)
+            final_status = "OnDuty" if s.get('is_on_duty') else s['status']
+            
+            # Handle external students (MDM/OE)
+            if s.get('is_external') or s.get('external_student_id'):
+                ext_id = s.get('external_student_id')
+                if ext_id:
+                    new_txn = AttendanceTransaction(
+                        session_id=session.session_id, 
+                        student_id=None,  # No internal student
+                        external_student_id=ext_id, 
+                        status=final_status
+                    )
+                    db.session.add(new_txn)
+            else:
+                # Regular internal student
+                new_txn = AttendanceTransaction(session_id=session.session_id, student_id=s['student_id'], status=final_status)
+                db.session.add(new_txn)
 
         # 5. Save Lesson Log(s) - only for regular sessions with topics
         if topic_ids and not is_extra_session:
@@ -5442,6 +5980,11 @@ def get_extra_sessions():
         for es, subj, sec in sessions:
             # Check if attendance has been marked
             session_log = SessionLog.query.filter_by(extra_session_id=es.id).first()
+            
+            # Check if MDM/OE
+            is_mdm_oe = getattr(subj, 'is_mdm_oe', False) or False
+            is_virtual = getattr(sec, 'is_virtual', False) or False
+            
             result.append({
                 "id": es.id,
                 "subject_id": es.subject_id,
@@ -5454,7 +5997,9 @@ def get_extra_sessions():
                 "topic": es.topic,
                 "meeting_link": es.meeting_link,
                 "status": es.status,
-                "attendance_marked": session_log is not None
+                "attendance_marked": session_log is not None,
+                "is_mdm_oe": is_mdm_oe,
+                "is_virtual": is_virtual
             })
 
         return jsonify({"extra_sessions": result}), 200
@@ -5487,15 +6032,21 @@ def get_extra_session_allocations():
             sec_key = sec.section_id
             subj_key = subj.subject_id
 
+            # Check if MDM/OE subject
+            is_mdm_oe = getattr(subj, 'is_mdm_oe', False) or False
+            is_virtual = getattr(sec, 'is_virtual', False) or False
+
             if sec_key not in sections:
                 sections[sec_key] = {
                     "section_id": sec.section_id,
-                    "name": f"{sec.class_level}-{sec.name}"
+                    "name": f"{sec.class_level}-{sec.name}",
+                    "is_virtual": is_virtual
                 }
             if subj_key not in subjects:
                 subjects[subj_key] = {
                     "subject_id": subj.subject_id,
-                    "name": subj.name
+                    "name": subj.name,
+                    "is_mdm_oe": is_mdm_oe
                 }
 
             section_subjects.append({
@@ -5583,7 +6134,14 @@ def create_extra_session():
         subject = Subject.query.get(subject_id)
         teacher = StaffProfile.query.get(user_id)
 
-        if is_elective_type(subject.subject_type):
+        # Check if this is an MDM virtual section
+        is_virtual_section = getattr(section, 'is_virtual', False) or False
+        
+        if is_virtual_section:
+            # MDM virtual sections - no local students, external students don't get notifications
+            # (they're from other institutions without accounts here)
+            pass
+        elif is_elective_type(subject.subject_type):
             # Only notify students with approved elective selection
             students = (db.session.query(StudentProfile)
                         .join(StudentElective, StudentProfile.student_id == StudentElective.student_id)
@@ -5591,16 +6149,22 @@ def create_extra_session():
                         .filter(StudentElective.subject_id == subject_id)
                         .filter(StudentElective.status == 'Approved')
                         .all())
+            for student in students:
+                send_notification(
+                    student.student_id,
+                    f"Extra Class: {subject.name}",
+                    f"Extra class scheduled on {session_date.strftime('%d %b')} at {start_time.strftime('%I:%M %p')}. Topic: {topic or 'TBA'}",
+                    type='info'
+                )
         else:
             students = StudentProfile.query.filter_by(current_section_id=section_id).all()
-
-        for student in students:
-            send_notification(
-                student.student_id,
-                f"Extra Class: {subject.name}",
-                f"Extra class scheduled on {session_date.strftime('%d %b')} at {start_time.strftime('%I:%M %p')}. Topic: {topic or 'TBA'}",
-                type='info'
-            )
+            for student in students:
+                send_notification(
+                    student.student_id,
+                    f"Extra Class: {subject.name}",
+                    f"Extra class scheduled on {session_date.strftime('%d %b')} at {start_time.strftime('%I:%M %p')}. Topic: {topic or 'TBA'}",
+                    type='info'
+                )
 
         return jsonify({
             "message": "Extra session created successfully",
@@ -5986,14 +6550,41 @@ def student_dashboard():
                 t = db.session.get(StaffProfile, teacher_id)
                 if t: t_name = t.full_name
 
-            sub_perf.append({ 
-                "subject": subject.name, 
-                "code": subject.code, 
+            sub_perf.append({
+                "subject": subject.name,
+                "code": subject.code,
                 "teacher": t_name,
-                "conducted": conducted, 
-                "attended": attended_sub, 
-                "percentage": sub_perc 
+                "conducted": conducted,
+                "attended": attended_sub,
+                "percentage": sub_perc
             })
+
+        # --- 2b. MDM/OE ENROLLED COURSES (Add to subject list) ---
+        # Show all MDM/OE selections including Dropped (so students see their history)
+        try:
+            mdm_selections = (db.session.query(MDMOutboundSelection, MDMOfferingPool)
+                              .join(MDMOfferingPool, MDMOutboundSelection.pool_id == MDMOfferingPool.id)
+                              .filter(MDMOutboundSelection.student_id == student.student_id)
+                              .all())
+
+            for sel, pool in mdm_selections:
+                # MDM/OE courses have external attendance - show as cross-school
+                sub_perf.append({
+                    "subject": pool.name,
+                    "code": pool.code,
+                    "teacher": f"External ({pool.host_school_name or 'Partner School'})",
+                    "conducted": "--",  # Attendance tracked externally
+                    "attended": "--",
+                    "percentage": "--",
+                    "is_mdm_oe": True,
+                    "mdm_type": pool.type,  # MDM or OE
+                    "mdm_status": sel.status,  # Selected, Confirmed, Dropped
+                    "external_grade": sel.external_grade,
+                    "external_marks": sel.external_marks,
+                    "credits": pool.credits
+                })
+        except Exception as ex:
+            print(f"Error adding MDM/OE to subject list: {ex}")
 
         # --- 3. OVERALL STATS ---
         overall_percentage = round((grand_total_attended / grand_total_conducted) * 100, 1) if grand_total_conducted > 0 else 0
@@ -6116,6 +6707,33 @@ def student_dashboard():
         except Exception as ex:
             print(f"Error loading extra sessions for student: {ex}")
 
+        # --- 10. MDM/OE ENROLLED COURSES ---
+        mdm_oe_courses = []
+        try:
+            selections = (db.session.query(MDMOutboundSelection, MDMOfferingPool)
+                          .join(MDMOfferingPool, MDMOutboundSelection.pool_id == MDMOfferingPool.id)
+                          .filter(MDMOutboundSelection.student_id == student.student_id)
+                          .order_by(MDMOutboundSelection.selected_at.desc())
+                          .all())
+
+            for sel, pool in selections:
+                mdm_oe_courses.append({
+                    "id": sel.id,
+                    "course_code": pool.code,
+                    "course_name": pool.name,
+                    "type": pool.type,  # MDM or OE
+                    "credits": pool.credits,
+                    "host_school_name": pool.host_school_name,
+                    "schedule_pattern": pool.schedule_pattern,
+                    "status": sel.status,  # Selected, Confirmed, Dropped
+                    "selected_at": sel.selected_at.isoformat() if sel.selected_at else None,
+                    "confirmed_at": sel.confirmed_at.isoformat() if sel.confirmed_at else None,
+                    "external_marks": sel.external_marks,
+                    "external_grade": sel.external_grade
+                })
+        except Exception as ex:
+            print(f"Error loading MDM/OE courses for student: {ex}")
+
         return jsonify({
             "profile": { "name": student.full_name, "roll": student.admission_number, "class": f"{section.class_level}-{section.name}" },
             "stats": {
@@ -6132,7 +6750,8 @@ def student_dashboard():
             "meeting": upcoming_meeting,
             "results": results_data,
             "term_grant": grant_data,
-            "extra_sessions": extra_sessions_list
+            "extra_sessions": extra_sessions_list,
+            "mdm_oe_courses": mdm_oe_courses
         })
 
     except Exception as e:
@@ -6446,9 +7065,27 @@ def render_parent_dashboard():
 
 @app.route('/api/parent/dashboard', methods=['GET'])
 @login_required
+@limiter.limit(RATE_LIMIT_READ)
 def parent_dashboard():
+    """
+    Parent dashboard API endpoint.
+    SECURITY: Uses authenticated user's ID, NOT request parameter (OWASP A01 fix).
+    """
     try:
-        user_id = request.args.get('user_id')
+        # SECURITY FIX: Use authenticated user ID, not user-supplied parameter
+        # This prevents IDOR (Insecure Direct Object Reference) vulnerability
+        user_id = current_user.user_id
+
+        # Verify user is actually a parent
+        user_type = (current_user.user_type or '').lower()
+        if user_type != 'parent':
+            log_security_event('unauthorized_access', {
+                'endpoint': 'parent_dashboard',
+                'user_type': user_type,
+                'expected': 'parent'
+            })
+            return jsonify({"error": "Access denied. Parent account required."}), 403
+
         student = StudentProfile.query.filter_by(parent_user_id=user_id).first()
         if not student: return jsonify({"error": "No student linked."}), 404
         if not student.current_section_id: return jsonify({"error": "Unassigned."}), 404
@@ -6491,8 +7128,34 @@ def parent_dashboard():
                 "percentage": round((att/cond)*100, 1) if cond > 0 else 0
             })
 
+        # 2b. Add MDM/OE courses to subject list (show all including Dropped)
+        try:
+            mdm_selections = (db.session.query(MDMOutboundSelection, MDMOfferingPool)
+                              .join(MDMOfferingPool, MDMOutboundSelection.pool_id == MDMOfferingPool.id)
+                              .filter(MDMOutboundSelection.student_id == student.student_id)
+                              .all())
+
+            for sel, pool in mdm_selections:
+                sub_perf.append({
+                    "subject": pool.name,
+                    "code": pool.code,
+                    "subject_code": pool.code,
+                    "conducted": "--",
+                    "attended": "--",
+                    "percentage": "--",
+                    "is_mdm_oe": True,
+                    "mdm_type": pool.type,
+                    "mdm_status": sel.status,
+                    "external_grade": sel.external_grade,
+                    "external_marks": sel.external_marks,
+                    "credits": pool.credits,
+                    "host_school": pool.host_school_name
+                })
+        except Exception as ex:
+            print(f"Error adding MDM/OE to parent subject list: {ex}")
+
         overall = round((gt_a/gt_c)*100, 1) if gt_c > 0 else 0
-        
+
         # 3. Events & Leaves
         events = (db.session.query(EventParticipation, EventMaster).join(EventMaster).filter(EventParticipation.student_id == student.student_id).order_by(EventMaster.start_date.desc()).all())
         evts = [{ "name": e.event_name, "date": e.start_date.strftime('%d %b'), "role": p.student_role, "status": p.status } for p, e in events]
@@ -6541,6 +7204,30 @@ def parent_dashboard():
         term_grant = TermGrantRecord.query.filter_by(student_id=student.student_id).first()
         grant_data = { "status": term_grant.status, "remarks": term_grant.remarks } if term_grant else None
 
+        # 7. MDM/OE Enrolled Courses (show all including Dropped)
+        mdm_oe_courses = []
+        try:
+            selections = (db.session.query(MDMOutboundSelection, MDMOfferingPool)
+                          .join(MDMOfferingPool, MDMOutboundSelection.pool_id == MDMOfferingPool.id)
+                          .filter(MDMOutboundSelection.student_id == student.student_id)
+                          .order_by(MDMOutboundSelection.selected_at.desc())
+                          .all())
+
+            for sel, pool in selections:
+                mdm_oe_courses.append({
+                    "id": sel.id,
+                    "course_code": pool.code,
+                    "course_name": pool.name,
+                    "type": pool.type,  # MDM or OE
+                    "credits": pool.credits,
+                    "host_school_name": pool.host_school_name,
+                    "status": sel.status,  # Selected, Confirmed, Dropped
+                    "external_marks": sel.external_marks,
+                    "external_grade": sel.external_grade
+                })
+        except Exception as ex:
+            print(f"Error loading MDM/OE courses for parent dashboard: {ex}")
+
         return jsonify({
             "student": { "name": student.full_name, "roll": student.admission_number, "class": f"{section.class_level}-{section.name}" },
             "stats": { "percentage": overall, "total": gt_c, "attended": gt_a },
@@ -6552,7 +7239,8 @@ def parent_dashboard():
             "leaves": lvs,
             "logs": clogs,
             "results": results_data,
-            "term_grant": grant_data
+            "term_grant": grant_data,
+            "mdm_oe_courses": mdm_oe_courses
         })
 
     except Exception as e: return jsonify({"error": str(e)}), 500
@@ -8505,6 +9193,892 @@ def api_manage_elective_window_enrollment():
 
         db.session.commit()
         return jsonify({"message": "Updated successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# API: SIMPLIFIED ELECTIVE ROLLOUT (NEW)
+# ==========================================
+
+def _get_current_academic_year():
+    """Get current academic year string like '2025-26'."""
+    from datetime import datetime
+    now = datetime.now()
+    # Academic year starts in July
+    if now.month >= 7:
+        return f"{now.year}-{str(now.year + 1)[-2:]}"
+    else:
+        return f"{now.year - 1}-{str(now.year)[-2:]}"
+
+
+@app.route('/api/admin/elective_rollout/pool', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_elective_pool_list():
+    """Get elective subject pool for a class level and semester."""
+    try:
+        class_level = request.args.get('class_level', '').strip().upper()
+        target_semester = request.args.get('target_semester_no', type=int)
+        academic_year = request.args.get('academic_year', _get_current_academic_year())
+        
+        query = db.session.query(ElectiveSubjectPool, Subject).join(
+            Subject, ElectiveSubjectPool.subject_id == Subject.subject_id
+        ).filter(ElectiveSubjectPool.is_active == True)
+        
+        if class_level:
+            query = query.filter(ElectiveSubjectPool.target_class_level == class_level)
+        if target_semester:
+            query = query.filter(ElectiveSubjectPool.target_semester_no == target_semester)
+        if academic_year:
+            query = query.filter(ElectiveSubjectPool.academic_year == academic_year)
+        
+        rows = query.order_by(ElectiveSubjectPool.bucket, Subject.name).all()
+        
+        # Group by bucket
+        grouped = {}
+        for pool, subj in rows:
+            bucket = pool.bucket
+            if bucket not in grouped:
+                grouped[bucket] = []
+            grouped[bucket].append({
+                "pool_id": pool.id,
+                "subject_id": subj.subject_id,
+                "code": subj.code,
+                "name": subj.name,
+                "bucket": bucket,
+                "L": pool.l_count,
+                "T": pool.t_count,
+                "P": pool.p_count,
+                "credits": pool.credits
+            })
+        
+        return jsonify({
+            "buckets": grouped,
+            "academic_year": academic_year,
+            "class_level": class_level,
+            "target_semester_no": target_semester
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/pool/template', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_elective_pool_template():
+    """Download CSV template for elective pool upload."""
+    import io
+    csv_content = """subject_code,subject_name,bucket,L,T,P,credits
+CS401E1,Machine Learning,Elective-I,3,0,0,3
+CS401E2,Cloud Computing,Elective-I,3,0,0,3
+CS401E3,Cyber Security,Elective-I,3,0,0,3
+CS402E1,Deep Learning,Elective-II,3,0,0,3
+CS402E2,Blockchain Technology,Elective-II,3,0,0,3
+CS401OE1,Data Analytics for Business,Open Elective,3,0,0,3
+CS401OE2,Internet of Things,Open Elective,3,0,2,4"""
+    
+    output = io.BytesIO()
+    output.write(csv_content.encode('utf-8'))
+    output.seek(0)
+    
+    return send_file(
+        output,
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name='elective_pool_template.csv'
+    )
+
+
+@app.route('/api/admin/elective_rollout/pool/upload', methods=['POST'])
+@login_required
+@require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
+def api_elective_pool_upload():
+    """Upload elective subjects to the pool for rollout.
+    
+    CSV Format: subject_code,subject_name,bucket,credits,ltp
+    OR JSON: {class_level, target_semester_no, academic_year, subjects: [{code, name, bucket, credits, ltp}]}
+    """
+    try:
+        # Check if CSV or JSON
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # CSV Upload
+            file = request.files.get('file')
+            class_level = request.form.get('class_level', '').strip().upper()
+            target_semester = int(request.form.get('target_semester_no', 0))
+            academic_year = request.form.get('academic_year', _get_current_academic_year())
+            
+            if not file or not class_level or not target_semester:
+                return jsonify({"error": "file, class_level, and target_semester_no required"}), 400
+            
+            import csv
+            import io
+            content = file.read().decode('utf-8-sig')
+            reader = csv.DictReader(io.StringIO(content))
+            subjects_data = list(reader)
+        else:
+            # JSON Upload
+            data = request.json or {}
+            class_level = data.get('class_level', '').strip().upper()
+            target_semester = data.get('target_semester_no', 0)
+            academic_year = data.get('academic_year', _get_current_academic_year())
+            subjects_data = data.get('subjects', [])
+            
+            if not class_level or not target_semester or not subjects_data:
+                return jsonify({"error": "class_level, target_semester_no, and subjects required"}), 400
+        
+        created = 0
+        skipped = 0
+        errors = []
+        
+        for row in subjects_data:
+            code = (row.get('subject_code') or row.get('code', '')).strip()
+            name = (row.get('subject_name') or row.get('name', '')).strip()
+            bucket = (row.get('bucket') or row.get('type', '')).strip()
+            
+            # Parse L, T, P values (separate columns for load calculation)
+            l_count = int(row.get('L') or row.get('l_count') or 0)
+            t_count = int(row.get('T') or row.get('t_count') or 0)
+            p_count = int(row.get('P') or row.get('p_count') or 0)
+            credits = int(row.get('credits') or 0) or (l_count + t_count + (p_count // 2))  # Auto-calc if not provided
+            
+            if not code or not name or not bucket:
+                errors.append(f"Missing data for row: {row}")
+                continue
+            
+            # Get or create subject
+            subject = Subject.query.filter_by(code=code).first()
+            if not subject:
+                subject = Subject(
+                    code=code,
+                    name=name,
+                    subject_type=bucket,  # Use bucket as type
+                    l_count=l_count,
+                    t_count=t_count,
+                    p_count=p_count,
+                    credits=credits
+                )
+                db.session.add(subject)
+                db.session.flush()
+            
+            # Check if already in pool
+            existing = ElectiveSubjectPool.query.filter_by(
+                subject_id=subject.subject_id,
+                target_class_level=class_level,
+                target_semester_no=target_semester,
+                bucket=bucket,
+                academic_year=academic_year
+            ).first()
+            
+            if existing:
+                skipped += 1
+                continue
+            
+            # Add to pool with L, T, P values for load calculation
+            pool_entry = ElectiveSubjectPool(
+                subject_id=subject.subject_id,
+                target_class_level=class_level,
+                target_semester_no=target_semester,
+                bucket=bucket,
+                academic_year=academic_year,
+                l_count=l_count,
+                t_count=t_count,
+                p_count=p_count,
+                credits=credits,
+                created_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+            )
+            db.session.add(pool_entry)
+            created += 1
+        
+        # Audit log
+        db.session.add(ElectiveAuditLog(
+            action_type='POOL_UPLOAD',
+            details=f"Uploaded {created} subjects to pool for {class_level} Sem {target_semester} ({academic_year}). Skipped {skipped}.",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+        
+        db.session.commit()
+        
+        return jsonify({
+            "message": f"Pool updated: {created} subjects added, {skipped} skipped",
+            "created": created,
+            "skipped": skipped,
+            "errors": errors[:10]  # Return first 10 errors only
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/pool/<int:pool_id>', methods=['DELETE'])
+@login_required
+@require_roles('Admin')
+def api_elective_pool_delete(pool_id):
+    """Remove a subject from the elective pool."""
+    try:
+        entry = db.session.get(ElectiveSubjectPool, pool_id)
+        if not entry:
+            return jsonify({"error": "Pool entry not found"}), 404
+        
+        entry.is_active = False  # Soft delete
+        db.session.commit()
+        return jsonify({"message": "Removed from pool"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/sections_by_level', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_elective_rollout_sections_by_level():
+    """Get all sections for a class level (for bulk rollout selection)."""
+    try:
+        class_level = request.args.get('class_level', '').strip().upper()
+        if not class_level:
+            return jsonify({"error": "class_level required"}), 400
+
+        scope_dept_ids = _get_admin_scope_dept_ids()
+        
+        query = db.session.query(ClassSection)
+        if scope_dept_ids is not None:
+            query = (query.join(Specialization, ClassSection.spec_id == Specialization.id)
+                     .filter(Specialization.dept_id.in_(scope_dept_ids)))
+        
+        sections = query.filter(ClassSection.class_level == class_level).order_by(ClassSection.name).all()
+        
+        result = []
+        for sec in sections:
+            # Count students in this section
+            student_count = StudentProfile.query.filter_by(current_section_id=sec.section_id).count()
+            # Check if has active windows
+            active_windows = ElectiveWindow.query.filter_by(section_id=sec.section_id).filter(
+                ElectiveWindow.status.in_(['Open', 'Extension'])
+            ).count()
+            
+            result.append({
+                "id": sec.section_id,
+                "name": f"{sec.class_level} - {sec.name}",
+                "student_count": student_count,
+                "has_active_windows": active_windows > 0
+            })
+        
+        return jsonify({"sections": result, "class_level": class_level})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/common_electives', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_elective_rollout_common_electives():
+    """Get electives for rollout - from ElectiveSubjectPool first, fallback to SemesterCourseStructure.
+    
+    Priority:
+    1. ElectiveSubjectPool (uploaded specifically for rollout)
+    2. SemesterCourseStructure (if pool is empty - backward compatibility)
+    """
+    try:
+        section_ids = request.args.get('section_ids', '')
+        target_semester_no = request.args.get('target_semester_no', type=int)
+        
+        if not section_ids or not target_semester_no:
+            return jsonify({"error": "section_ids and target_semester_no required"}), 400
+        
+        section_id_list = [int(x.strip()) for x in section_ids.split(',') if x.strip()]
+        if not section_id_list:
+            return jsonify({"error": "No valid section IDs provided"}), 400
+        
+        # Determine class level from sections
+        first_section = db.session.get(ClassSection, section_id_list[0])
+        class_level = first_section.class_level if first_section else None
+        academic_year = _get_current_academic_year()
+        
+        # Try ElectiveSubjectPool first
+        pool_entries = db.session.query(ElectiveSubjectPool, Subject).join(
+            Subject, ElectiveSubjectPool.subject_id == Subject.subject_id
+        ).filter(
+            ElectiveSubjectPool.is_active == True,
+            ElectiveSubjectPool.target_class_level == class_level,
+            ElectiveSubjectPool.target_semester_no == target_semester_no,
+            ElectiveSubjectPool.academic_year == academic_year
+        ).all()
+        
+        if pool_entries:
+            # Use pool - all subjects apply to all sections
+            grouped = {}
+            for pool, subj in pool_entries:
+                bucket = pool.bucket
+                if bucket not in grouped:
+                    grouped[bucket] = []
+                grouped[bucket].append({
+                    "id": subj.subject_id,
+                    "name": subj.name,
+                    "code": subj.code,
+                    "type": bucket,
+                    "section_count": len(section_id_list),
+                    "is_common": True,
+                    "source": "pool"
+                })
+            
+            for bucket in grouped:
+                grouped[bucket].sort(key=lambda x: x["name"])
+            
+            return jsonify({
+                "buckets": grouped,
+                "total_sections": len(section_id_list),
+                "target_semester_no": target_semester_no,
+                "source": "elective_pool",
+                "academic_year": academic_year
+            })
+        
+        # Fallback: Use SemesterCourseStructure (backward compatibility)
+        all_electives = {}  # subject_id -> {subject_data, sections: set}
+        
+        for sec_id in section_id_list:
+            rows = (db.session.query(Subject)
+                    .join(SemesterCourseStructure, SemesterCourseStructure.subject_id == Subject.subject_id)
+                    .filter(SemesterCourseStructure.section_id == sec_id)
+                    .filter(SemesterCourseStructure.semester_no == target_semester_no)
+                    .all())
+            
+            for s in rows:
+                if not is_elective_type(s.subject_type):
+                    continue
+                if s.subject_id not in all_electives:
+                    all_electives[s.subject_id] = {
+                        "id": s.subject_id,
+                        "name": s.name,
+                        "code": s.code,
+                        "type": s.subject_type,
+                        "sections": set()
+                    }
+                all_electives[s.subject_id]["sections"].add(sec_id)
+        
+        # Group by bucket, include section coverage info
+        grouped = {}
+        for sid, data in all_electives.items():
+            bucket = data["type"]
+            if bucket not in grouped:
+                grouped[bucket] = []
+            grouped[bucket].append({
+                "id": data["id"],
+                "name": data["name"],
+                "code": data["code"],
+                "type": data["type"],
+                "section_count": len(data["sections"]),
+                "is_common": len(data["sections"]) == len(section_id_list),
+                "source": "course_structure"
+            })
+        
+        # Sort each bucket by name
+        for bucket in grouped:
+            grouped[bucket].sort(key=lambda x: x["name"])
+        
+        return jsonify({
+            "buckets": grouped,
+            "total_sections": len(section_id_list),
+            "target_semester_no": target_semester_no,
+            "source": "semester_course_structure"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/bulk_launch', methods=['POST'])
+@login_required
+@require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
+def api_elective_rollout_bulk_launch():
+    """Launch elective windows for multiple sections at once.
+    
+    Body: {
+        section_ids: [1, 2, 3],
+        target_semester_no: 4,
+        buckets: [{bucket: "Elective-I", subject_ids: [10, 11, 12]}, ...],
+        min_batch_size: 12,
+        deadline_days: 7,  // Days from now until deadline
+        save_as_template?: "Template Name"  // Optional: save config as template
+    }
+    """
+    try:
+        data = request.json or {}
+        section_ids = data.get('section_ids') or []
+        target_semester_no = int(data.get('target_semester_no')) if data.get('target_semester_no') else None
+        buckets_config = data.get('buckets') or []
+        min_batch_size = int(data.get('min_batch_size') or 12)
+        deadline_days = int(data.get('deadline_days') or 7)
+        save_as_template = (data.get('save_as_template') or '').strip()
+        
+        if not section_ids:
+            return jsonify({"error": "section_ids required"}), 400
+        if not target_semester_no:
+            return jsonify({"error": "target_semester_no required"}), 400
+        if not buckets_config:
+            return jsonify({"error": "buckets configuration required"}), 400
+        
+        # Validate sections exist and get class_level
+        sections = ClassSection.query.filter(ClassSection.section_id.in_(section_ids)).all()
+        if len(sections) != len(section_ids):
+            return jsonify({"error": "One or more section_ids are invalid"}), 400
+        
+        class_level = sections[0].class_level if sections else None
+        
+        # Generate batch ID for this rollout
+        rollout_batch_id = str(uuid.uuid4())
+        deadline_at = datetime.utcnow() + timedelta(days=deadline_days)
+        
+        created_windows = []
+        
+        for section in sections:
+            for bucket_cfg in buckets_config:
+                bucket_name = bucket_cfg.get('bucket')
+                subject_ids = bucket_cfg.get('subject_ids') or []
+                
+                if not bucket_name or not subject_ids:
+                    continue
+                
+                # Validate subjects
+                subjects = Subject.query.filter(Subject.subject_id.in_(subject_ids)).all()
+                
+                # Close any existing open windows for same section/semester/bucket
+                existing = (ElectiveWindow.query
+                           .filter_by(section_id=section.section_id, target_semester_no=target_semester_no, bucket=bucket_name)
+                           .filter(ElectiveWindow.status.in_(['Open', 'Extension']))
+                           .all())
+                for w in existing:
+                    w.status = 'Closed'
+                    w.closed_at = datetime.utcnow()
+                    ElectiveOffering.query.filter_by(window_id=w.id).update({"status": "Closed"})
+                
+                # Create new window
+                window = ElectiveWindow(
+                    section_id=section.section_id,
+                    target_semester_no=target_semester_no,
+                    bucket=bucket_name,
+                    status='Open',
+                    min_batch_size=min_batch_size,
+                    deadline_at=deadline_at,
+                    rollout_batch_id=rollout_batch_id
+                )
+                db.session.add(window)
+                db.session.flush()
+                
+                # Create offerings
+                for subj in subjects:
+                    db.session.add(ElectiveOffering(
+                        section_id=section.section_id,
+                        subject_id=subj.subject_id,
+                        window_id=window.id,
+                        status='Open'
+                    ))
+                
+                created_windows.append({
+                    "window_id": window.id,
+                    "section": f"{section.class_level} - {section.name}",
+                    "bucket": bucket_name,
+                    "subject_count": len(subjects)
+                })
+        
+        # Save as template if requested
+        template_id = None
+        if save_as_template:
+            scope_dept_ids = _get_admin_scope_dept_ids()
+            dept_id = scope_dept_ids[0] if scope_dept_ids else None
+            
+            template = ElectiveRolloutTemplate(
+                name=save_as_template,
+                dept_id=dept_id,
+                class_level=class_level,
+                target_semester_no=target_semester_no,
+                buckets_config=buckets_config,
+                min_batch_size=min_batch_size,
+                default_duration_days=deadline_days,
+                created_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+            )
+            db.session.add(template)
+            db.session.flush()
+            template_id = template.id
+        
+        db.session.commit()
+        
+        return jsonify({
+            "message": f"Successfully launched {len(created_windows)} windows",
+            "rollout_batch_id": rollout_batch_id,
+            "deadline": deadline_at.isoformat(),
+            "windows": created_windows,
+            "template_id": template_id
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/templates', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_elective_rollout_templates():
+    """List saved rollout templates."""
+    try:
+        scope_dept_ids = _get_admin_scope_dept_ids()
+        
+        query = ElectiveRolloutTemplate.query
+        if scope_dept_ids is not None:
+            query = query.filter(
+                db.or_(
+                    ElectiveRolloutTemplate.dept_id.in_(scope_dept_ids),
+                    ElectiveRolloutTemplate.dept_id.is_(None)
+                )
+            )
+        
+        templates = query.order_by(ElectiveRolloutTemplate.created_at.desc()).all()
+        
+        return jsonify({
+            "templates": [{
+                "id": t.id,
+                "name": t.name,
+                "class_level": t.class_level,
+                "target_semester_no": t.target_semester_no,
+                "min_batch_size": t.min_batch_size,
+                "default_duration_days": t.default_duration_days,
+                "bucket_count": len(t.buckets_config) if t.buckets_config else 0,
+                "created_at": t.created_at.isoformat() if t.created_at else None
+            } for t in templates]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/templates/<int:template_id>', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_elective_rollout_template_detail(template_id):
+    """Get a specific template's details."""
+    try:
+        template = ElectiveRolloutTemplate.query.get(template_id)
+        if not template:
+            return jsonify({"error": "Template not found"}), 404
+        
+        return jsonify({
+            "id": template.id,
+            "name": template.name,
+            "class_level": template.class_level,
+            "target_semester_no": template.target_semester_no,
+            "buckets_config": template.buckets_config,
+            "min_batch_size": template.min_batch_size,
+            "default_duration_days": template.default_duration_days
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/templates/<int:template_id>', methods=['DELETE'])
+@login_required
+@require_roles('Admin')
+def api_elective_rollout_template_delete(template_id):
+    """Delete a template."""
+    try:
+        template = ElectiveRolloutTemplate.query.get(template_id)
+        if not template:
+            return jsonify({"error": "Template not found"}), 404
+        
+        db.session.delete(template)
+        db.session.commit()
+        return jsonify({"message": "Template deleted"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/dashboard', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_elective_rollout_dashboard():
+    """Get comprehensive dashboard with progress stats for all active rollouts."""
+    try:
+        scope_dept_ids = _get_admin_scope_dept_ids()
+        
+        # Get all active windows
+        query = ElectiveWindow.query.filter(ElectiveWindow.status.in_(['Open', 'Extension']))
+        
+        if scope_dept_ids is not None:
+            allowed_section_ids = [
+                r[0] for r in (db.session.query(ClassSection.section_id)
+                               .join(Specialization, ClassSection.spec_id == Specialization.id)
+                               .filter(Specialization.dept_id.in_(scope_dept_ids))
+                               .all())
+            ]
+            query = query.filter(ElectiveWindow.section_id.in_(allowed_section_ids))
+        
+        windows = query.order_by(ElectiveWindow.rollout_batch_id, ElectiveWindow.section_id).all()
+        
+        # Group by rollout batch
+        batches = {}
+        for w in windows:
+            batch_id = w.rollout_batch_id or f"legacy_{w.id}"
+            if batch_id not in batches:
+                batches[batch_id] = {
+                    "batch_id": batch_id,
+                    "deadline": w.deadline_at.isoformat() if w.deadline_at else None,
+                    "windows": [],
+                    "total_students": 0,
+                    "total_selected": 0
+                }
+            
+            section = ClassSection.query.get(w.section_id)
+            student_count = StudentProfile.query.filter_by(current_section_id=w.section_id).count()
+            selected_count = (db.session.query(db.func.count(db.distinct(StudentElective.student_id)))
+                              .filter(StudentElective.window_id == w.id)
+                              .scalar()) or 0
+            
+            # Get per-subject counts
+            offerings = ElectiveOffering.query.filter_by(window_id=w.id, status='Open').all()
+            subjects_data = []
+            for off in offerings:
+                subj = Subject.query.get(off.subject_id)
+                count = StudentElective.query.filter_by(window_id=w.id, subject_id=off.subject_id).count()
+                subjects_data.append({
+                    "subject_id": off.subject_id,
+                    "name": subj.name if subj else "-",
+                    "count": count,
+                    "is_danger": count < w.min_batch_size
+                })
+            
+            batches[batch_id]["windows"].append({
+                "window_id": w.id,
+                "section_id": w.section_id,
+                "section_name": f"{section.class_level} - {section.name}" if section else "-",
+                "bucket": w.bucket,
+                "target_semester": w.target_semester_no,
+                "status": w.status,
+                "min_batch_size": w.min_batch_size,
+                "student_count": student_count,
+                "selected_count": selected_count,
+                "progress_pct": round((selected_count / student_count * 100), 1) if student_count > 0 else 0,
+                "subjects": subjects_data
+            })
+            
+            batches[batch_id]["total_students"] += student_count
+            batches[batch_id]["total_selected"] += selected_count
+        
+        # Calculate overall progress per batch
+        result = []
+        for batch_id, batch in batches.items():
+            batch["overall_progress_pct"] = (
+                round((batch["total_selected"] / batch["total_students"] * 100), 1)
+                if batch["total_students"] > 0 else 0
+            )
+            result.append(batch)
+        
+        # Sort by deadline (soonest first)
+        result.sort(key=lambda x: x["deadline"] or "9999")
+        
+        return jsonify({"rollouts": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_rollout/bulk_close', methods=['POST'])
+@login_required
+@require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
+def api_elective_rollout_bulk_close():
+    """Close all windows in a rollout batch (or finalize with auto-balance)."""
+    try:
+        data = request.json or {}
+        batch_id = data.get('batch_id')
+        finalize = bool(data.get('finalize'))
+        window_ids = data.get('window_ids')  # Optional: close specific windows
+        
+        if not batch_id and not window_ids:
+            return jsonify({"error": "batch_id or window_ids required"}), 400
+        
+        if batch_id:
+            windows = ElectiveWindow.query.filter_by(rollout_batch_id=batch_id).filter(
+                ElectiveWindow.status.in_(['Open', 'Extension'])
+            ).all()
+        else:
+            windows = ElectiveWindow.query.filter(
+                ElectiveWindow.id.in_(window_ids),
+                ElectiveWindow.status.in_(['Open', 'Extension'])
+            ).all()
+        
+        results = []
+        for window in windows:
+            if finalize:
+                # Run auto-balance for each window
+                result = _finalize_single_window(window)
+                results.append(result)
+            else:
+                # Check for underfilled
+                _, counts = _window_offering_counts(window.id)
+                underfilled = [c for c in counts if c['status'] == 'Open' and c['count'] < window.min_batch_size]
+                
+                if underfilled:
+                    window.status = 'Extension'
+                    results.append({
+                        "window_id": window.id,
+                        "status": "Extension",
+                        "underfilled": len(underfilled)
+                    })
+                else:
+                    window.status = 'Closed'
+                    window.closed_at = datetime.utcnow()
+                    ElectiveOffering.query.filter_by(window_id=window.id).update({"status": "Closed"})
+                    StudentElective.query.filter_by(window_id=window.id).update({"status": "Approved"})
+                    results.append({
+                        "window_id": window.id,
+                        "status": "Closed"
+                    })
+        
+        db.session.commit()
+        return jsonify({
+            "message": f"Processed {len(results)} windows",
+            "results": results
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+def _finalize_single_window(window):
+    """Helper to finalize a single window with auto-balance."""
+    min_batch = int(window.min_batch_size or 12)
+    
+    # Get students and selections
+    section_students = StudentProfile.query.filter_by(current_section_id=window.section_id).all()
+    student_ids = [s.student_id for s in section_students]
+    
+    selections = (StudentElective.query
+                  .filter(StudentElective.window_id == window.id)
+                  .filter(StudentElective.student_id.in_(student_ids))
+                  .all())
+    selected_by_student = {se.student_id: se for se in selections}
+    
+    # Get offerings
+    offered = ElectiveOffering.query.filter_by(window_id=window.id).all()
+    offered_subject_ids = [o.subject_id for o in offered]
+    
+    # Count per subject
+    subject_counts = {sid: 0 for sid in offered_subject_ids}
+    for se in selections:
+        if se.subject_id in subject_counts:
+            subject_counts[se.subject_id] += 1
+    
+    # Determine drops
+    to_drop = [sid for sid, c in subject_counts.items() if c < min_batch]
+    active_subject_ids = [sid for sid in offered_subject_ids if sid not in to_drop]
+    if not active_subject_ids:
+        to_drop = []
+        active_subject_ids = list(offered_subject_ids)
+    
+    # Mark offerings
+    for off in offered:
+        if off.subject_id in to_drop:
+            off.status = 'Dropped'
+        else:
+            off.status = 'Closed'
+    
+    # Find students needing assignment
+    needing = []
+    for s in section_students:
+        se = selected_by_student.get(s.student_id)
+        if se is None or se.subject_id not in active_subject_ids:
+            needing.append(s.student_id)
+    
+    # Recompute active counts
+    active_counts = {sid: 0 for sid in active_subject_ids}
+    for s in section_students:
+        se = selected_by_student.get(s.student_id)
+        if se and se.subject_id in active_counts:
+            active_counts[se.subject_id] += 1
+    
+    # Auto-assign
+    assigned = 0
+    for sid in needing:
+        target_subject_id = sorted(active_counts.items(), key=lambda kv: (kv[1], kv[0]))[0][0]
+        existing = selected_by_student.get(sid)
+        if existing:
+            existing.subject_id = target_subject_id
+            existing.status = 'Approved'
+        else:
+            db.session.add(StudentElective(student_id=sid, subject_id=target_subject_id, window_id=window.id, status='Approved'))
+        active_counts[target_subject_id] += 1
+        assigned += 1
+    
+    # Approve all
+    StudentElective.query.filter_by(window_id=window.id).update({"status": "Approved"})
+    
+    # Close window
+    window.status = 'Closed'
+    window.closed_at = datetime.utcnow()
+    
+    return {
+        "window_id": window.id,
+        "status": "Closed",
+        "dropped": len(to_drop),
+        "auto_assigned": assigned
+    }
+
+
+@app.route('/api/admin/elective_rollout/send_reminders', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def api_elective_rollout_send_reminders():
+    """Send reminder notifications to students who haven't selected electives."""
+    try:
+        data = request.json or {}
+        batch_id = data.get('batch_id')
+        window_ids = data.get('window_ids')
+        
+        if not batch_id and not window_ids:
+            return jsonify({"error": "batch_id or window_ids required"}), 400
+        
+        if batch_id:
+            windows = ElectiveWindow.query.filter_by(rollout_batch_id=batch_id).filter(
+                ElectiveWindow.status.in_(['Open', 'Extension'])
+            ).all()
+        else:
+            windows = ElectiveWindow.query.filter(
+                ElectiveWindow.id.in_(window_ids),
+                ElectiveWindow.status.in_(['Open', 'Extension'])
+            ).all()
+        
+        notified_count = 0
+        for window in windows:
+            section = ClassSection.query.get(window.section_id)
+            if not section:
+                continue
+            
+            # Get students who haven't selected
+            all_students = StudentProfile.query.filter_by(current_section_id=window.section_id).all()
+            selected_ids = set(
+                r[0] for r in db.session.query(StudentElective.student_id)
+                .filter_by(window_id=window.id).all()
+            )
+            
+            deadline_str = window.deadline_at.strftime('%d %b %Y %I:%M %p') if window.deadline_at else "soon"
+            
+            for student in all_students:
+                if student.student_id not in selected_ids:
+                    # Create notification
+                    db.session.add(Notification(
+                        user_id=student.student_id,
+                        title="Elective Selection Pending",
+                        message=f"Please select your {window.bucket} elective for Semester {window.target_semester_no}. Deadline: {deadline_str}",
+                        type="warning"
+                    ))
+                    notified_count += 1
+            
+            window.reminder_sent_at = datetime.utcnow()
+        
+        db.session.commit()
+        return jsonify({
+            "message": f"Sent reminders to {notified_count} students",
+            "notified_count": notified_count
+        })
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
@@ -10531,10 +12105,12 @@ def mark_notification_read():
 
 # ==========================================
 # UPLOAD APIs (Admin Only - Protected)
+# SECURITY: All uploads are rate limited to prevent DoS
 # ==========================================
 @app.route('/api/upload/master_dept_subject', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)  # Strict limit for resource-intensive operations
 def upload_dept_subject():
     try:
         dept_ids = _get_admin_scope_dept_ids()
@@ -10575,6 +12151,7 @@ def upload_dept_subject():
 @app.route('/api/upload/master_class', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_classes():
     try:
         dept_ids = _get_admin_scope_dept_ids()
@@ -10680,6 +12257,7 @@ def upload_classes():
 @app.route('/api/upload/semester_course_structure', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_semester_course_structure():
     """Upload semester course structure independent of faculty allocation.
 
@@ -10832,6 +12410,7 @@ def upload_semester_course_structure():
 @app.route('/api/upload/rooms', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_rooms():
     try:
         file = get_db_file_handle(request)
@@ -10874,6 +12453,7 @@ def upload_rooms():
 @app.route('/api/upload/staff', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_staff():
     try:
         file = get_db_file_handle(request); df = pd.read_csv(file)
@@ -10957,6 +12537,7 @@ def upload_staff():
 @app.route('/api/upload/students', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_students():
     try:
         file = get_db_file_handle(request)
@@ -11105,6 +12686,7 @@ def upload_students():
 @app.route('/api/upload/schedule', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_schedule():
     try:
         scope_dept_ids = _get_admin_scope_dept_ids()
@@ -11214,6 +12796,7 @@ def upload_schedule():
 @app.route('/api/upload/assign_class_teachers', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_class_teachers():
     try:
         scope_dept_ids = _get_admin_scope_dept_ids()
@@ -11779,6 +13362,7 @@ def get_mentor_logs():
 @app.route('/api/upload/subject_allocation', methods=['POST'])
 @login_required
 @require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_subject_allocation():
     try:
         dept_ids = _get_admin_scope_dept_ids()
@@ -12108,11 +13692,22 @@ def submit_elective():
                         return jsonify({"error": "You are not eligible for extension changes"}), 403
 
             # Save/replace (editable while open/extension)
+            action_type = "updated" if existing else "submitted"
             if existing:
                 existing.subject_id = subject_id
                 existing.status = 'Pending'
             else:
                 db.session.add(StudentElective(student_id=student_id, subject_id=subject_id, window_id=window.id, status='Pending'))
+            
+            # Send confirmation notification to student
+            deadline_str = window.deadline_at.strftime('%d %b %Y') if window.deadline_at else "TBD"
+            db.session.add(Notification(
+                user_id=student_id,
+                title=f"Elective Selection {action_type.title()}",
+                message=f"Your selection for {new_subject.name} ({new_subject.subject_type}) has been {action_type}. Selection deadline: {deadline_str}. You can change until the window closes.",
+                type="success"
+            ))
+            
             db.session.commit()
             return jsonify({"message": "Saved", "window_id": window.id}), 200
 
@@ -12139,6 +13734,15 @@ def submit_elective():
         
         # 3. Save New Choice
         db.session.add(StudentElective(student_id=student_id, subject_id=subject_id))
+        
+        # Send confirmation notification to student
+        db.session.add(Notification(
+            user_id=student_id,
+            title="Elective Selection Locked",
+            message=f"Your selection for {new_subject.name} ({target_type}) has been saved and is now locked. Contact your Class Teacher if you need to change it.",
+            type="success"
+        ))
+        
         db.session.commit()
         
         return jsonify({"message": "Saved"}), 200
@@ -12169,7 +13773,70 @@ def get_ca_sheet():
             d = db.session.get(Department, subject.dept_id)
             if d: dept_name = d.name
 
-        # 4. Students Query (Elective Aware)
+        # 4. Students Query (MDM External, Elective, or Regular)
+        is_mdm_virtual = getattr(section, 'is_virtual', False) and getattr(subject, 'is_mdm_oe', False)
+        
+        if is_mdm_virtual:
+            # MDM/OE Inbound: Load external students
+            pool_id = getattr(subject, 'mdm_pool_id', None)
+            students = []
+            if pool_id:
+                pool = db.session.get(MDMOfferingPool, pool_id)
+                if pool:
+                    offering = CrossSchoolOffering.query.filter_by(code=pool.code).first()
+                    if offering:
+                        external_students = ExternalStudentProfile.query.filter_by(
+                            enrolled_offering_id=offering.offering_id,
+                            status='Enrolled'
+                        ).order_by(ExternalStudentProfile.full_name).all()
+                        
+                        # Fetch existing marks for external students
+                        existing = CAMarks.query.filter_by(section_id=section_id, subject_id=subject_id).all()
+                        marks_map = {m.external_student_id: m for m in existing if m.external_student_id}
+                        
+                        pub_status = {
+                            'ta1': any(m.is_published_ta1 for m in existing),
+                            'ta2': any(m.is_published_ta2 for m in existing),
+                            'ta3': any(m.is_published_ta3 for m in existing)
+                        }
+                        
+                        sheet = []
+                        for es in external_students:
+                            m = marks_map.get(es.external_id)
+                            sheet.append({
+                                "student_id": f"ext_{es.external_id}",
+                                "external_student_id": es.external_id,
+                                "is_external": True,
+                                "roll": es.roll_number or f"EXT-{es.external_id}",
+                                "name": es.full_name,
+                                "home_school": es.home_school_name,
+                                "ta1": m.ta1 if m else "", "ta2": m.ta2 if m else "", "ta3": m.ta3 if m else "",
+                                "a1": m.a1 if m else "", "a2": m.a2 if m else "", "a3": m.a3 if m else "", "a4": m.a4 if m else "", "a5": m.a5 if m else "",
+                                "status": m.learner_status if m else "-",
+                                "att_score": m.attendance_score if m else 0
+                            })
+                        
+                        # Metadata for MDM
+                        today = date.today()
+                        current_term = get_current_term_name()
+                        meta = {
+                            "department": f"MDM/OE - {pool.type}",
+                            "school": "MIT Art, Design and Technology University",
+                            "class_name": f"External - {pool.code}",
+                            "subject_name": subject.name,
+                            "subject_code": subject.code,
+                            "teacher": teacher_name,
+                            "academic_year": pool.academic_year or current_term.split(' Sem')[0],
+                            "semester": current_term.split(' ')[-2] + " " + current_term.split(' ')[-1],
+                            "is_mdm_oe": True
+                        }
+                        
+                        return jsonify({"subject": subject.name, "meta": meta, "publish_status": pub_status, "students": sheet, "is_mdm_external": True})
+            
+            # Fallback if no students found
+            return jsonify({"subject": subject.name, "meta": {}, "publish_status": {}, "students": [], "is_mdm_external": True})
+        
+        # Regular flow (elective or core)
         students_query = StudentProfile.query.filter_by(current_section_id=section_id)
         if is_elective_type(subject.subject_type):
             students_query = (students_query.join(StudentElective)
@@ -12254,16 +13921,41 @@ def submit_ca_marks():
         # ---------------------------------------------------
 
         for row in marks_list:
-            student_id = row['student_id']
-            record = CAMarks.query.filter_by(student_id=student_id, subject_id=subject_id).first()
+            student_id = row.get('student_id')
+            external_student_id = row.get('external_student_id')
+            is_external = row.get('is_external') or (student_id and str(student_id).startswith('ext_'))
             
-            # Create if new
-            if not record: 
-                record = CAMarks(
-                    student_id=student_id, subject_id=subject_id, section_id=section_id,
-                    ta1=0, ta2=0, ta3=0, a1=0, a2=0, a3=0, a4=0, a5=0
-                )
-                db.session.add(record)
+            # Handle external students (MDM/OE)
+            if is_external:
+                if not external_student_id and student_id:
+                    # Extract external_student_id from "ext_123" format
+                    external_student_id = int(str(student_id).replace('ext_', ''))
+                
+                record = CAMarks.query.filter_by(
+                    external_student_id=external_student_id, 
+                    subject_id=subject_id
+                ).first()
+                
+                if not record:
+                    record = CAMarks(
+                        student_id=None,  # No internal student
+                        external_student_id=external_student_id,
+                        subject_id=subject_id, 
+                        section_id=section_id,
+                        ta1=0, ta2=0, ta3=0, a1=0, a2=0, a3=0, a4=0, a5=0
+                    )
+                    db.session.add(record)
+            else:
+                # Regular internal student
+                record = CAMarks.query.filter_by(student_id=student_id, subject_id=subject_id).first()
+                
+                # Create if new
+                if not record: 
+                    record = CAMarks(
+                        student_id=student_id, subject_id=subject_id, section_id=section_id,
+                        ta1=0, ta2=0, ta3=0, a1=0, a2=0, a3=0, a4=0, a5=0
+                    )
+                    db.session.add(record)
             
             # Helper to parse input
             def get_val(key): return float(row.get(key) or 0)
@@ -12280,30 +13972,46 @@ def submit_ca_marks():
                 if publish: record.is_published_ta3 = True
 
             # --- 2. CALCULATE REAL ATTENDANCE SCORE ---
-            # Get Student Object to find Batch
-            student = db.session.get(StudentProfile, student_id)
-            student_batch = None
-            if student and student.mentor_batch_id:
-                mb = db.session.get(MentorBatch, student.mentor_batch_id)
-                if mb: student_batch = mb.batch_name
+            # For external students, calculate attendance from external transactions
+            if is_external:
+                # Get attendance for external students
+                ext_sessions = sess_ids  # Use all sessions for the subject
+                valid_sessions = len(ext_sessions)
+                attended_count = 0
+                if ext_sessions:
+                    ext_transactions = AttendanceTransaction.query.filter(
+                        AttendanceTransaction.session_id.in_(ext_sessions),
+                        AttendanceTransaction.external_student_id == external_student_id
+                    ).all()
+                    attended_count = sum(1 for t in ext_transactions if t.status in PRESENT_STATUSES)
+                
+                # Scale to 5 Marks
+                att_perc = (attended_count / valid_sessions) if valid_sessions > 0 else 0
+                real_att_score = round(att_perc * 5, 1)
+                record.attendance_score = real_att_score
+            else:
+                # Internal student - get batch info
+                student = db.session.get(StudentProfile, student_id)
+                student_batch = None
+                if student and student.mentor_batch_id:
+                    mb = db.session.get(MentorBatch, student.mentor_batch_id)
+                    if mb: student_batch = mb.batch_name
 
-            valid_sessions = 0
-            attended_count = 0
-            
-            for sess_id, target_batch in sessions:
-                # Logic: If lecture (no batch) OR batch matches student
-                if not target_batch or target_batch == student_batch:
-                    valid_sessions += 1
-                    status = att_map.get((student_id, sess_id))
-                    if status in PRESENT_STATUSES:
-                        attended_count += 1
-            
-            # Scale to 5 Marks
-            # Example: 80% Attendance = (80/100)*5 = 4 Marks
-            att_perc = (attended_count / valid_sessions) if valid_sessions > 0 else 0
-            real_att_score = round(att_perc * 5, 1)
-            
-            record.attendance_score = real_att_score
+                valid_sessions = 0
+                attended_count = 0
+                
+                for sess_id, target_batch in sessions:
+                    # Logic: If lecture (no batch) OR batch matches student
+                    if not target_batch or target_batch == student_batch:
+                        valid_sessions += 1
+                        status = att_map.get((student_id, sess_id))
+                        if status in PRESENT_STATUSES:
+                            attended_count += 1
+                
+                # Scale to 5 Marks
+                att_perc = (attended_count / valid_sessions) if valid_sessions > 0 else 0
+                real_att_score = round(att_perc * 5, 1)
+                record.attendance_score = real_att_score
             # ------------------------------------------
 
             # --- 3. RECALCULATE TOTALS ---
@@ -12332,8 +14040,8 @@ def submit_ca_marks():
             # Total = TA1(10) + TA2(10) + TA3(10) + Assign(15) + Att(5) = 50
             record.total_ca = min(50, s_ta1 + s_ta2 + val_ta3 + s_assign + real_att_score)
 
-            # Notification
-            if publish:
+            # Notification (only for internal students)
+            if publish and not is_external and student_id:
                 send_notification(
                     student_id, 
                     f"Results: {subject.name}", 
@@ -13034,6 +14742,13 @@ def rollover_semester():
     def _impl():
         conf = SystemConfig.query.get('current_term')
         old_term = conf.value if conf else get_current_term_name()
+        
+        # Determine current semester number from term (e.g., "2025-26 Odd" -> Odd semesters are 1,3,5,7)
+        # After rollover, we move to the NEXT semester
+        is_odd_term = 'odd' in old_term.lower() if old_term else True
+        # Current semester numbers being completed: Odd=1,3,5,7 or Even=2,4,6,8
+        # We preserve elections for semesters AFTER the current batch
+        current_max_sem = 7 if is_odd_term else 8
 
         # Archive Allocations
         allocs = (
@@ -13076,19 +14791,52 @@ def rollover_semester():
                 )
             )
 
-        # FLUSH Active Tables
+        # FLUSH Active Tables (Schedule & Allocations - always cleared)
         db.session.query(WeeklySchedule).delete()
         db.session.query(SubjectAllocation).delete()
-        db.session.query(StudentElective).delete()
-        db.session.query(ElectiveOffering).delete()
+        
+        # ============================================
+        # SAFE ELECTIVE CLEANUP - Preserve Future Semester Elections
+        # ============================================
+        # Get window IDs for current/past semesters (these can be deleted)
+        windows_to_clear = db.session.query(ElectiveWindow.id).filter(
+            ElectiveWindow.target_semester_no <= current_max_sem
+        ).subquery()
+        
+        # Count preserved elections for audit
+        preserved_count = db.session.query(StudentElective).filter(
+            ~StudentElective.window_id.in_(db.session.query(windows_to_clear))
+        ).count()
+        
+        # Log audit entry for rollover
+        db.session.add(ElectiveAuditLog(
+            action_type='ROLLOVER',
+            details=f"Term rollover from {old_term}. Preserved {preserved_count} future-semester elections.",
+            performed_by_id=current_user.user_id if current_user and current_user.is_authenticated else None
+        ))
+        
+        # Delete only elections for current/past semester windows
+        db.session.query(StudentElective).filter(
+            StudentElective.window_id.in_(db.session.query(windows_to_clear))
+        ).delete(synchronize_session=False)
+        
+        # Delete only offerings for current/past semester windows
+        db.session.query(ElectiveOffering).filter(
+            ElectiveOffering.window_id.in_(db.session.query(windows_to_clear))
+        ).delete(synchronize_session=False)
+        
+        # Close/archive old windows but keep future ones
+        db.session.query(ElectiveWindow).filter(
+            ElectiveWindow.target_semester_no <= current_max_sem
+        ).update({'status': 'Archived'}, synchronize_session=False)
 
         db.session.commit()
-        log_activity("System Rollover", f"Archived {old_term} and reset for new term.")
+        log_activity("System Rollover", f"Archived {old_term}. Preserved {preserved_count} future-semester elective selections.")
 
         return (
             jsonify(
                 {
-                    "message": f"Rollover Complete. System reset for new term. Old data archived under '{old_term}'."
+                    "message": f"Rollover Complete. System reset for new term. Old data archived under '{old_term}'. {preserved_count} future elective selections preserved."
                 }
             ),
             200,
@@ -13273,6 +15021,8 @@ def create_teaching_plan():
 
 
 @app.route('/api/upload/syllabus', methods=['POST'])
+@login_required
+@limiter.limit(RATE_LIMIT_BULK)
 def upload_syllabus_csv():
     try:
         file = get_db_file_handle(request)
@@ -13368,6 +15118,2040 @@ def get_syllabus():
             "progress": progress
         })
     except Exception as e: return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# MDM/OE REVAMPED ROLLOUT SYSTEM
+# ==========================================
+
+def _get_mdm_academic_year():
+    """Get current academic year for MDM/OE (same as elective)."""
+    from datetime import datetime
+    now = datetime.now()
+    if now.month >= 6:
+        return f"{now.year}-{str(now.year + 1)[-2:]}"
+    else:
+        return f"{now.year - 1}-{str(now.year)[-2:]}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COURSE POOL MANAGEMENT (Both Inbound & Outbound)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/admin/mdm_rollout/pool', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_pool_list():
+    """List MDM/OE course pool with optional filters."""
+    try:
+        direction = request.args.get('direction', '').strip()  # Inbound or Outbound
+        course_type = request.args.get('type', '').strip()  # MDM or OE
+        academic_year = request.args.get('academic_year', _get_mdm_academic_year())
+
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        query = db.session.query(MDMOfferingPool).filter(
+            MDMOfferingPool.is_active == True,
+            MDMOfferingPool.academic_year == academic_year
+        )
+
+        # Apply department filter for non-SuperAdmin
+        if scope_dept_ids is not None:
+            if not scope_dept_ids:
+                return jsonify({"pool": {"Inbound": {"MDM": [], "OE": []}, "Outbound": {"MDM": [], "OE": []}}, "academic_year": academic_year, "total_count": 0})
+            query = query.filter(MDMOfferingPool.dept_id.in_(scope_dept_ids))
+
+        if direction:
+            query = query.filter(MDMOfferingPool.direction == direction)
+        if course_type:
+            query = query.filter(MDMOfferingPool.type == course_type)
+
+        rows = query.order_by(MDMOfferingPool.direction, MDMOfferingPool.type, MDMOfferingPool.code).all()
+        
+        # Group by direction then type
+        grouped = {'Inbound': {'MDM': [], 'OE': []}, 'Outbound': {'MDM': [], 'OE': []}}
+        for p in rows:
+            item = {
+                "id": p.id,
+                "code": p.code,
+                "name": p.name,
+                "type": p.type,
+                "direction": p.direction,
+                "L": p.l_count,
+                "T": p.t_count,
+                "P": p.p_count,
+                "credits": p.credits,
+                "capacity": p.capacity,
+                "host_school_name": p.host_school_name,
+                "schedule_pattern": p.schedule_pattern,
+                "start_date": str(p.start_date) if p.start_date else None,
+                "end_date": str(p.end_date) if p.end_date else None,
+                "target_class_levels": p.target_class_levels,
+                "description": p.description
+            }
+            if p.direction in grouped and p.type in grouped[p.direction]:
+                grouped[p.direction][p.type].append(item)
+        
+        return jsonify({
+            "pool": grouped,
+            "academic_year": academic_year,
+            "total_count": len(rows)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/pool/template', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_pool_template():
+    """Download CSV template for MDM/OE pool upload."""
+    import io
+    csv_content = """code,name,type,direction,L,T,P,credits,capacity,host_school_name,schedule_pattern,start_date,end_date,target_class_levels,description
+PYB101,Python for Biologists,MDM,Inbound,3,0,2,4,60,,,2026-02-01,2026-03-31,SY,Intro to Python for Biology students
+BLK201,Blockchain Fundamentals,MDM,Inbound,3,0,0,3,50,,,2026-02-01,2026-03-31,"SY,TY",Blockchain technology introduction
+ENV101,Environmental Studies,OE,Inbound,2,0,0,2,,,Sat 10-12 AM,2026-01-15,2026-05-15,,Environmental awareness course
+SKT101,Sketching 101,MDM,Outbound,2,1,2,4,40,School of Design,MWF 3-5 PM,2026-02-01,2026-03-31,SY,Design sketching basics
+MKT201,Marketing Basics,OE,Outbound,3,0,0,3,30,Business School,Tue-Thu 2-4 PM,2026-02-01,2026-05-01,"TY,LY",Marketing fundamentals"""
+    
+    output = io.BytesIO()
+    output.write(csv_content.encode('utf-8'))
+    output.seek(0)
+    
+    return send_file(
+        output,
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name='mdm_oe_pool_template.csv'
+    )
+
+
+@app.route('/api/admin/mdm_rollout/pool/upload', methods=['POST'])
+@login_required
+@require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
+def api_mdm_pool_upload():
+    """Upload MDM/OE courses to the pool.
+
+    CSV Format: code,name,type,direction,L,T,P,credits,capacity,host_school_name,schedule_pattern,start_date,end_date,target_class_levels,description
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+        if scope_dept_ids is not None and not scope_dept_ids:
+            return jsonify({"error": "Admin department scope not configured"}), 403
+
+        # Get department ID for the uploaded courses
+        dept_id = scope_dept_ids[0] if scope_dept_ids else None
+
+        file = request.files.get('file')
+        academic_year = request.form.get('academic_year', _get_mdm_academic_year())
+        
+        if not file:
+            return jsonify({"error": "CSV file required"}), 400
+        
+        import csv
+        import io
+        from datetime import datetime
+        
+        content = file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(content))
+        courses_data = list(reader)
+        
+        created = 0
+        updated = 0
+        errors = []
+        
+        for row in courses_data:
+            code = (row.get('code') or '').strip()
+            name = (row.get('name') or '').strip()
+            course_type = (row.get('type') or '').strip().upper()
+            direction = (row.get('direction') or '').strip().capitalize()
+            
+            if not code or not name:
+                errors.append(f"Missing code or name: {row}")
+                continue
+            
+            if course_type not in ['MDM', 'OE']:
+                errors.append(f"Invalid type '{course_type}' for {code}. Must be MDM or OE.")
+                continue
+            
+            if direction not in ['Inbound', 'Outbound']:
+                errors.append(f"Invalid direction '{direction}' for {code}. Must be Inbound or Outbound.")
+                continue
+            
+            # Parse L, T, P
+            l_count = int(row.get('L') or row.get('l_count') or 0)
+            t_count = int(row.get('T') or row.get('t_count') or 0)
+            p_count = int(row.get('P') or row.get('p_count') or 0)
+            credits = int(row.get('credits') or 0) or (l_count + t_count + (p_count // 2))
+            
+            capacity = int(row.get('capacity')) if row.get('capacity') else None
+            host_school = (row.get('host_school_name') or '').strip() or None
+            schedule = (row.get('schedule_pattern') or '').strip() or None
+            target_levels = (row.get('target_class_levels') or '').strip() or None
+            description = (row.get('description') or '').strip() or None
+            
+            # Parse dates
+            start_date = None
+            end_date = None
+            if row.get('start_date'):
+                try:
+                    start_date = datetime.strptime(row['start_date'].strip(), '%Y-%m-%d').date()
+                except:
+                    pass
+            if row.get('end_date'):
+                try:
+                    end_date = datetime.strptime(row['end_date'].strip(), '%Y-%m-%d').date()
+                except:
+                    pass
+            
+            # Check if exists
+            existing = MDMOfferingPool.query.filter_by(code=code, academic_year=academic_year).first()
+
+            if existing:
+                # Check department scope for updates
+                if scope_dept_ids is not None and existing.dept_id not in scope_dept_ids:
+                    errors.append(f"Course {code} belongs to another department - cannot modify")
+                    continue
+
+                # Update existing
+                existing.name = name
+                existing.type = course_type
+                existing.direction = direction
+                existing.l_count = l_count
+                existing.t_count = t_count
+                existing.p_count = p_count
+                existing.credits = credits
+                existing.capacity = capacity
+                existing.host_school_name = host_school
+                existing.schedule_pattern = schedule
+                existing.start_date = start_date
+                existing.end_date = end_date
+                existing.target_class_levels = target_levels
+                existing.description = description
+                existing.is_active = True
+                updated += 1
+            else:
+                # Create new
+                pool_entry = MDMOfferingPool(
+                    code=code,
+                    name=name,
+                    type=course_type,
+                    direction=direction,
+                    l_count=l_count,
+                    t_count=t_count,
+                    p_count=p_count,
+                    credits=credits,
+                    capacity=capacity,
+                    host_school_name=host_school,
+                    schedule_pattern=schedule,
+                    start_date=start_date,
+                    end_date=end_date,
+                    target_class_levels=target_levels,
+                    description=description,
+                    academic_year=academic_year,
+                    dept_id=dept_id,  # Department scope
+                    created_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+                )
+                db.session.add(pool_entry)
+                created += 1
+        
+        # Audit log
+        db.session.add(MDMAuditLog(
+            action_type='POOL_UPLOAD',
+            details=f"Uploaded {created} new, updated {updated} courses for {academic_year}. Errors: {len(errors)}",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+        
+        db.session.commit()
+        
+        return jsonify({
+            "message": f"Pool updated: {created} created, {updated} updated",
+            "created": created,
+            "updated": updated,
+            "errors": errors[:10]
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/pool/<int:pool_id>', methods=['DELETE'])
+@login_required
+@require_roles('Admin')
+def api_mdm_pool_delete(pool_id):
+    """Remove a course from the MDM/OE pool (soft delete)."""
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        entry = db.session.get(MDMOfferingPool, pool_id)
+        if not entry:
+            return jsonify({"error": "Pool entry not found"}), 404
+
+        # Check department scope
+        if scope_dept_ids is not None and entry.dept_id not in scope_dept_ids:
+            return jsonify({"error": "Access denied - course belongs to another department"}), 403
+
+        entry.is_active = False
+        
+        db.session.add(MDMAuditLog(
+            action_type='POOL_DELETE',
+            pool_id=pool_id,
+            details=f"Removed {entry.code} ({entry.name}) from pool",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+        
+        db.session.commit()
+        return jsonify({"message": "Removed from pool"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INBOUND MANAGEMENT (External Students - They Come To Us)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/admin/mdm_rollout/inbound/courses', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_inbound_courses():
+    """List active Inbound courses (we host) for management."""
+    try:
+        academic_year = request.args.get('academic_year', _get_mdm_academic_year())
+
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        query = MDMOfferingPool.query.filter(
+            MDMOfferingPool.direction == 'Inbound',
+            MDMOfferingPool.is_active == True,
+            MDMOfferingPool.academic_year == academic_year
+        )
+
+        # Apply department filter for non-SuperAdmin
+        if scope_dept_ids is not None:
+            if not scope_dept_ids:
+                return jsonify({"courses": [], "academic_year": academic_year})
+            query = query.filter(MDMOfferingPool.dept_id.in_(scope_dept_ids))
+
+        courses = query.order_by(MDMOfferingPool.type, MDMOfferingPool.code).all()
+        
+        result = []
+        for c in courses:
+            # Count external students enrolled
+            ext_count = ExternalStudentProfile.query.join(
+                CrossSchoolOffering, ExternalStudentProfile.enrolled_offering_id == CrossSchoolOffering.offering_id
+            ).filter(CrossSchoolOffering.code == c.code).count()
+            
+            # Get assigned faculty name
+            faculty_name = None
+            if c.assigned_faculty_id:
+                staff = StaffProfile.query.get(c.assigned_faculty_id)
+                if staff:
+                    faculty_name = staff.full_name
+            
+            result.append({
+                "id": c.id,
+                "code": c.code,
+                "name": c.name,
+                "type": c.type,
+                "L": c.l_count,
+                "T": c.t_count,
+                "P": c.p_count,
+                "credits": c.credits,
+                "capacity": c.capacity,
+                "external_students_count": ext_count,
+                "assigned_faculty_id": c.assigned_faculty_id,
+                "assigned_faculty_name": faculty_name,
+                "schedule_pattern": c.schedule_pattern,
+                "start_date": str(c.start_date) if c.start_date else None,
+                "end_date": str(c.end_date) if c.end_date else None
+            })
+        
+        return jsonify({"courses": result, "academic_year": academic_year})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/inbound/<int:pool_id>/assign_faculty', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def api_mdm_inbound_assign_faculty(pool_id):
+    """Assign faculty to an Inbound course. Auto-creates Subject + virtual Section + Allocation."""
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        data = request.json or {}
+        faculty_id = data.get('faculty_id')
+
+        if not faculty_id:
+            return jsonify({"error": "faculty_id required"}), 400
+
+        course = db.session.get(MDMOfferingPool, pool_id)
+        if not course or course.direction != 'Inbound':
+            return jsonify({"error": "Inbound course not found"}), 404
+
+        # Check department scope
+        if scope_dept_ids is not None and course.dept_id not in scope_dept_ids:
+            return jsonify({"error": "Access denied - course belongs to another department"}), 403
+        
+        old_faculty = course.assigned_faculty_id
+        course.assigned_faculty_id = faculty_id
+        
+        # ===== AUTO-CREATE SUBJECT + SECTION + ALLOCATION =====
+        # This bridges MDM courses into the regular academic infrastructure
+        
+        # 1. Check if Subject already exists for this pool
+        mdm_subject = Subject.query.filter_by(mdm_pool_id=pool_id).first()
+        if not mdm_subject:
+            # Create new subject from pool data
+            # Use unique code: MDM_{pool_code}_{academic_year_short}
+            year_short = course.academic_year.replace('-', '')[-4:] if course.academic_year else '2526'
+            unique_code = f"MDM_{course.code}_{year_short}"
+            
+            # Check if code already exists (edge case)
+            existing = Subject.query.filter_by(code=unique_code).first()
+            if existing:
+                unique_code = f"MDM_{course.code}_{pool_id}"
+            
+            mdm_subject = Subject(
+                name=f"[{course.type}] {course.name}",
+                code=unique_code,
+                dept_id=None,  # Cross-school, no specific department
+                subject_type=course.type,  # MDM or OE
+                l_count=course.l_count or 0,
+                t_count=course.t_count or 0,
+                p_count=course.p_count or 0,
+                credits=course.credits or 3,
+                target_class=course.target_class_levels,
+                is_mdm_oe=True,
+                mdm_pool_id=pool_id,
+                mdm_direction='Inbound'
+            )
+            db.session.add(mdm_subject)
+            db.session.flush()  # Get subject_id
+        
+        # 2. Check if virtual section exists for this pool
+        virtual_section = ClassSection.query.filter_by(mdm_pool_id=pool_id, is_virtual=True).first()
+        if not virtual_section:
+            # Create virtual section for external students
+            virtual_section = ClassSection(
+                name=f"EXT-{course.code}",  # External section naming
+                class_level='MDM',  # Special class level for MDM
+                is_virtual=True,
+                mdm_pool_id=pool_id
+            )
+            db.session.add(virtual_section)
+            db.session.flush()  # Get section_id
+        
+        # 3. Check/Update SubjectAllocation for this faculty
+        existing_alloc = SubjectAllocation.query.filter_by(
+            subject_id=mdm_subject.subject_id,
+            section_id=virtual_section.section_id
+        ).first()
+        
+        if existing_alloc:
+            # Update existing allocation with new faculty
+            existing_alloc.teacher_id = faculty_id
+        else:
+            # Create new allocation
+            new_alloc = SubjectAllocation(
+                section_id=virtual_section.section_id,
+                subject_id=mdm_subject.subject_id,
+                teacher_id=faculty_id
+            )
+            db.session.add(new_alloc)
+        
+        # ===== END AUTO-CREATE =====
+        
+        db.session.add(MDMAuditLog(
+            action_type='FACULTY_ASSIGN',
+            pool_id=pool_id,
+            old_value={"faculty_id": old_faculty},
+            new_value={"faculty_id": faculty_id, "subject_id": mdm_subject.subject_id, "section_id": virtual_section.section_id},
+            details=f"Assigned faculty to {course.code}, created Subject {mdm_subject.code}",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+        
+        db.session.commit()
+        return jsonify({
+            "message": "Faculty assigned successfully",
+            "subject_created": mdm_subject.code,
+            "virtual_section": virtual_section.name
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/inbound/<int:pool_id>/external_students', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_inbound_external_students(pool_id):
+    """Get external students enrolled in an Inbound course."""
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        course = db.session.get(MDMOfferingPool, pool_id)
+        if not course or course.direction != 'Inbound':
+            return jsonify({"error": "Inbound course not found"}), 404
+
+        # Check department scope
+        if scope_dept_ids is not None and course.dept_id not in scope_dept_ids:
+            return jsonify({"error": "Access denied - course belongs to another department"}), 403
+        
+        # Find the CrossSchoolOffering linked to this pool code
+        offering = CrossSchoolOffering.query.filter_by(code=course.code).first()
+        if not offering:
+            return jsonify({"students": [], "message": "No offering created yet"})
+        
+        students = ExternalStudentProfile.query.filter_by(
+            enrolled_offering_id=offering.offering_id
+        ).order_by(ExternalStudentProfile.full_name).all()
+        
+        result = [{
+            "external_id": s.external_id,
+            "full_name": s.full_name,
+            "roll_number": s.roll_number,
+            "email": s.email,
+            "home_school_name": s.home_school_name,
+            "department_name": s.department_name,
+            "status": s.status,
+            "enrolled_on": s.enrolled_on.isoformat() if s.enrolled_on else None
+        } for s in students]
+        
+        return jsonify({"students": result, "course": course.name, "count": len(result)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/inbound/<int:pool_id>/upload_students', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def api_mdm_inbound_upload_students(pool_id):
+    """Upload external students to an Inbound course via CSV.
+
+    CSV Format: full_name,roll_number,email,home_school_name,department_name
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        course = db.session.get(MDMOfferingPool, pool_id)
+        if not course or course.direction != 'Inbound':
+            return jsonify({"error": "Inbound course not found"}), 404
+
+        # Check department scope
+        if scope_dept_ids is not None and course.dept_id not in scope_dept_ids:
+            return jsonify({"error": "Access denied - course belongs to another department"}), 403
+
+        file = request.files.get('file')
+        if not file:
+            return jsonify({"error": "CSV file required"}), 400
+        
+        import csv
+        import io
+        
+        content = file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(content))
+        students_data = list(reader)
+        
+        # Get or create CrossSchoolOffering
+        offering = CrossSchoolOffering.query.filter_by(code=course.code).first()
+        if not offering:
+            offering = CrossSchoolOffering(
+                name=course.name,
+                code=course.code,
+                type=course.type,
+                direction='Inbound',
+                credits=course.credits,
+                capacity=course.capacity,
+                start_date=course.start_date,
+                end_date=course.end_date,
+                schedule_pattern=course.schedule_pattern,
+                assigned_faculty_id=course.assigned_faculty_id,
+                status='Open'
+            )
+            db.session.add(offering)
+            db.session.flush()
+        
+        created = 0
+        skipped = 0
+        errors = []
+        
+        for row in students_data:
+            full_name = (row.get('full_name') or row.get('name') or '').strip()
+            roll_number = (row.get('roll_number') or row.get('roll') or '').strip()
+            email = (row.get('email') or '').strip() or None
+            home_school = (row.get('home_school_name') or row.get('home_school') or '').strip()
+            dept = (row.get('department_name') or row.get('department') or '').strip() or None
+            
+            if not full_name or not roll_number or not home_school:
+                errors.append(f"Missing required fields: {row}")
+                continue
+            
+            # Check duplicate
+            existing = ExternalStudentProfile.query.filter_by(
+                roll_number=roll_number,
+                enrolled_offering_id=offering.offering_id
+            ).first()
+            
+            if existing:
+                skipped += 1
+                continue
+            
+            # Check capacity
+            if course.capacity:
+                current_count = ExternalStudentProfile.query.filter_by(
+                    enrolled_offering_id=offering.offering_id
+                ).count()
+                if current_count >= course.capacity:
+                    errors.append(f"Capacity full, cannot add {roll_number}")
+                    continue
+            
+            student = ExternalStudentProfile(
+                full_name=full_name,
+                roll_number=roll_number,
+                email=email,
+                home_school_name=home_school,
+                department_name=dept,
+                enrolled_offering_id=offering.offering_id,
+                status='Active'
+            )
+            db.session.add(student)
+            created += 1
+        
+        db.session.add(MDMAuditLog(
+            action_type='EXTERNAL_UPLOAD',
+            pool_id=pool_id,
+            details=f"Uploaded {created} external students to {course.code}. Skipped: {skipped}",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+        
+        db.session.commit()
+        
+        return jsonify({
+            "message": f"Uploaded {created} students, skipped {skipped}",
+            "created": created,
+            "skipped": skipped,
+            "errors": errors[:10]
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/inbound/<int:pool_id>/export_marks', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_inbound_export_marks(pool_id):
+    """Export marks for external students in an Inbound course."""
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        course = db.session.get(MDMOfferingPool, pool_id)
+        if not course or course.direction != 'Inbound':
+            return jsonify({"error": "Inbound course not found"}), 404
+
+        # Check department scope
+        if scope_dept_ids is not None and course.dept_id not in scope_dept_ids:
+            return jsonify({"error": "Access denied - course belongs to another department"}), 403
+        
+        offering = CrossSchoolOffering.query.filter_by(code=course.code).first()
+        if not offering:
+            return jsonify({"error": "No offering found"}), 404
+        
+        students = ExternalStudentProfile.query.filter_by(
+            enrolled_offering_id=offering.offering_id
+        ).order_by(ExternalStudentProfile.roll_number).all()
+        
+        # Get marks
+        import io
+        import csv
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Roll Number', 'Student Name', 'Home School', 'Department', 'TA1', 'TA2', 'TA3', 'Total', 'Grade', 'Host School'])
+        
+        for s in students:
+            # Get CA marks for this external student
+            marks = CAMarks.query.filter_by(
+                external_student_id=s.external_id,
+                cross_school_offering_id=offering.offering_id
+            ).first()
+            
+            ta1 = marks.ta1 if marks else ''
+            ta2 = marks.ta2 if marks else ''
+            ta3 = marks.ta3 if marks else ''
+            total = ''
+            grade = ''
+            
+            if marks:
+                total = (marks.ta1 or 0) + (marks.ta2 or 0) + (marks.ta3 or 0)
+                # Simple grading
+                if total >= 54:
+                    grade = 'A+'
+                elif total >= 48:
+                    grade = 'A'
+                elif total >= 42:
+                    grade = 'B+'
+                elif total >= 36:
+                    grade = 'B'
+                elif total >= 30:
+                    grade = 'C'
+                else:
+                    grade = 'F'
+            
+            writer.writerow([
+                s.roll_number,
+                s.full_name,
+                s.home_school_name,
+                s.department_name or '',
+                ta1,
+                ta2,
+                ta3,
+                total,
+                grade,
+                'School of Computing'  # Our school
+            ])
+        
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode('utf-8')),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'{course.code}_external_marks.csv'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OUTBOUND ROLLOUT (Selection Window - Our Students Select Partner Courses)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/admin/mdm_rollout/outbound/courses', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_courses():
+    """List Outbound courses available for rollout."""
+    try:
+        academic_year = request.args.get('academic_year', _get_mdm_academic_year())
+        class_level = request.args.get('class_level', '').strip().upper()
+        course_type = request.args.get('type', '').strip().upper()
+
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        query = MDMOfferingPool.query.filter(
+            MDMOfferingPool.direction == 'Outbound',
+            MDMOfferingPool.is_active == True,
+            MDMOfferingPool.academic_year == academic_year
+        )
+
+        # Apply department filter for non-SuperAdmin
+        if scope_dept_ids is not None:
+            if not scope_dept_ids:
+                return jsonify({"courses": [], "academic_year": academic_year})
+            query = query.filter(MDMOfferingPool.dept_id.in_(scope_dept_ids))
+
+        if course_type:
+            query = query.filter(MDMOfferingPool.type == course_type)
+
+        courses = query.order_by(MDMOfferingPool.type, MDMOfferingPool.code).all()
+        
+        result = []
+        for c in courses:
+            # Check if class level is targeted
+            if class_level and c.target_class_levels:
+                levels = [l.strip().upper() for l in c.target_class_levels.split(',')]
+                if class_level not in levels:
+                    continue
+            
+            # Count current selections
+            selection_count = MDMOutboundSelection.query.filter_by(pool_id=c.id).count()
+            
+            result.append({
+                "id": c.id,
+                "code": c.code,
+                "name": c.name,
+                "type": c.type,
+                "L": c.l_count,
+                "T": c.t_count,
+                "P": c.p_count,
+                "credits": c.credits,
+                "capacity": c.capacity,
+                "host_school_name": c.host_school_name,
+                "schedule_pattern": c.schedule_pattern,
+                "start_date": str(c.start_date) if c.start_date else None,
+                "end_date": str(c.end_date) if c.end_date else None,
+                "target_class_levels": c.target_class_levels,
+                "description": c.description,
+                "current_selections": selection_count
+            })
+        
+        return jsonify({"courses": result, "academic_year": academic_year})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/windows', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_windows():
+    """List Outbound selection windows."""
+    try:
+        academic_year = request.args.get('academic_year', _get_mdm_academic_year())
+        status = request.args.get('status', '').strip()
+
+        # Department scoping - filter by sections in admin's department
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        query = MDMOutboundWindow.query.filter_by(academic_year=academic_year)
+
+        # Apply department filter via section for non-SuperAdmin
+        if scope_dept_ids is not None:
+            if not scope_dept_ids:
+                return jsonify({"windows": [], "academic_year": academic_year})
+            # Filter windows where section belongs to admin's department
+            query = query.join(
+                ClassSection, MDMOutboundWindow.section_id == ClassSection.section_id
+            ).join(
+                Specialization, ClassSection.spec_id == Specialization.id
+            ).filter(Specialization.dept_id.in_(scope_dept_ids))
+
+        if status:
+            query = query.filter(MDMOutboundWindow.status == status)
+
+        windows = query.order_by(MDMOutboundWindow.created_at.desc()).all()
+        
+        result = []
+        for w in windows:
+            # Get section/class info
+            section_name = None
+            if w.section_id:
+                sec = ClassSection.query.get(w.section_id)
+                if sec:
+                    section_name = f"{sec.class_level} - {sec.name}"
+            
+            # Count students and selections
+            student_count = 0
+            selected_count = 0
+            
+            if w.section_id:
+                student_count = StudentProfile.query.filter_by(current_section_id=w.section_id).count()
+            elif w.class_level:
+                student_count = db.session.query(StudentProfile).join(
+                    ClassSection, StudentProfile.current_section_id == ClassSection.section_id
+                ).filter(ClassSection.class_level == w.class_level).count()
+            
+            selected_count = MDMOutboundSelection.query.filter_by(window_id=w.id).count()
+            
+            # Get courses in this window
+            offerings = db.session.query(MDMOfferingPool).join(
+                MDMWindowOffering, MDMOfferingPool.id == MDMWindowOffering.pool_id
+            ).filter(MDMWindowOffering.window_id == w.id).all()
+            
+            course_names = [o.code for o in offerings]
+            
+            result.append({
+                "id": w.id,
+                "section_id": w.section_id,
+                "section_name": section_name,
+                "class_level": w.class_level,
+                "course_type": w.course_type,
+                "status": w.status,
+                "min_batch_size": w.min_batch_size,
+                "deadline_at": w.deadline_at.isoformat() if w.deadline_at else None,
+                "student_count": student_count,
+                "selected_count": selected_count,
+                "courses": course_names,
+                "created_at": w.created_at.isoformat() if w.created_at else None
+            })
+        
+        return jsonify({"windows": result, "academic_year": academic_year})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/sections', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_sections():
+    """Get sections for outbound rollout wizard."""
+    try:
+        class_level = request.args.get('class_level', '').strip().upper()
+        
+        if not class_level:
+            return jsonify({"error": "class_level required"}), 400
+        
+        scope_dept_ids = _get_admin_scope_dept_ids()
+        
+        query = db.session.query(ClassSection)
+        if scope_dept_ids is not None:
+            query = query.join(Specialization, ClassSection.spec_id == Specialization.id).filter(
+                Specialization.dept_id.in_(scope_dept_ids)
+            )
+        
+        sections = query.filter(ClassSection.class_level == class_level).order_by(ClassSection.name).all()
+        
+        result = []
+        for sec in sections:
+            student_count = StudentProfile.query.filter_by(current_section_id=sec.section_id).count()
+            
+            # Check for active windows
+            active_window = MDMOutboundWindow.query.filter(
+                MDMOutboundWindow.section_id == sec.section_id,
+                MDMOutboundWindow.status.in_(['Open', 'Extension'])
+            ).first()
+            
+            result.append({
+                "id": sec.section_id,
+                "name": f"{sec.class_level} - {sec.name}",
+                "student_count": student_count,
+                "has_active_window": active_window is not None
+            })
+        
+        return jsonify({"sections": result, "class_level": class_level})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/start', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_start_rollout():
+    """Start an Outbound selection window for students to choose partner courses.
+    
+    Request: {
+        section_ids: [1, 2, 3] OR class_level: "SY",
+        course_type: "MDM" or "OE" or "BOTH",
+        course_ids: [10, 11, 12],  // Pool IDs
+        deadline_at: "2026-02-15T17:00:00",
+        min_batch_size: 15
+    }
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        data = request.json or {}
+        section_ids = data.get('section_ids', [])
+        class_level = data.get('class_level', '').strip().upper()
+        course_type = data.get('course_type', 'BOTH').strip().upper()
+        course_ids = data.get('course_ids', [])
+        deadline_str = data.get('deadline_at')
+        min_batch = data.get('min_batch_size', 15)
+        academic_year = data.get('academic_year', _get_mdm_academic_year())
+
+        if not section_ids and not class_level:
+            return jsonify({"error": "Either section_ids or class_level required"}), 400
+
+        if not course_ids:
+            return jsonify({"error": "course_ids required"}), 400
+
+        if course_type not in ['MDM', 'OE', 'BOTH']:
+            return jsonify({"error": "course_type must be MDM, OE, or BOTH"}), 400
+
+        # Parse deadline
+        from datetime import datetime
+        deadline = None
+        if deadline_str:
+            try:
+                deadline = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+            except:
+                pass
+
+        # Validate courses are outbound and belong to admin's department
+        course_query = MDMOfferingPool.query.filter(
+            MDMOfferingPool.id.in_(course_ids),
+            MDMOfferingPool.direction == 'Outbound',
+            MDMOfferingPool.is_active == True
+        )
+        if scope_dept_ids is not None:
+            course_query = course_query.filter(MDMOfferingPool.dept_id.in_(scope_dept_ids))
+
+        courses = course_query.all()
+
+        if len(courses) != len(course_ids):
+            return jsonify({"error": "Some course IDs are invalid, not Outbound, or belong to another department"}), 400
+        
+        rollout_batch_id = str(uuid.uuid4())
+        windows_created = 0
+
+        # Create windows for each section (with department scoping)
+        targets = []
+        if section_ids:
+            # Validate sections belong to admin's department
+            section_query = ClassSection.query.filter(ClassSection.section_id.in_(section_ids))
+            if scope_dept_ids is not None:
+                section_query = section_query.join(
+                    Specialization, ClassSection.spec_id == Specialization.id
+                ).filter(Specialization.dept_id.in_(scope_dept_ids))
+            valid_sections = section_query.all()
+            for sec in valid_sections:
+                targets.append({'section_id': sec.section_id, 'class_level': None})
+        else:
+            # All sections at class level (with department scoping)
+            section_query = ClassSection.query.filter_by(class_level=class_level)
+            if scope_dept_ids is not None:
+                section_query = section_query.join(
+                    Specialization, ClassSection.spec_id == Specialization.id
+                ).filter(Specialization.dept_id.in_(scope_dept_ids))
+            sections = section_query.all()
+            for sec in sections:
+                targets.append({'section_id': sec.section_id, 'class_level': class_level})
+        
+        for target in targets:
+            # Check for existing active window
+            existing = MDMOutboundWindow.query.filter(
+                MDMOutboundWindow.section_id == target['section_id'],
+                MDMOutboundWindow.course_type == course_type,
+                MDMOutboundWindow.status.in_(['Open', 'Extension'])
+            ).first()
+            
+            if existing:
+                continue  # Skip sections with active windows
+            
+            window = MDMOutboundWindow(
+                section_id=target['section_id'],
+                class_level=target['class_level'] or class_level,
+                course_type=course_type,
+                academic_year=academic_year,
+                status='Open',
+                min_batch_size=min_batch,
+                deadline_at=deadline,
+                rollout_batch_id=rollout_batch_id,
+                created_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+            )
+            db.session.add(window)
+            db.session.flush()
+            
+            # Link courses to window
+            for course in courses:
+                link = MDMWindowOffering(
+                    window_id=window.id,
+                    pool_id=course.id,
+                    window_capacity=course.capacity
+                )
+                db.session.add(link)
+            
+            windows_created += 1
+        
+        db.session.add(MDMAuditLog(
+            action_type='WINDOW_OPEN',
+            details=f"Opened {windows_created} outbound {course_type} windows for {class_level or 'selected sections'}",
+            new_value={"rollout_batch_id": rollout_batch_id, "course_ids": course_ids},
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+        
+        db.session.commit()
+        
+        return jsonify({
+            "message": f"Created {windows_created} selection windows",
+            "windows_created": windows_created,
+            "rollout_batch_id": rollout_batch_id
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/windows/<int:window_id>/settings', methods=['PATCH'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_update_window_settings(window_id):
+    """Update settings for an Outbound selection window.
+
+    Body:
+        {
+            min_batch_size?: 3,      // Minimum students for course to run (can be as low as 1)
+            deadline_at?: "2026-02-15T17:00:00"
+        }
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        window = db.session.get(MDMOutboundWindow, window_id)
+        if not window:
+            return jsonify({"error": "Window not found"}), 404
+
+        # Check department scope via section
+        if scope_dept_ids is not None and window.section_id:
+            section = ClassSection.query.join(
+                Specialization, ClassSection.spec_id == Specialization.id
+            ).filter(
+                ClassSection.section_id == window.section_id,
+                Specialization.dept_id.in_(scope_dept_ids)
+            ).first()
+            if not section:
+                return jsonify({"error": "Access denied - window belongs to another department"}), 403
+
+        if window.status == 'Concluded':
+            return jsonify({"error": "Cannot modify concluded window"}), 400
+
+        data = request.json or {}
+        updated_fields = []
+
+        # Update min_batch_size
+        if 'min_batch_size' in data:
+            new_min = int(data['min_batch_size'])
+            if new_min < 1:
+                return jsonify({"error": "min_batch_size must be at least 1"}), 400
+            window.min_batch_size = new_min
+            updated_fields.append(f"min_batch_size={new_min}")
+
+        # Update deadline
+        if 'deadline_at' in data:
+            if data['deadline_at']:
+                from datetime import datetime
+                try:
+                    window.deadline_at = datetime.fromisoformat(data['deadline_at'].replace('Z', '+00:00'))
+                except ValueError:
+                    return jsonify({"error": "Invalid deadline_at format"}), 400
+            else:
+                window.deadline_at = None
+            updated_fields.append(f"deadline_at={data['deadline_at']}")
+
+        if updated_fields:
+            db.session.add(MDMAuditLog(
+                action_type='WINDOW_UPDATE',
+                window_id=window_id,
+                details=f"Updated: {', '.join(updated_fields)}",
+                performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+            ))
+            db.session.commit()
+
+        return jsonify({
+            "message": "Settings updated",
+            "min_batch_size": window.min_batch_size,
+            "deadline_at": window.deadline_at.isoformat() if window.deadline_at else None
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/windows/<int:window_id>/close', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_close_window(window_id):
+    """Close an Outbound selection window (stop accepting new selections).
+
+    This does NOT finalize selections - use /conclude for that.
+    Students can still see their selections, just can't change them.
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        window = db.session.get(MDMOutboundWindow, window_id)
+        if not window:
+            return jsonify({"error": "Window not found"}), 404
+
+        # Check department scope via section
+        if scope_dept_ids is not None and window.section_id:
+            section = ClassSection.query.join(
+                Specialization, ClassSection.spec_id == Specialization.id
+            ).filter(
+                ClassSection.section_id == window.section_id,
+                Specialization.dept_id.in_(scope_dept_ids)
+            ).first()
+            if not section:
+                return jsonify({"error": "Access denied - window belongs to another department"}), 403
+
+        if window.status in ('Closed', 'Concluded'):
+            return jsonify({"error": f"Window already {window.status.lower()}"}), 400
+
+        from datetime import datetime
+
+        selection_count = MDMOutboundSelection.query.filter_by(window_id=window_id).count()
+
+        window.status = 'Closed'
+        window.closed_at = datetime.now()
+
+        db.session.add(MDMAuditLog(
+            action_type='WINDOW_CLOSE',
+            window_id=window_id,
+            details=f"Closed window. Total selections: {selection_count}. Awaiting conclusion.",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+
+        db.session.commit()
+
+        return jsonify({
+            "message": f"Window closed. {selection_count} selections pending conclusion.",
+            "selection_count": selection_count
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/windows/<int:window_id>/reopen', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_reopen_window(window_id):
+    """Reopen a closed Outbound selection window.
+
+    Allows students to modify their selections again.
+    Can only reopen windows that are 'Closed' (not 'Concluded').
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        window = db.session.get(MDMOutboundWindow, window_id)
+        if not window:
+            return jsonify({"error": "Window not found"}), 404
+
+        # Check department scope via section
+        if scope_dept_ids is not None and window.section_id:
+            section = ClassSection.query.join(
+                Specialization, ClassSection.spec_id == Specialization.id
+            ).filter(
+                ClassSection.section_id == window.section_id,
+                Specialization.dept_id.in_(scope_dept_ids)
+            ).first()
+            if not section:
+                return jsonify({"error": "Access denied - window belongs to another department"}), 403
+
+        if window.status == 'Concluded':
+            return jsonify({"error": "Cannot reopen concluded window. Selections have been finalized."}), 400
+
+        if window.status in ('Open', 'Extension'):
+            return jsonify({"error": f"Window is already {window.status.lower()}"}), 400
+
+        from datetime import datetime
+
+        # Reopen as Extension (since it was previously open)
+        old_status = window.status
+        window.status = 'Extension'
+        window.closed_at = None
+
+        db.session.add(MDMAuditLog(
+            action_type='WINDOW_REOPEN',
+            window_id=window_id,
+            details=f"Reopened window from {old_status} to Extension.",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "Window reopened. Students can now modify their selections.",
+            "status": "Extension"
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/windows/<int:window_id>/conclude', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_conclude_window(window_id):
+    """Conclude/finalize an Outbound selection window.
+
+    - Courses meeting min_batch_size: selections become 'Confirmed'
+    - Courses below min_batch_size: selections become 'Dropped' (course cancelled)
+
+    This is the final step after closing the window.
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        window = db.session.get(MDMOutboundWindow, window_id)
+        if not window:
+            return jsonify({"error": "Window not found"}), 404
+
+        # Check department scope via section
+        if scope_dept_ids is not None and window.section_id:
+            section = ClassSection.query.join(
+                Specialization, ClassSection.spec_id == Specialization.id
+            ).filter(
+                ClassSection.section_id == window.section_id,
+                Specialization.dept_id.in_(scope_dept_ids)
+            ).first()
+            if not section:
+                return jsonify({"error": "Access denied - window belongs to another department"}), 403
+
+        if window.status == 'Concluded':
+            return jsonify({"error": "Window already concluded"}), 400
+
+        from datetime import datetime
+
+        # Get all selections for this window
+        selections = MDMOutboundSelection.query.filter_by(window_id=window_id).all()
+
+        # Group by course
+        course_selections = {}
+        for sel in selections:
+            if sel.pool_id not in course_selections:
+                course_selections[sel.pool_id] = []
+            course_selections[sel.pool_id].append(sel)
+
+        confirmed_count = 0
+        dropped_count = 0
+        cancelled_courses = []
+        confirmed_courses = []
+
+        for pool_id, sels in course_selections.items():
+            wo = MDMWindowOffering.query.filter_by(window_id=window_id, pool_id=pool_id).first()
+            course = MDMOfferingPool.query.get(pool_id)
+            course_code = course.code if course else str(pool_id)
+
+            if len(sels) < window.min_batch_size:
+                # Cancel course - below minimum batch size
+                if wo:
+                    wo.final_status = 'Cancelled'
+                for sel in sels:
+                    sel.status = 'Dropped'
+                    dropped_count += 1
+                cancelled_courses.append(course_code)
+            else:
+                # Confirm selections - min batch size met
+                if wo:
+                    wo.final_status = 'Confirmed'
+                for sel in sels:
+                    sel.status = 'Confirmed'
+                    sel.confirmed_at = datetime.now()
+                    confirmed_count += 1
+                confirmed_courses.append(course_code)
+
+        window.status = 'Concluded'
+        window.closed_at = window.closed_at or datetime.now()
+
+        db.session.add(MDMAuditLog(
+            action_type='WINDOW_CONCLUDE',
+            window_id=window_id,
+            details=f"Concluded window. Confirmed: {confirmed_count} in {len(confirmed_courses)} courses. Dropped: {dropped_count} in {len(cancelled_courses)} courses (below min batch {window.min_batch_size}).",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+
+        db.session.commit()
+
+        return jsonify({
+            "message": f"Window concluded. {confirmed_count} confirmed, {dropped_count} dropped.",
+            "confirmed": confirmed_count,
+            "dropped": dropped_count,
+            "confirmed_courses": confirmed_courses,
+            "cancelled_courses": cancelled_courses
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/windows/<int:window_id>/export', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_export_selections(window_id):
+    """Export confirmed selections for sending to partner schools."""
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        window = db.session.get(MDMOutboundWindow, window_id)
+        if not window:
+            return jsonify({"error": "Window not found"}), 404
+
+        # Check department scope via section
+        if scope_dept_ids is not None and window.section_id:
+            section = ClassSection.query.join(
+                Specialization, ClassSection.spec_id == Specialization.id
+            ).filter(
+                ClassSection.section_id == window.section_id,
+                Specialization.dept_id.in_(scope_dept_ids)
+            ).first()
+            if not section:
+                return jsonify({"error": "Access denied - window belongs to another department"}), 403
+        
+        selections = db.session.query(
+            MDMOutboundSelection, StudentProfile, MDMOfferingPool
+        ).join(
+            StudentProfile, MDMOutboundSelection.student_id == StudentProfile.student_id
+        ).join(
+            MDMOfferingPool, MDMOutboundSelection.pool_id == MDMOfferingPool.id
+        ).filter(
+            MDMOutboundSelection.window_id == window_id
+        ).order_by(MDMOfferingPool.code, StudentProfile.admission_number).all()
+
+        import io
+        import csv
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Course Code', 'Course Name', 'Host School', 'Student Name', 'Roll Number', 'Email', 'Department', 'Home School', 'Status'])
+        
+        for sel, student, course in selections:
+            # Get student's department
+            dept_name = ''
+            if student.current_section_id:
+                sec = ClassSection.query.get(student.current_section_id)
+                if sec and sec.spec_id:
+                    spec = Specialization.query.get(sec.spec_id)
+                    if spec and spec.dept_id:
+                        dept = Department.query.get(spec.dept_id)
+                        if dept:
+                            dept_name = dept.name
+            
+            writer.writerow([
+                course.code,
+                course.name,
+                course.host_school_name,
+                student.full_name,
+                student.admission_number,
+                '',  # Email - would need join to UserMaster
+                dept_name,
+                'School of Computing',  # Our school
+                sel.status
+            ])
+        
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode('utf-8')),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'outbound_selections_window_{window_id}.csv'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/windows/<int:window_id>/selections', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_get_selections(window_id):
+    """Get all student selections for a window as JSON (for display in table)."""
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        window = db.session.get(MDMOutboundWindow, window_id)
+        if not window:
+            return jsonify({"error": "Window not found"}), 404
+
+        # Check department scope via section
+        if scope_dept_ids is not None and window.section_id:
+            section = ClassSection.query.join(
+                Specialization, ClassSection.spec_id == Specialization.id
+            ).filter(
+                ClassSection.section_id == window.section_id,
+                Specialization.dept_id.in_(scope_dept_ids)
+            ).first()
+            if not section:
+                return jsonify({"error": "Access denied - window belongs to another department"}), 403
+
+        selections = db.session.query(
+            MDMOutboundSelection, StudentProfile, MDMOfferingPool
+        ).join(
+            StudentProfile, MDMOutboundSelection.student_id == StudentProfile.student_id
+        ).join(
+            MDMOfferingPool, MDMOutboundSelection.pool_id == MDMOfferingPool.id
+        ).filter(
+            MDMOutboundSelection.window_id == window_id
+        ).order_by(MDMOfferingPool.code, StudentProfile.admission_number).all()
+
+        result = []
+        for sel, student, course in selections:
+            # Get student's department
+            dept_name = ''
+            if student.current_section_id:
+                sec = ClassSection.query.get(student.current_section_id)
+                if sec and sec.spec_id:
+                    spec = Specialization.query.get(sec.spec_id)
+                    if spec and spec.dept_id:
+                        dept = Department.query.get(spec.dept_id)
+                        if dept:
+                            dept_name = dept.name
+
+            result.append({
+                "course_code": course.code,
+                "course_name": course.name,
+                "host_school": course.host_school_name,
+                "student_name": student.full_name,
+                "roll_number": student.admission_number,
+                "department": dept_name,
+                "status": sel.status,
+                "selected_at": sel.selected_at.strftime('%d %b %Y') if sel.selected_at else None
+            })
+
+        return jsonify({"selections": result, "count": len(result)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/outbound/import_marks', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def api_mdm_outbound_import_marks():
+    """Import marks from partner schools for our Outbound students.
+
+    CSV Format: roll_number,course_code,marks,grade
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        file = request.files.get('file')
+        if not file:
+            return jsonify({"error": "CSV file required"}), 400
+
+        import csv
+        import io
+        from datetime import datetime
+
+        content = file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(content))
+        marks_data = list(reader)
+
+        updated = 0
+        errors = []
+
+        for row in marks_data:
+            roll = (row.get('roll_number') or row.get('roll') or '').strip()
+            course_code = (row.get('course_code') or row.get('code') or '').strip()
+            marks = row.get('marks')
+            grade = (row.get('grade') or '').strip()
+
+            if not roll or not course_code:
+                errors.append(f"Missing roll/code: {row}")
+                continue
+
+            # Find student
+            student = StudentProfile.query.filter_by(admission_number=roll).first()
+            if not student:
+                errors.append(f"Student not found: {roll}")
+                continue
+
+            # Find course
+            course = MDMOfferingPool.query.filter_by(code=course_code, direction='Outbound').first()
+            if not course:
+                errors.append(f"Outbound course not found: {course_code}")
+                continue
+
+            # Check department scope for this course
+            if scope_dept_ids is not None and course.dept_id not in scope_dept_ids:
+                errors.append(f"Course {course_code} belongs to another department")
+                continue
+            
+            # Find selection
+            selection = MDMOutboundSelection.query.filter_by(
+                student_id=student.student_id,
+                pool_id=course.id
+            ).first()
+            
+            if not selection:
+                errors.append(f"No selection found for {roll} in {course_code}")
+                continue
+            
+            # Update marks
+            selection.external_marks = float(marks) if marks else None
+            selection.external_grade = grade if grade else None
+            selection.marks_imported_at = datetime.now()
+            updated += 1
+        
+        db.session.add(MDMAuditLog(
+            action_type='MARKS_IMPORT',
+            details=f"Imported marks for {updated} students. Errors: {len(errors)}",
+            performed_by_id=current_user.user_id if hasattr(current_user, 'user_id') else None
+        ))
+        
+        db.session.commit()
+        
+        return jsonify({
+            "message": f"Updated marks for {updated} students",
+            "updated": updated,
+            "errors": errors[:10]
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/report/inbound/<int:pool_id>', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_report_inbound(pool_id):
+    """Generate comprehensive report for an Inbound MDM/OE course.
+
+    Includes: Course details, enrolled external students, attendance summary, marks summary.
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        import io
+        import csv
+
+        course = db.session.get(MDMOfferingPool, pool_id)
+        if not course or course.direction != 'Inbound':
+            return jsonify({"error": "Inbound course not found"}), 404
+
+        # Check department scope
+        if scope_dept_ids is not None and course.dept_id not in scope_dept_ids:
+            return jsonify({"error": "Access denied - course belongs to another department"}), 403
+        
+        # Get assigned faculty
+        faculty_name = "Not Assigned"
+        if course.assigned_faculty_id:
+            f = db.session.get(StaffProfile, course.assigned_faculty_id)
+            if f: faculty_name = f.full_name
+        
+        # Find subject and section created for this pool
+        subject = Subject.query.filter_by(mdm_pool_id=pool_id).first()
+        section = ClassSection.query.filter_by(mdm_pool_id=pool_id, is_virtual=True).first()
+        
+        # Get external students
+        offering = CrossSchoolOffering.query.filter_by(code=course.code).first()
+        external_students = []
+        if offering:
+            external_students = ExternalStudentProfile.query.filter_by(
+                enrolled_offering_id=offering.offering_id,
+                status='Enrolled'
+            ).order_by(ExternalStudentProfile.full_name).all()
+        
+        # Get attendance data
+        attendance_data = {}
+        marks_data = {}
+        
+        if subject and section:
+            # Get conducted sessions
+            sessions = (db.session.query(SessionLog)
+                .join(WeeklySchedule, SessionLog.schedule_id == WeeklySchedule.schedule_id)
+                .filter(WeeklySchedule.subject_id == subject.subject_id)
+                .filter(WeeklySchedule.section_id == section.section_id)
+                .filter(SessionLog.status == 'Conducted')
+                .all())
+            
+            total_sessions = len(sessions)
+            sess_ids = [s.session_id for s in sessions]
+            
+            # Get attendance transactions for external students
+            if sess_ids:
+                for es in external_students:
+                    txns = AttendanceTransaction.query.filter(
+                        AttendanceTransaction.session_id.in_(sess_ids),
+                        AttendanceTransaction.external_student_id == es.external_id
+                    ).all()
+                    present_count = sum(1 for t in txns if t.status in PRESENT_STATUSES)
+                    attendance_data[es.external_id] = {
+                        'total': total_sessions,
+                        'present': present_count,
+                        'percentage': round((present_count / total_sessions * 100), 1) if total_sessions > 0 else 0
+                    }
+            
+            # Get marks data
+            for es in external_students:
+                marks = CAMarks.query.filter_by(
+                    external_student_id=es.external_id,
+                    subject_id=subject.subject_id
+                ).first()
+                if marks:
+                    marks_data[es.external_id] = {
+                        'ta1': marks.ta1 or 0, 'ta2': marks.ta2 or 0, 'ta3': marks.ta3 or 0,
+                        'a1': marks.a1 or 0, 'a2': marks.a2 or 0, 'a3': marks.a3 or 0,
+                        'a4': marks.a4 or 0, 'a5': marks.a5 or 0,
+                        'att_score': marks.attendance_score or 0,
+                        'total': marks.total_ca or 0,
+                        'status': marks.learner_status or '-'
+                    }
+        
+        # Build report
+        report = {
+            "course": {
+                "code": course.code,
+                "name": course.name,
+                "type": course.type,
+                "direction": course.direction,
+                "credits": course.credits,
+                "ltp": f"{course.l_count}-{course.t_count}-{course.p_count}",
+                "faculty": faculty_name,
+                "academic_year": course.academic_year
+            },
+            "summary": {
+                "total_students": len(external_students),
+                "total_sessions": attendance_data.get(external_students[0].external_id, {}).get('total', 0) if external_students else 0
+            },
+            "students": []
+        }
+        
+        for es in external_students:
+            att = attendance_data.get(es.external_id, {})
+            mrks = marks_data.get(es.external_id, {})
+            report["students"].append({
+                "external_id": es.external_id,
+                "name": es.full_name,
+                "roll_number": es.roll_number,
+                "home_school": es.home_school_name,
+                "department": es.department_name,
+                "attendance": att,
+                "marks": mrks
+            })
+        
+        # Check if CSV export requested
+        if request.args.get('format') == 'csv':
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Header
+            writer.writerow([f"MDM/OE Inbound Report: {course.code} - {course.name}"])
+            writer.writerow([f"Type: {course.type} | Faculty: {faculty_name} | Academic Year: {course.academic_year}"])
+            writer.writerow([])
+            writer.writerow(['Roll Number', 'Name', 'Home School', 'Att %', 'TA1', 'TA2', 'TA3', 'A1', 'A2', 'A3', 'A4', 'A5', 'Att Score', 'Total/50', 'Status'])
+            
+            for s in report["students"]:
+                att = s.get('attendance', {})
+                mrks = s.get('marks', {})
+                writer.writerow([
+                    s['roll_number'] or '', s['name'], s['home_school'] or '',
+                    f"{att.get('percentage', 0)}%",
+                    mrks.get('ta1', ''), mrks.get('ta2', ''), mrks.get('ta3', ''),
+                    mrks.get('a1', ''), mrks.get('a2', ''), mrks.get('a3', ''), mrks.get('a4', ''), mrks.get('a5', ''),
+                    mrks.get('att_score', ''), mrks.get('total', ''), mrks.get('status', '')
+                ])
+            
+            output.seek(0)
+            return Response(
+                output.getvalue(),
+                mimetype='text/csv',
+                headers={"Content-Disposition": f"attachment;filename=MDM_Inbound_{course.code}_Report.csv"}
+            )
+        
+        return jsonify(report)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/mdm_rollout/report/outbound', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def api_mdm_report_outbound():
+    """Generate comprehensive report for Outbound MDM/OE courses.
+
+    Shows all our students who selected outbound courses and their imported marks.
+    """
+    try:
+        # Department scoping
+        scope_dept_ids = _get_admin_scope_dept_ids()
+
+        academic_year = request.args.get('academic_year') or get_current_academic_year()
+        course_type = request.args.get('type')  # MDM, OE, or None for both
+
+        # Get all outbound selections
+        query = db.session.query(
+            MDMOutboundSelection, StudentProfile, MDMOfferingPool
+        ).join(
+            StudentProfile, MDMOutboundSelection.student_id == StudentProfile.student_id
+        ).join(
+            MDMOfferingPool, MDMOutboundSelection.pool_id == MDMOfferingPool.id
+        ).filter(
+            MDMOfferingPool.direction == 'Outbound',
+            MDMOfferingPool.academic_year == academic_year
+        )
+
+        # Apply department filter for non-SuperAdmin
+        if scope_dept_ids is not None:
+            if not scope_dept_ids:
+                return jsonify({"courses": [], "summary": {"total_courses": 0, "total_students": 0}, "academic_year": academic_year})
+            query = query.filter(MDMOfferingPool.dept_id.in_(scope_dept_ids))
+
+        if course_type:
+            query = query.filter(MDMOfferingPool.type == course_type)
+        
+        selections = query.order_by(MDMOfferingPool.code, StudentProfile.full_name).all()
+        
+        # Group by course
+        courses_map = {}
+        for sel, student, course in selections:
+            if course.id not in courses_map:
+                courses_map[course.id] = {
+                    "code": course.code,
+                    "name": course.name,
+                    "type": course.type,
+                    "host_school": course.host_school_name,
+                    "credits": course.credits,
+                    "students": []
+                }
+            
+            section = db.session.get(ClassSection, student.current_section_id) if student.current_section_id else None
+            courses_map[course.id]["students"].append({
+                "student_id": student.student_id,
+                "name": student.full_name,
+                "admission_number": student.admission_number,
+                "section": f"{section.class_level}-{section.name}" if section else "-",
+                "status": sel.status,
+                "external_marks": sel.external_marks,
+                "external_grade": sel.external_grade,
+                "selected_at": sel.selected_at.isoformat() if sel.selected_at else None
+            })
+        
+        report = {
+            "academic_year": academic_year,
+            "total_selections": len(selections),
+            "total_courses": len(courses_map),
+            "courses": list(courses_map.values())
+        }
+        
+        # CSV export
+        if request.args.get('format') == 'csv':
+            import io
+            import csv
+            
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            writer.writerow([f"MDM/OE Outbound Report - {academic_year}"])
+            writer.writerow([])
+            writer.writerow(['Course Code', 'Course Name', 'Host School', 'Student Name', 'Admission No', 'Section', 'Status', 'Marks', 'Grade'])
+            
+            for course in report["courses"]:
+                for s in course["students"]:
+                    writer.writerow([
+                        course["code"], course["name"], course["host_school"] or '',
+                        s["name"], s["admission_number"], s["section"],
+                        s["status"], s["external_marks"] or '', s["external_grade"] or ''
+                    ])
+            
+            output.seek(0)
+            return Response(
+                output.getvalue(),
+                mimetype='text/csv',
+                headers={"Content-Disposition": f"attachment;filename=MDM_Outbound_Report_{academic_year}.csv"}
+            )
+        
+        return jsonify(report)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STUDENT APIs (Outbound Selection)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/student/mdm_outbound/windows', methods=['GET'])
+@login_required
+def api_student_mdm_windows():
+    """Get student's open MDM/OE selection windows."""
+    try:
+        student = StudentProfile.query.filter_by(student_id=current_user.user_id).first()
+        if not student:
+            return jsonify({"error": "Student not found"}), 404
+        
+        section_id = student.current_section_id
+        if not section_id:
+            return jsonify({"windows": []})
+        
+        # Get windows for student's section (Open, Extension, or Closed with selection)
+        # Include Closed windows so students can see their pending selections
+        windows = MDMOutboundWindow.query.filter(
+            MDMOutboundWindow.section_id == section_id,
+            MDMOutboundWindow.status.in_(['Open', 'Extension', 'Closed'])
+        ).all()
+
+        result = []
+        for w in windows:
+            # Get available courses
+            courses = db.session.query(MDMOfferingPool, MDMWindowOffering).join(
+                MDMWindowOffering, MDMOfferingPool.id == MDMWindowOffering.pool_id
+            ).filter(MDMWindowOffering.window_id == w.id).all()
+
+            # Get student's current selection
+            my_selection = MDMOutboundSelection.query.filter_by(
+                student_id=student.student_id,
+                window_id=w.id
+            ).first()
+
+            # Skip Closed windows where student has no selection (nothing to show)
+            if w.status == 'Closed' and not my_selection:
+                continue
+
+            course_list = []
+            for course, wo in courses:
+                # Count selections
+                sel_count = MDMOutboundSelection.query.filter_by(pool_id=course.id, window_id=w.id).count()
+                capacity = wo.window_capacity or course.capacity
+
+                course_list.append({
+                    "id": course.id,
+                    "code": course.code,
+                    "name": course.name,
+                    "type": course.type,
+                    "credits": course.credits,
+                    "host_school_name": course.host_school_name,
+                    "schedule_pattern": course.schedule_pattern,
+                    "description": course.description,
+                    "capacity": capacity,
+                    "selections": sel_count,
+                    "available": (capacity - sel_count) if capacity else None
+                })
+
+            # can_edit: only Open/Extension windows allow selection changes
+            can_edit = w.status in ('Open', 'Extension')
+
+            result.append({
+                "id": w.id,
+                "course_type": w.course_type,
+                "status": w.status,
+                "can_edit": can_edit,
+                "deadline_at": w.deadline_at.isoformat() if w.deadline_at else None,
+                "courses": course_list,
+                "my_selection": {
+                    "id": my_selection.pool_id,
+                    "pool_id": my_selection.pool_id,
+                    "status": my_selection.status,
+                    "code": next((c["code"] for c in course_list if c["id"] == my_selection.pool_id), None),
+                    "name": next((c["name"] for c in course_list if c["id"] == my_selection.pool_id), None),
+                    "host_school_name": next((c["host_school_name"] for c in course_list if c["id"] == my_selection.pool_id), None)
+                } if my_selection else None
+            })
+        
+        return jsonify({"windows": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/student/mdm_outbound/select', methods=['POST'])
+@login_required
+def api_student_mdm_select():
+    """Student selects an Outbound MDM/OE course."""
+    try:
+        data = request.json or {}
+        window_id = data.get('window_id')
+        pool_id = data.get('pool_id')
+        
+        if not window_id or not pool_id:
+            return jsonify({"error": "window_id and pool_id required"}), 400
+        
+        student = StudentProfile.query.filter_by(student_id=current_user.user_id).first()
+        if not student:
+            return jsonify({"error": "Student not found"}), 404
+        
+        window = db.session.get(MDMOutboundWindow, window_id)
+        if not window:
+            return jsonify({"error": "Window not found"}), 404
+        
+        if window.status not in ['Open', 'Extension']:
+            return jsonify({"error": "Selection window is closed"}), 400
+        
+        if window.section_id != student.current_section_id:
+            return jsonify({"error": "Window not available for your section"}), 403
+        
+        # Verify course is in window
+        wo = MDMWindowOffering.query.filter_by(window_id=window_id, pool_id=pool_id).first()
+        if not wo:
+            return jsonify({"error": "Course not available in this window"}), 400
+        
+        # Check capacity
+        course = db.session.get(MDMOfferingPool, pool_id)
+        capacity = wo.window_capacity or course.capacity
+        if capacity:
+            current_count = MDMOutboundSelection.query.filter_by(pool_id=pool_id, window_id=window_id).count()
+            if current_count >= capacity:
+                return jsonify({"error": "Course is full"}), 400
+        
+        # Check for existing selection in same window
+        existing = MDMOutboundSelection.query.filter_by(
+            student_id=student.student_id,
+            window_id=window_id
+        ).first()
+        
+        old_pool_id = None
+        if existing:
+            old_pool_id = existing.pool_id
+            existing.pool_id = pool_id
+            existing.status = 'Selected'
+            from datetime import datetime
+            existing.selected_at = datetime.now()
+        else:
+            selection = MDMOutboundSelection(
+                student_id=student.student_id,
+                window_id=window_id,
+                pool_id=pool_id,
+                status='Selected'
+            )
+            db.session.add(selection)
+        
+        db.session.add(MDMAuditLog(
+            action_type='STUDENT_SELECT',
+            window_id=window_id,
+            student_id=student.student_id,
+            pool_id=pool_id,
+            old_value={"pool_id": old_pool_id} if old_pool_id else None,
+            new_value={"pool_id": pool_id},
+            details=f"Selected {course.code}",
+            performed_by_id=current_user.user_id
+        ))
+        
+        # Send confirmation notification to student
+        action_type = "changed" if old_pool_id else "selected"
+        old_course_name = ""
+        if old_pool_id:
+            old_course = db.session.get(MDMOfferingPool, old_pool_id)
+            old_course_name = f" (previously: {old_course.code})" if old_course else ""
+        
+        db.session.add(Notification(
+            user_id=student.student_id,
+            title=f"{course.type} Course Selection Confirmed",
+            message=f"You have successfully {action_type} {course.code} - {course.name} at {course.host_school_name or 'partner school'}.{old_course_name}",
+            type="success"
+        ))
+        
+        db.session.commit()
+        
+        return jsonify({"message": f"Selected {course.name}", "course_code": course.code})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/student/mdm_outbound/my_courses', methods=['GET'])
+@login_required
+def api_student_mdm_my_courses():
+    """Get student's MDM/OE course selections and marks."""
+    try:
+        student = StudentProfile.query.filter_by(student_id=current_user.user_id).first()
+        if not student:
+            return jsonify({"error": "Student not found"}), 404
+        
+        selections = db.session.query(
+            MDMOutboundSelection, MDMOfferingPool
+        ).join(
+            MDMOfferingPool, MDMOutboundSelection.pool_id == MDMOfferingPool.id
+        ).filter(
+            MDMOutboundSelection.student_id == student.student_id
+        ).order_by(MDMOutboundSelection.selected_at.desc()).all()
+        
+        result = []
+        for sel, course in selections:
+            result.append({
+                "id": sel.id,
+                "course_code": course.code,
+                "course_name": course.name,
+                "type": course.type,
+                "credits": course.credits,
+                "host_school_name": course.host_school_name,
+                "schedule_pattern": course.schedule_pattern,
+                "status": sel.status,
+                "selected_at": sel.selected_at.isoformat() if sel.selected_at else None,
+                "confirmed_at": sel.confirmed_at.isoformat() if sel.confirmed_at else None,
+                "external_marks": sel.external_marks,
+                "external_grade": sel.external_grade
+            })
+        
+        return jsonify({"courses": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':

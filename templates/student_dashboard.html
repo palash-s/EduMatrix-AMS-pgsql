@@ -101,6 +101,8 @@
                 </div>
                 <!-- Dynamic Containers -->
                 <div id="elective-container"></div>
+                <div id="mdm-oe-container"></div>
+                <div id="mdm-enrolled-container"></div>
                 <div id="mentor-container"></div>
                 <div id="extra-sessions-container"></div>
                 <!-- Event History -->
@@ -252,6 +254,10 @@
                 // --- NEW: FEEDBACK CHECK ---
                 checkFeedbackStatus();
                 // ---------------------------
+                
+                // --- MDM/OE SELECTION CHECK ---
+                checkMDMOEWindows();
+                // ------------------------------
 
                 // Auto-refresh is disabled globally.
             } catch (e) { console.error(e); showToast("Session Error", "error"); window.location.href = '/'; }
@@ -305,6 +311,33 @@
             const subList = document.getElementById('subject-list');
             if (!data.subject_wise || data.subject_wise.length === 0) subList.innerHTML = `<div class="col-span-2 text-center text-gray-400 py-4 text-sm">No data available.</div>`;
             else subList.innerHTML = data.subject_wise.map(sub => {
+                // Check if MDM/OE course (cross-school)
+                if (sub.is_mdm_oe) {
+                    const typeBadge = sub.mdm_type === 'MDM' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700';
+                    const isDropped = sub.mdm_status === 'Dropped';
+                    const statusBadge = sub.mdm_status === 'Confirmed' ? 'bg-green-100 text-green-700' :
+                                       sub.mdm_status === 'Dropped' ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-700';
+                    const statusLabel = isDropped ? 'Cancelled' : sub.mdm_status;
+                    const gradeDisplay = sub.external_grade ? `<span class="text-sm font-bold text-green-600">${sub.external_grade}</span>` :
+                                        isDropped ? '<span class="text-[10px] text-red-400">Course cancelled</span>' : '<span class="text-[10px] text-gray-400">Pending</span>';
+                    const cardStyle = isDropped ? 'opacity-60 bg-gradient-to-br from-gray-50 to-gray-100 border-gray-300' : 'bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-200';
+                    return `<div class="p-3 border rounded-lg hover:shadow-sm transition-shadow ${cardStyle}">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-1 mb-1">
+                                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded ${typeBadge}">${sub.mdm_type}</span>
+                                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded ${statusBadge}">${statusLabel}</span>
+                                </div>
+                                <h4 class="font-bold ${isDropped ? 'text-gray-500 line-through' : 'text-gray-700'} text-xs truncate" title="${sub.subject}">${sub.subject}</h4>
+                                <p class="text-[10px] text-gray-500">${sub.code}</p>
+                            </div>
+                            <div class="text-right">${gradeDisplay}</div>
+                        </div>
+                        <p class="text-[10px] ${isDropped ? 'text-gray-400' : 'text-purple-600'} truncate" title="${sub.teacher}"><i data-lucide="building-2" class="w-3 h-3 inline mr-1"></i>${sub.teacher}</p>
+                        <p class="text-[10px] text-gray-400 text-right mt-1">${sub.credits} Credits</p>
+                    </div>`;
+                }
+                // Regular subject
                 const color = sub.percentage >= 75 ? 'bg-[#00a887]' : 'bg-[#ef4444]';
                 const txtColor = sub.percentage >= 75 ? 'text-green-700' : 'text-red-600';
                 return `<div class="p-3 border border-gray-100 rounded-lg hover:shadow-sm transition-shadow"><div class="flex justify-between items-center mb-2"><h4 class="font-bold text-gray-700 text-xs truncate w-3/4" title="${sub.subject}">${sub.subject}</h4><span class="text-xs font-bold ${txtColor}">${sub.percentage}%</span></div><div class="w-full bg-gray-100 rounded-full h-1.5 mb-2 overflow-hidden"><div class="${color} h-1.5 rounded-full" style="width: ${sub.percentage}%"></div></div><p class="text-[10px] text-gray-400 text-right">${sub.attended}/${sub.conducted} Attended</p></div>`;
@@ -464,6 +497,45 @@
                 div.id = 'grant-alert-container';
                 div.innerHTML = grantHTML;
                 main.prepend(div);
+            }
+
+            // MDM/OE Enrolled Courses
+            const mdmEnrolledContainer = document.getElementById('mdm-enrolled-container');
+            if (data.mdm_oe_courses && data.mdm_oe_courses.length > 0) {
+                mdmEnrolledContainer.innerHTML = `
+                <div class="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl shadow-sm border border-indigo-200 p-4 mb-4">
+                    <h3 class="text-xs font-bold text-indigo-700 uppercase mb-3 flex items-center gap-2">
+                        <i data-lucide="globe-2" class="w-4 h-4"></i> My Cross-School Courses
+                    </h3>
+                    <div class="space-y-3">
+                        ${data.mdm_oe_courses.map(c => `
+                            <div class="bg-white rounded-lg p-3 border border-indigo-100 hover:shadow-sm transition-shadow">
+                                <div class="flex justify-between items-start">
+                                    <div class="flex-1">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <span class="font-bold text-gray-800 text-sm">${c.course_name}</span>
+                                            <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${c.type === 'MDM' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}">${c.type}</span>
+                                            <span class="text-[10px] px-2 py-0.5 rounded-full ${c.status === 'Confirmed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">${c.status}</span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-1 font-mono">${c.course_code}</p>
+                                        ${c.host_school_name ? `<p class="text-xs text-indigo-600 mt-1"><i data-lucide="building-2" class="w-3 h-3 inline"></i> ${c.host_school_name}</p>` : ''}
+                                        <p class="text-xs text-gray-400 mt-1"><i data-lucide="award" class="w-3 h-3 inline"></i> ${c.credits} Credits</p>
+                                        ${c.schedule_pattern ? `<p class="text-xs text-gray-400"><i data-lucide="clock" class="w-3 h-3 inline"></i> ${c.schedule_pattern}</p>` : ''}
+                                    </div>
+                                    ${c.external_marks !== null ? `
+                                        <div class="text-right bg-gradient-to-br from-green-50 to-teal-50 p-2 rounded-lg border border-green-200">
+                                            <p class="text-[10px] text-gray-500 uppercase font-bold">External</p>
+                                            <p class="text-lg font-bold text-green-700">${c.external_marks}</p>
+                                            ${c.external_grade ? `<p class="text-xs font-bold text-green-600">${c.external_grade}</p>` : ''}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+            } else {
+                mdmEnrolledContainer.innerHTML = '';
             }
 
             lucide.createIcons();
@@ -778,6 +850,162 @@
             container.innerHTML = html;
             lucide.createIcons();
         }
+
+        // --- MDM/OE SELECTION FUNCTIONS ---
+        async function checkMDMOEWindows() {
+            try {
+                const res = await fetch('/api/student/mdm_outbound/windows');
+                const data = await res.json();
+                
+                const container = document.getElementById('mdm-oe-container');
+                if (!data.windows || data.windows.length === 0) {
+                    container.innerHTML = '';
+                    return;
+                }
+                
+                let html = '';
+                for (const w of data.windows) {
+                    const deadline = w.deadline_at ? new Date(w.deadline_at).toLocaleString('en-IN', {day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'}) : 'No deadline';
+                    const isExtension = w.status === 'Extension';
+                    const statusBadge = isExtension 
+                        ? '<span class="px-2 py-0.5 text-[10px] font-bold bg-yellow-100 text-yellow-700 rounded-full">EXTENSION</span>'
+                        : '<span class="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">OPEN</span>';
+                    
+                    html += `
+                    <div class="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl shadow-sm border border-indigo-200 p-4 mb-4">
+                        <div class="flex justify-between items-start mb-3">
+                            <div class="flex items-center gap-2">
+                                <i data-lucide="globe" class="w-5 h-5 text-indigo-600"></i>
+                                <h3 class="text-sm font-bold text-indigo-800">${w.course_type} Course Selection</h3>
+                            </div>
+                            ${statusBadge}
+                        </div>
+                        <p class="text-xs text-gray-600 mb-2">Select a course from partner schools.</p>
+                        <p class="text-[10px] text-gray-500 mb-3"><i data-lucide="clock" class="w-3 h-3 inline"></i> Deadline: ${deadline}</p>
+                        
+                        ${w.my_selection ? `
+                            <div class="bg-white rounded-lg p-3 border border-green-200 mb-3">
+                                <p class="text-[10px] text-green-600 font-bold uppercase">Your Selection</p>
+                                <p class="text-sm font-bold text-gray-800">${w.my_selection.code}: ${w.my_selection.name}</p>
+                                <p class="text-xs text-gray-500">@ ${w.my_selection.host_school_name || 'Partner School'}</p>
+                            </div>
+                        ` : ''}
+                        
+                        <button onclick="openMDMSelectionModal(${w.id}, '${w.course_type}')" class="w-full py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
+                            <i data-lucide="${w.my_selection ? 'edit' : 'plus-circle'}" class="w-4 h-4"></i>
+                            ${w.my_selection ? 'Change Selection' : 'Select Course'}
+                        </button>
+                    </div>`;
+                }
+                
+                container.innerHTML = html;
+                lucide.createIcons();
+            } catch(e) {
+                console.error('MDM/OE Check Error:', e);
+            }
+        }
+        
+        let currentMDMWindowId = null;
+        async function openMDMSelectionModal(windowId, courseType) {
+            currentMDMWindowId = windowId;
+            
+            // Create modal if not exists
+            let modal = document.getElementById('mdm-selection-modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'mdm-selection-modal';
+                modal.className = 'fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm';
+                modal.innerHTML = `
+                    <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg max-h-[80vh] overflow-auto relative">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-lg font-bold mit-purple serif">Select <span id="mdm-modal-type">MDM/OE</span> Course</h2>
+                            <button onclick="closeMDMSelectionModal()" class="p-1 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <div id="mdm-courses-list" class="space-y-3"></div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            }
+            
+            document.getElementById('mdm-modal-type').innerText = courseType;
+            modal.classList.remove('hidden');
+            
+            const list = document.getElementById('mdm-courses-list');
+            list.innerHTML = '<div class="text-center py-4"><div class="w-8 h-8 mx-auto aurora-loader rounded-full"></div><p class="text-xs text-gray-400 mt-2">Loading courses...</p></div>';
+            
+            try {
+                const res = await fetch('/api/student/mdm_outbound/windows');
+                const data = await res.json();
+                const window = data.windows.find(w => w.id === windowId);
+                
+                if (!window || !window.courses || window.courses.length === 0) {
+                    list.innerHTML = '<p class="text-center text-gray-500 py-4">No courses available.</p>';
+                    return;
+                }
+                
+                list.innerHTML = window.courses.map(c => {
+                    const isSelected = window.my_selection && window.my_selection.id === c.id;
+                    const isFull = c.capacity && c.selections >= c.capacity;
+                    const availText = c.capacity ? `${c.available || 0} seats left` : 'Unlimited';
+                    
+                    return `
+                        <div class="p-4 rounded-lg border ${isSelected ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-indigo-300'} transition-colors">
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <h4 class="font-bold text-gray-800">${c.code}: ${c.name}</h4>
+                                    <p class="text-xs text-gray-500">@ ${c.host_school_name || 'Partner School'}</p>
+                                </div>
+                                <span class="text-xs font-bold px-2 py-1 rounded ${c.type === 'MDM' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${c.type}</span>
+                            </div>
+                            <div class="flex items-center gap-3 text-[10px] text-gray-500 mb-3">
+                                <span>${c.credits} Credits</span>
+                                <span class="${isFull ? 'text-red-500 font-bold' : ''}">${availText}</span>
+                                ${c.schedule_pattern ? `<span>${c.schedule_pattern}</span>` : ''}
+                            </div>
+                            ${c.description ? `<p class="text-xs text-gray-600 mb-3">${c.description}</p>` : ''}
+                            <button onclick="selectMDMCourse(${windowId}, ${c.id})" 
+                                    class="w-full py-2 rounded-lg text-xs font-bold transition-colors ${isSelected ? 'bg-green-600 text-white' : isFull ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}"
+                                    ${isFull && !isSelected ? 'disabled' : ''}>
+                                ${isSelected ? '✓ Selected' : isFull ? 'Full' : 'Select This Course'}
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+                
+                lucide.createIcons();
+            } catch(e) {
+                console.error(e);
+                list.innerHTML = '<p class="text-center text-red-500 py-4">Error loading courses.</p>';
+            }
+        }
+        
+        function closeMDMSelectionModal() {
+            const modal = document.getElementById('mdm-selection-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+        
+        async function selectMDMCourse(windowId, poolId) {
+            try {
+                const res = await fetch('/api/student/mdm_outbound/select', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ window_id: windowId, pool_id: poolId })
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showToast(data.message || 'Course selected!');
+                    closeMDMSelectionModal();
+                    checkMDMOEWindows(); // Refresh the container
+                } else {
+                    showToast(data.error || 'Selection failed', 'error');
+                }
+            } catch(e) {
+                console.error(e);
+                showToast('Error selecting course', 'error');
+            }
+        }
+        // --- END MDM/OE FUNCTIONS ---
 
         async function logout() {
             try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); }

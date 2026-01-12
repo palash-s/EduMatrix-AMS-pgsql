@@ -200,7 +200,8 @@
             data.widgets.my_subjects.forEach(s => {
                 const opt = document.createElement('option');
                 opt.value = JSON.stringify({sub: s.subject_id, sec: s.section_id, name: s.subject_name});
-                opt.text = `${s.subject_name} (${s.class_name})`;
+                const mdmTag = s.is_mdm_oe ? ' [MDM/OE]' : '';
+                opt.text = `${s.subject_name} (${s.class_name})${mdmTag}`;
                 select.appendChild(opt);
             });
         });
@@ -216,7 +217,12 @@
                 const res = await fetch(`/api/marks/get_ca_sheet?subject_id=${sub}&section_id=${sec}`);
                 const data = await res.json();
                 currentSheetData = data.students; publishStatus = data.publish_status; reportMeta = data.meta;
-                document.getElementById('header-subtitle').innerText = `${data.subject} - ${currentSheetData.length} Students`;
+                
+                // Show MDM/OE badge if applicable
+                const isMDM = data.is_mdm_external || (reportMeta && reportMeta.is_mdm_oe);
+                const mdmBadge = isMDM ? '<span class="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-bold rounded">MDM/OE</span>' : '';
+                document.getElementById('header-subtitle').innerHTML = `${data.subject} - ${currentSheetData.length} Students ${mdmBadge}`;
+                
                 btns.forEach(b => b.disabled = false);
                 switchTab(activeTab); 
             } catch(e) { console.error(e); showToast("Failed to load data", "error"); }
@@ -539,6 +545,10 @@
                 await amsEnsureCurrentTermInfo();
                 const termLine = amsGetAcademicTermLine();
                 
+                const isMDM = reportMeta && reportMeta.is_mdm_oe;
+                const reportTitle = isMDM ? 'MDM/OE RESULT ANALYSIS REPORT' : 'RESULT ANALYSIS REPORT';
+                const deptLine = isMDM ? `${reportMeta.department || 'MDM/OE Program'}` : `Department of ${reportMeta.department || 'Information Technology'}`;
+                
                 const metaBits = [
                     `Class: ${reportMeta.class_name}`,
                     `Subject: ${reportMeta.subject_name} (${reportMeta.subject_code})`,
@@ -549,8 +559,8 @@
 
                 const startY = amsDrawPdfHeader(
                     doc,
-                    'RESULT ANALYSIS REPORT',
-                    ['Department of Information Technology'],
+                    reportTitle,
+                    [deptLine],
                     metaBits.join(' | ')
                 );
                 

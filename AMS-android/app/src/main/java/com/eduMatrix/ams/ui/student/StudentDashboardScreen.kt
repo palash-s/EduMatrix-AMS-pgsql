@@ -54,6 +54,8 @@ fun StudentDashboardScreen(
     onNavigateToResults: () -> Unit,
     onNavigateToFeedback: () -> Unit,
     onNavigateToNotifications: () -> Unit,
+    onNavigateToElectives: () -> Unit = {},
+    onNavigateToMDM: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -244,7 +246,7 @@ fun StudentDashboardScreen(
                         }
                     }
 
-                    // Quick Actions - Bento Grid
+                    // Quick Actions - Bento Grid Row 1
                     item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -268,6 +270,29 @@ fun StudentDashboardScreen(
                                 onClick = { showResultsDialog = true },
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+                    }
+
+                    // Quick Actions - Bento Grid Row 2 (Electives & MDM)
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(AmsDesign.GridSpacing)
+                        ) {
+                            QuickActionCard(
+                                icon = Icons.Outlined.School,
+                                label = "Electives",
+                                onClick = onNavigateToElectives,
+                                modifier = Modifier.weight(1f)
+                            )
+                            QuickActionCard(
+                                icon = Icons.Outlined.Public,
+                                label = "MDM/OE",
+                                onClick = onNavigateToMDM,
+                                modifier = Modifier.weight(1f)
+                            )
+                            // Placeholder for symmetry
+                            Spacer(modifier = Modifier.weight(1f))
                         }
                     }
 

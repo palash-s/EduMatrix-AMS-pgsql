@@ -1,5 +1,7 @@
 package com.eduMatrix.ams.ui.staff
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,11 +22,13 @@ import com.eduMatrix.ams.AppPrefs
 import com.eduMatrix.ams.ui.navigation.NavRoutes
 import com.eduMatrix.ams.ui.staff.attendance.StaffMarkAttendanceScreen
 import com.eduMatrix.ams.ui.staff.events.EventDashboardScreen
+import com.eduMatrix.ams.ui.staff.hod.HodLeaveApprovalsScreen
 import com.eduMatrix.ams.ui.staff.leaves.StaffLeaveApprovalsScreen
 import com.eduMatrix.ams.ui.staff.mentor.MentorDashboardScreen
 import com.eduMatrix.ams.ui.theme.accentPurple
 import androidx.compose.ui.unit.dp
 import com.eduMatrix.ams.ui.notifications.NotificationsScreen
+import kotlinx.coroutines.launch
 
 
 /**
@@ -189,6 +193,16 @@ fun StaffMainScreen(
             // HOD Dashboard
             composable(NavRoutes.HOD_DASHBOARD) {
                 HodDashboardScreen(
+                    onBack = { navController.popBackStack() },
+                    onNavigateToLeaveApprovals = {
+                        navController.navigate(NavRoutes.HOD_LEAVE_APPROVALS)
+                    }
+                )
+            }
+
+            // HOD Leave Approvals
+            composable(NavRoutes.HOD_LEAVE_APPROVALS) {
+                HodLeaveApprovalsScreen(
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -292,28 +306,327 @@ fun StaffNotificationsScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HodDashboardScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToLeaveApprovals: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // State
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var deptName by remember { mutableStateOf("") }
+    var stats by remember { mutableStateOf<com.eduMatrix.ams.data.models.HodStats?>(null) }
+    var pendingCount by remember { mutableStateOf(0) }
+
+    // Load dashboard data
+    fun loadDashboard() {
+        scope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                val token = AppPrefs.getAccessToken(context) ?: throw Exception("Not authenticated")
+                val user = AppPrefs.getUser(context) ?: throw Exception("User not found")
+
+                val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.eduMatrix.ams.data.api.ApiService.getHodDashboard(
+                        baseUrl = com.eduMatrix.ams.BuildConfig.API_BASE_URL,
+                        accessToken = token,
+                        userId = user.userId
+                    )
+                }
+
+                deptName = response.deptName
+                stats = response.stats
+                pendingCount = response.approvals.size
+            } catch (e: com.eduMatrix.ams.data.api.ApiException) {
+                errorMessage = e.message ?: "Failed to load dashboard"
+            } catch (e: Exception) {
+                errorMessage = "Connection error: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    // Initial load
+    LaunchedEffect(Unit) {
+        loadDashboard()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("HOD Dashboard") },
+                title = {
+                    Column {
+                        Text("HOD Dashboard")
+                        if (deptName.isNotBlank()) {
+                            Text(
+                                text = deptName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                actions = {
+                    IconButton(onClick = { loadDashboard() }) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Refresh",
+                            tint = androidx.compose.ui.graphics.Color.White
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = accentPurple(),
+                    titleContentColor = androidx.compose.ui.graphics.Color.White,
+                    navigationIconContentColor = androidx.compose.ui.graphics.Color.White
+                )
             )
         }
     ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentAlignment = androidx.compose.ui.Alignment.Center
-        ) {
-            Text("HOD Dashboard - Coming Soon")
+        when {
+            isLoading -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = androidx.compose.ui.Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        CircularProgressIndicator(color = accentPurple())
+                        Text(
+                            text = "Loading department stats...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            errorMessage != null -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = androidx.compose.ui.Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Error,
+                            contentDescription = null,
+                            tint = com.eduMatrix.ams.ui.theme.StatusRed,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = errorMessage ?: "Unknown error",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(
+                            onClick = { loadDashboard() },
+                            colors = ButtonDefaults.buttonColors(containerColor = accentPurple())
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Retry")
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Stats grid
+                    stats?.let { s ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                HodStatItem(
+                                    label = "Students",
+                                    value = "${s.students}",
+                                    color = com.eduMatrix.ams.ui.theme.primaryAccent()
+                                )
+                                HodStatItem(
+                                    label = "Faculty",
+                                    value = "${s.faculty}",
+                                    color = accentPurple()
+                                )
+                                HodStatItem(
+                                    label = "Attendance",
+                                    value = "${s.attendance.toInt()}%",
+                                    color = com.eduMatrix.ams.ui.theme.StatusGreen
+                                )
+                                HodStatItem(
+                                    label = "Pending",
+                                    value = "${s.pending}",
+                                    color = com.eduMatrix.ams.ui.theme.StatusYellow
+                                )
+                            }
+                        }
+                    }
+
+                    // Info card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = accentPurple().copy(alpha = 0.1f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = accentPurple()
+                            )
+                            Column {
+                                Text(
+                                    text = "Head of Department",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                    color = accentPurple()
+                                )
+                                Text(
+                                    text = "Manage escalated leave approvals and department overview.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    // Quick action card for leave approvals
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToLeaveApprovals() },
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .background(
+                                            color = com.eduMatrix.ams.ui.theme.StatusYellow.copy(alpha = 0.1f),
+                                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                                        ),
+                                    contentAlignment = androidx.compose.ui.Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.EventBusy,
+                                        contentDescription = null,
+                                        tint = com.eduMatrix.ams.ui.theme.StatusYellow,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                Column {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Leave Approvals",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                                        )
+                                        if (pendingCount > 0) {
+                                            Surface(
+                                                color = com.eduMatrix.ams.ui.theme.StatusRed,
+                                                shape = androidx.compose.foundation.shape.CircleShape
+                                            ) {
+                                                Text(
+                                                    text = "$pendingCount",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = androidx.compose.ui.graphics.Color.White,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = "Review escalated leave requests",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun HodStatItem(
+    label: String,
+    value: String,
+    color: androidx.compose.ui.graphics.Color
+) {
+    Column(
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+            color = color
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

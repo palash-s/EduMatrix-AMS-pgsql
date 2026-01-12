@@ -738,6 +738,8 @@
                 const dateDisplay = u && u.date_display ? String(u.date_display) : '';
                 const subject = (u.subject || '').toString();
                 const cls = (u.class || '').toString();
+                const isMDM = u.is_mdm_oe || false;
+                const mdmBadge = isMDM ? `<span class="ml-1 text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">MDM/OE</span>` : '';
                 const adj = u && u.adjustment ? u.adjustment : null;
                 let rightControls = '';
                 if (adj && adj.kind === 'out' && adj.role === 'requester') {
@@ -749,15 +751,20 @@
                     const label = (adj.kind === 'in') ? 'Swapped In' : 'Swapped';
                     const partner = adj.partner_name ? ` • ${amsEscapeHtml(adj.partner_name)}` : '';
                     rightControls = `<span class="mt-1 inline-flex text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">${label}${partner}</span>`;
+                } else if (u.is_extra_session) {
+                    // Extra sessions don't have adjustment feature
+                    rightControls = `<span class="mt-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">Extra Session</span>`;
                 } else {
                     rightControls = `<button onclick="openAdjustmentModal(${u.id}, '${dateISO}')" class="mt-1 text-[10px] font-bold text-purple-600 hover:underline bg-purple-50 px-2 py-0.5 rounded border border-purple-100">Adjust</button>`;
                 }
 
+                const borderColor = isMDM ? 'border-l-indigo-400' : (u.is_extra_session ? 'border-l-amber-400' : 'border-l-purple-400');
+
                 return `
-                <div class="flex justify-between items-center p-3 border-b border-gray-50 last:border-0 hover:bg-gray-50 rounded-lg transition-colors">
+                <div class="flex justify-between items-center p-3 border-b border-gray-50 last:border-0 hover:bg-gray-50 rounded-lg transition-colors border-l-2 ${borderColor}">
                     <div>
                         <span class="text-[10px] font-bold text-gray-400 uppercase bg-gray-100 px-1.5 py-0.5 rounded">${dayShort}</span>
-                        <p class="text-xs font-bold text-gray-700 mt-1">${subject}</p>
+                        <p class="text-xs font-bold text-gray-700 mt-1">${subject}${mdmBadge}</p>
                         ${cls ? `<p class="text-[10px] text-gray-400 font-bold uppercase mt-0.5">${cls}</p>` : ''}
                     </div>
                     <div class="text-right">
@@ -921,9 +928,11 @@
             const list = document.getElementById('schedule-container');
             if (data.widgets.today_schedule.length === 0) list.innerHTML = `<div class="p-8 text-center text-gray-400 text-sm">No classes scheduled today.</div>`;
             else list.innerHTML = data.widgets.today_schedule.map(c => {
+                const isMDM = c.is_mdm_oe || false;
                 let typeBadge = c.batch 
                     ? `<span class="ml-2 text-[10px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded border border-green-200 flex items-center gap-1"><i data-lucide="flask-conical" class="w-3 h-3"></i> ${c.type} • ${c.batch}</span>`
                     : `<span class="ml-2 text-[10px] font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100">${c.type || 'Lecture'}</span>`;
+                const mdmBadge = isMDM ? `<span class="ml-2 text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200">MDM/OE</span>` : '';
                 const adj = c && c.adjustment ? c.adjustment : null;
                 const isSwapOutApproved = !!(adj && adj.status === 'Approved' && adj.kind === 'out');
 
@@ -951,11 +960,15 @@
                         return `<button class="px-4 py-2 bg-gray-100 text-gray-500 text-xs font-bold rounded-lg cursor-default">Done</button>`;
                     }
                     const dateForRow = (c && c.date_iso) ? String(c.date_iso) : todayISO;
+                    // MDM sessions use subject_id and section_id instead of schedule_id
+                    if (isMDM && c.subject_id && c.section_id) {
+                        return `<button onclick="window.location.href='/staff/mark_attendance?subject_id=${c.subject_id}&section_id=${c.section_id}&date=${dateForRow}'" class="px-4 py-2 bg-indigo-600 text-white text-xs font-bold uppercase rounded-lg hover:bg-indigo-700 shadow-md">Mark</button>`;
+                    }
                     return `<button onclick="window.location.href='/staff/mark_attendance?schedule_id=${c.id}&date=${dateForRow}'" class="px-4 py-2 bg-purple-600 text-white text-xs font-bold uppercase rounded-lg hover:bg-purple-700 shadow-md">Mark</button>`;
                 })();
 
-                const leftBorder = isSwapOutApproved ? 'border-l-gray-300' : (c.status === 'Done' ? 'border-l-green-500' : 'border-l-purple-500');
-                return `<div class="flex justify-between items-center p-4 bg-white border border-gray-100 rounded-xl hover:border-purple-200 transition-all border-l-4 ${leftBorder}"><div><div class="flex items-center mb-1"><h4 class="font-bold text-sm text-gray-800">${c.subject}</h4>${typeBadge}${swapTag}${swapToTag}</div><p class="text-xs text-gray-500 font-mono flex items-center gap-2"><i data-lucide="clock" class="w-3 h-3"></i> ${c.time.split(' - ')[0]} <span class="text-gray-300">|</span> <span class="font-bold text-gray-600">${c.class}</span></p></div>${actionBtn}</div>`;
+                const leftBorder = isSwapOutApproved ? 'border-l-gray-300' : (c.status === 'Done' ? 'border-l-green-500' : (isMDM ? 'border-l-indigo-500' : 'border-l-purple-500'));
+                return `<div class="flex justify-between items-center p-4 bg-white border border-gray-100 rounded-xl hover:border-purple-200 transition-all border-l-4 ${leftBorder}"><div><div class="flex items-center mb-1"><h4 class="font-bold text-sm text-gray-800">${c.subject}</h4>${typeBadge}${mdmBadge}${swapTag}${swapToTag}</div><p class="text-xs text-gray-500 font-mono flex items-center gap-2"><i data-lucide="clock" class="w-3 h-3"></i> ${c.time.split(' - ')[0]} <span class="text-gray-300">|</span> <span class="font-bold text-gray-600">${c.class}</span></p></div>${actionBtn}</div>`;
             }).join('');
 
             // Upcoming
@@ -980,7 +993,38 @@
             // Subjects
             const subContainer = document.getElementById('subjects-container');
             if (data.widgets.my_subjects.length === 0) subContainer.innerHTML = '<div class="p-6 text-center text-gray-400">No subjects assigned.</div>';
-            else subContainer.innerHTML = data.widgets.my_subjects.map(s => `<div class="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors"><div><div class="w-8 h-8 rounded-full bg-teal-50 mit-teal flex items-center justify-center text-xs font-bold">${s.class_name.substring(0,2)}</div><div><h4 class="font-bold text-sm text-gray-700">${s.subject_name}</h4><div class="flex items-center gap-2 mt-0.5"><span class="text-[10px] text-gray-400 font-bold uppercase">${s.class_name}</span>${s.sessions_per_week > 0 ? `<span class="text-purple-600 font-bold text-[10px] bg-purple-50 px-2 py-0.5 rounded">${s.sessions_per_week} Sess/Wk</span>` : `<span class="text-orange-500 font-bold text-[10px] bg-orange-50 px-2 py-0.5 rounded">Not Scheduled</span>`}</div></div></div><button onclick="openReport(${s.subject_id}, ${s.section_id})" class="text-xs mit-purple font-bold hover:underline flex items-center gap-1"><i data-lucide="file-bar-chart" class="w-3 h-3"></i> Report</button></div>`).join('');
+            else subContainer.innerHTML = data.widgets.my_subjects.map(s => {
+                const isMDM = s.is_mdm_oe || false;
+                const initials = s.class_name.substring(0,2).toUpperCase();
+                
+                let sessionLabel, sessionClass;
+                if (isMDM && s.mdm_info) {
+                    sessionLabel = s.mdm_info.schedule_pattern || `L${s.mdm_info.l_count}-T${s.mdm_info.t_count}-P${s.mdm_info.p_count}`;
+                    sessionClass = 'text-indigo-600 bg-indigo-50';
+                } else {
+                    sessionLabel = s.sessions_per_week > 0 ? `${s.sessions_per_week} Sess/Wk` : 'Not Scheduled';
+                    sessionClass = s.sessions_per_week > 0 ? 'text-purple-600 bg-purple-50' : 'text-orange-500 bg-orange-50';
+                }
+                
+                const mdmBadge = isMDM && s.mdm_info ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded ${s.mdm_info.type === 'MDM' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${s.mdm_info.type}</span>` : '';
+                
+                const reportBtn = `<button onclick="openReport(${s.subject_id}, ${s.section_id})" class="text-xs mit-purple font-bold hover:underline flex items-center gap-1"><i data-lucide="file-bar-chart" class="w-3 h-3"></i> Report</button>`;
+                
+                return `<div class="flex items-center justify-between p-3 border ${isMDM ? 'border-indigo-200 bg-indigo-50/30' : 'border-gray-100'} rounded-lg hover:bg-gray-50 transition-colors">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full ${isMDM ? 'bg-indigo-100 text-indigo-700' : 'bg-teal-50 mit-teal'} flex items-center justify-center text-xs font-bold">${initials}</div>
+                        <div>
+                            <h4 class="font-bold text-sm text-gray-700">${s.subject_name}</h4>
+                            <div class="flex items-center gap-2 mt-0.5">
+                                <span class="text-[10px] text-gray-400 font-bold uppercase">${s.class_name}</span>
+                                ${mdmBadge}
+                                <span class="${sessionClass} font-bold text-[10px] px-2 py-0.5 rounded">${sessionLabel}</span>
+                            </div>
+                        </div>
+                    </div>
+                    ${reportBtn}
+                </div>`;
+            }).join('');
 
             // History
             const histList = document.getElementById('history-container');
@@ -1001,6 +1045,7 @@
             if (data.roles.is_mentor) roleHTML += `<div onclick="openMenteeModal()" class="bg-white p-5 rounded-xl border border-teal-200 shadow-sm hover:shadow-md cursor-pointer transition-all relative overflow-hidden"><div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="heart-handshake" class="w-12 h-12 text-teal-600"></i></div><h3 class="font-bold text-gray-800 text-sm mb-1">My Mentees</h3><p class="text-xs text-gray-500 mb-3">Counseling Group</p><span class="bg-teal-50 text-teal-700 text-[10px] font-bold px-3 py-1 rounded-full">${data.widgets.mentee_data.count} Students</span></div>`;
             if (data.roles.is_amc_member || data.roles.is_amc_head) roleHTML += `<div onclick="window.location.href='/staff/amc_dashboard'" class="bg-white p-5 rounded-xl border border-blue-200 shadow-sm hover:shadow-md cursor-pointer transition-all relative overflow-hidden"><div class="absolute right-0 top-0 p-3 opacity-10"><i data-lucide="activity" class="w-12 h-12 text-blue-600"></i></div><h3 class="font-bold text-gray-800 text-sm mb-1">AMC Monitor</h3><p class="text-xs text-gray-500 mb-3">Compliance Report</p><span class="bg-blue-50 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full">View Status</span></div>`;
             if (data.roles.is_coordinator) roleHTML += `<div onclick="window.location.href='/staff/events'" class="bg-gradient-to-br from-purple-600 to-blue-600 p-5 rounded-xl shadow-lg text-white cursor-pointer hover:scale-[1.02] transition-transform"><h3 class="font-bold text-sm flex items-center gap-2"><i data-lucide="calendar-check" class="w-4 h-4"></i> Event Manager</h3><p class="text-[10px] text-white/80 mt-1">Manage ODs</p></div>`;
+            if (data.roles.is_mdm_oe_coordinator) roleHTML += `<div onclick="window.location.href='/admin/mdm_oe_coordinator'" class="bg-gradient-to-br from-green-600 to-teal-600 p-5 rounded-xl shadow-lg text-white cursor-pointer hover:scale-[1.02] transition-transform"><h3 class="font-bold text-sm flex items-center gap-2"><i data-lucide="globe" class="w-4 h-4"></i> MDM/OE Manager</h3><p class="text-[10px] text-white/80 mt-1">Cross-School Courses</p></div>`;
             if (data.roles.is_hod) roleHTML += `<div onclick="window.location.href='/staff/hod_dashboard'" class="bg-gray-900 p-5 rounded-xl shadow-lg text-white cursor-pointer hover:scale-[1.02] transition-transform"><h3 class="font-bold text-sm flex items-center gap-2"><i data-lucide="briefcase" class="w-4 h-4"></i> HOD Console</h3><p class="text-[10px] text-gray-400 mt-1">Dept Admin</p></div>`;
             
             // --- NEW: Adjustment Requests Widget ---
@@ -1756,7 +1801,10 @@
         function populateESSections() {
             const sel = document.getElementById('es-section');
             sel.innerHTML = '<option value="">Select Class</option>' +
-                esAllocations.sections.map(s => `<option value="${s.section_id}">${s.name}</option>`).join('');
+                esAllocations.sections.map(s => {
+                    const label = s.is_virtual ? `${s.name} (MDM)` : s.name;
+                    return `<option value="${s.section_id}">${label}</option>`;
+                }).join('');
         }
 
         function filterESSubjects() {
@@ -1774,7 +1822,10 @@
 
             const filteredSubjects = esAllocations.subjects.filter(s => validSubjects.includes(s.subject_id));
             subSel.innerHTML = '<option value="">Select Subject</option>' +
-                filteredSubjects.map(s => `<option value="${s.subject_id}">${s.name}</option>`).join('');
+                filteredSubjects.map(s => {
+                    const label = s.is_mdm_oe ? `${s.name} (MDM/OE)` : s.name;
+                    return `<option value="${s.subject_id}">${label}</option>`;
+                }).join('');
         }
 
         function openExtraSessionModal() {
@@ -1891,6 +1942,8 @@
                         : (isPast ? '<span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Pending</span>'
                             : '<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Scheduled</span>');
 
+                    const mdmBadge = es.is_mdm_oe ? '<span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full ml-1">MDM/OE</span>' : '';
+
                     const dateObj = new Date(es.date);
                     const dateDisplay = dateObj.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 
@@ -1900,7 +1953,7 @@
                                 <div>
                                     <div class="flex items-center gap-2 mb-1">
                                         <span class="font-bold text-gray-800">${es.subject_name}</span>
-                                        ${statusBadge}
+                                        ${statusBadge}${mdmBadge}
                                     </div>
                                     <p class="text-sm text-gray-500">${es.section_name}</p>
                                     <p class="text-xs text-gray-400 mt-1">
@@ -1954,36 +2007,95 @@
         function toggleUpcoming() { const w = document.getElementById('upcoming-wrapper'); w.classList.toggle('hidden'); document.getElementById('upcoming-icon').style.transform = w.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)'; }
         
         async function openReport(sid, secid) { document.getElementById('report-modal').classList.remove('hidden'); document.getElementById('report-modal-loader').classList.remove('hidden'); const headerRow = document.getElementById('report-modal-header-row'); const body = document.getElementById('report-modal-body'); headerRow.innerHTML = ''; body.innerHTML = ''; try { const res = await fetch(`/api/class_teacher/subject_report?user_id=${userId}&subject_id=${sid}&section_id=${secid}`); const data = await res.json(); reportMeta = data.meta; document.getElementById('report-modal-title').innerText = data.meta.subject; document.getElementById('report-modal-subtitle').innerText = `Report for ${data.meta.class_div}`; let headers = `<th class="p-4 bg-gray-50 border-r w-16">Roll</th><th class="p-4 bg-gray-50 border-r w-48">Name</th>`; data.dates.forEach(d => headers += `<th class="p-4 text-center min-w-[50px]">${d}</th>`); headers += `<th class="p-4 bg-gray-50 border-l text-center">Total</th><th class="p-4 bg-gray-50 border-l text-center">%</th>`; headerRow.innerHTML = headers; body.innerHTML = data.rows.map(r => { let cells = r.record.map(s => `<td class="p-4 text-center border-b border-gray-50 ${s === 'P' ? 'text-green-600 font-bold' : (s === 'OD' ? 'text-purple-600 font-bold' : 'text-red-300')}">${s}</td>`).join(''); return `<tr><td class="p-4 border-r font-mono text-xs text-gray-500">${r.roll}</td><td class="p-4 border-r font-bold text-gray-700 text-sm whitespace-nowrap">${r.name}</td>${cells}<td class="p-4 border-l text-center font-bold">${r.total}</td><td class="p-4 border-l text-center font-bold ${r.perc < 75 ? 'text-red-600' : 'text-green-600'}">${r.perc}%</td></tr>`; }).join(''); } catch (e) { console.error(e); } finally { document.getElementById('report-modal-loader').classList.add('hidden'); } }
+        
+        async function openMDMReport(offeringId) { 
+            document.getElementById('report-modal').classList.remove('hidden'); 
+            document.getElementById('report-modal-loader').classList.remove('hidden'); 
+            const headerRow = document.getElementById('report-modal-header-row'); 
+            const body = document.getElementById('report-modal-body'); 
+            headerRow.innerHTML = ''; 
+            body.innerHTML = ''; 
+            
+            try { 
+                const res = await fetch(`/api/mdm_oe/report?offering_id=${offeringId}`); 
+                const data = await res.json(); 
+                reportMeta = data.meta; 
+                reportMeta.is_mdm_oe = true; // Flag for PDF generation
+                
+                document.getElementById('report-modal-title').innerText = `${data.meta.subject} (MDM/OE)`;
+                document.getElementById('report-modal-subtitle').innerText = `Cross-School ${data.meta.offering_type} • ${data.meta.date_range}`;
+                
+                let headers = `<th class="p-4 bg-green-50 border-r w-16">Roll</th><th class="p-4 bg-green-50 border-r w-48">Name</th><th class="p-4 bg-green-50 border-r w-32">Home School</th>`;
+                data.dates.forEach(d => headers += `<th class="p-4 text-center min-w-[50px]">${d}</th>`);
+                headers += `<th class="p-4 bg-green-50 border-l text-center">Total</th><th class="p-4 bg-green-50 border-l text-center">%</th>`;
+                headerRow.innerHTML = headers;
+                
+                body.innerHTML = data.rows.map(r => {
+                    let cells = r.record.map(s => `<td class="p-4 text-center border-b border-gray-50 ${s === 'P' ? 'text-green-600 font-bold' : (s === 'OD' ? 'text-purple-600 font-bold' : 'text-red-300')}">${s}</td>`).join('');
+                    return `<tr>
+                        <td class="p-4 border-r font-mono text-xs text-gray-500">${r.roll}</td>
+                        <td class="p-4 border-r font-bold text-gray-700 text-sm whitespace-nowrap">${r.name}</td>
+                        <td class="p-4 border-r text-xs text-gray-600">${r.home_school}</td>
+                        ${cells}
+                        <td class="p-4 border-l text-center font-bold">${r.total}</td>
+                        <td class="p-4 border-l text-center font-bold ${r.perc < 75 ? 'text-red-600' : 'text-green-600'}">${r.perc}%</td>
+                    </tr>`;
+                }).join('');
+            } catch (e) { 
+                console.error(e); 
+                showToast('Failed to load MDM/OE report', 'error');
+            } finally { 
+                document.getElementById('report-modal-loader').classList.add('hidden'); 
+            } 
+        }
+        
         function generatePDF() {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF('l', 'mm', 'a4');
 
             const termLine = amsGetAcademicTermLine(reportMeta);
+            const isMDM = reportMeta.is_mdm_oe || false;
+            
             const subLines = [
                 reportMeta.school || 'School of Computing',
                 reportMeta.department ? `Department: ${reportMeta.department}` : ''
             ].filter(Boolean);
 
-            const metaBits = [
-                reportMeta.class_div ? `Class: ${reportMeta.class_div}` : '',
-                reportMeta.teacher ? `Teacher: ${reportMeta.teacher}` : '',
-                termLine
-            ].filter(Boolean);
+            const metaBits = isMDM 
+                ? [
+                    reportMeta.offering_type ? `Type: ${reportMeta.offering_type}` : '',
+                    reportMeta.date_range ? `Period: ${reportMeta.date_range}` : '',
+                    reportMeta.teacher ? `Faculty: ${reportMeta.teacher}` : '',
+                    termLine
+                ].filter(Boolean)
+                : [
+                    reportMeta.class_div ? `Class: ${reportMeta.class_div}` : '',
+                    reportMeta.teacher ? `Teacher: ${reportMeta.teacher}` : '',
+                    termLine
+                ].filter(Boolean);
+
+            const reportTitle = isMDM 
+                ? `${reportMeta.subject || 'MDM/OE Course'} - Cross-School Attendance Report`
+                : `${reportMeta.subject || 'Subject'} Attendance Report`;
 
             const startY = amsDrawPdfHeader(
                 doc,
-                `${reportMeta.subject || 'Subject'} Attendance Report`,
+                reportTitle,
                 subLines,
                 metaBits.join(' | ')
             );
+
+            const columnConfig = isMDM
+                ? { 0: { cellWidth: 20 }, 1: { cellWidth: 45, halign: 'left' }, 2: { cellWidth: 35, halign: 'left' } }
+                : { 0: { cellWidth: 20 }, 1: { cellWidth: 40, halign: 'left' } };
 
             doc.autoTable({
                 html: '#report-table',
                 startY,
                 theme: 'grid',
                 styles: { fontSize: 7, cellPadding: 1.5, halign: 'center', valign: 'middle' },
-                headStyles: { fillColor: [72, 22, 109], textColor: 255, fontStyle: 'bold' },
-                columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 40, halign: 'left' } },
+                headStyles: { fillColor: isMDM ? [22, 163, 74] : [72, 22, 109], textColor: 255, fontStyle: 'bold' },
+                columnStyles: columnConfig,
                 margin: { top: 10, bottom: 25 }
             });
 
@@ -1991,15 +2103,30 @@
             doc.setFontSize(10);
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(0, 0, 0);
-            doc.text('Class Teacher', 30, footerY);
-            doc.text('AMC Head', 140, footerY);
-            doc.text('HOD', 250, footerY);
-            doc.setLineWidth(0.5);
-            doc.line(30, footerY - 5, 60, footerY - 5);
-            doc.line(140, footerY - 5, 170, footerY - 5);
-            doc.line(250, footerY - 5, 280, footerY - 5);
+            
+            if (isMDM) {
+                doc.text('MDM/OE Coordinator', 30, footerY);
+                doc.text('Faculty', 140, footerY);
+                doc.text('Dean', 250, footerY);
+                doc.setLineWidth(0.5);
+                doc.line(30, footerY - 5, 80, footerY - 5);
+                doc.line(140, footerY - 5, 170, footerY - 5);
+                doc.line(250, footerY - 5, 280, footerY - 5);
+            } else {
+                doc.text('Class Teacher', 30, footerY);
+                doc.text('AMC Head', 140, footerY);
+                doc.text('HOD', 250, footerY);
+                doc.setLineWidth(0.5);
+                doc.line(30, footerY - 5, 60, footerY - 5);
+                doc.line(140, footerY - 5, 170, footerY - 5);
+                doc.line(250, footerY - 5, 280, footerY - 5);
+            }
 
-            doc.save(`${reportMeta.subject || 'Subject'}_${reportMeta.class_div || 'Class'}_Report.pdf`);
+            const fileName = isMDM
+                ? `MDM_OE_${reportMeta.subject || 'Course'}_Report.pdf`
+                : `${reportMeta.subject || 'Subject'}_${reportMeta.class_div || 'Class'}_Report.pdf`;
+            
+            doc.save(fileName);
         }
 
         function downloadSummaryPDF() {

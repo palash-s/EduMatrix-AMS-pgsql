@@ -30,6 +30,7 @@ object NavRoutes {
     const val STUDENT_NOTIFICATIONS = "student_notifications"
     const val STUDENT_EVENTS = "student_events"
     const val STUDENT_ELECTIVES = "student_electives"
+    const val STUDENT_MDM = "student_mdm"
     const val STUDENT_FEEDBACK = "student_feedback"
 
     // ========================================
@@ -61,6 +62,7 @@ object NavRoutes {
     const val HOD_DASHBOARD = "hod_dashboard"
     const val HOD_FACULTY = "hod_faculty"
     const val HOD_LONG_LEAVES = "hod_long_leaves"
+    const val HOD_LEAVE_APPROVALS = "hod_leave_approvals"
     const val HOD_FEEDBACK = "hod_feedback"
     const val HOD_SYLLABUS = "hod_syllabus"
 
