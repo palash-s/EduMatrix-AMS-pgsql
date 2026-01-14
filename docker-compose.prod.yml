@@ -42,11 +42,11 @@ services:
     networks:
       - ams_network
 
-  # Cloudflare Tunnel - Secure ingress without exposing ports
+  # Cloudflare Quick Tunnel - Free URL, no domain required
   tunnel:
     image: cloudflare/cloudflared:latest
     restart: always
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --url http://nginx:80
     depends_on:
       - nginx
     networks:
