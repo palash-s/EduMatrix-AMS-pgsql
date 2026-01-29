@@ -418,7 +418,10 @@
                 const resLog = await fetch('/api/admin/activity_log');
                 const dataLog = await resLog.json();
                 const logContainer = document.getElementById('activity-log-container');
-                if(dataLog.logs.length === 0) {
+                if(dataLog.error) {
+                    logContainer.innerHTML = `<div class="p-8 text-center text-red-400 text-sm flex flex-col items-center gap-2"><i data-lucide="alert-circle" class="w-8 h-8 opacity-50"></i><span>${dataLog.error}</span></div>`;
+                    lucide.createIcons();
+                } else if(!dataLog.logs || dataLog.logs.length === 0) {
                     logContainer.innerHTML = `<div class="p-12 text-center text-gray-400 text-sm flex flex-col items-center gap-2"><i data-lucide="clock" class="w-8 h-8 opacity-20"></i><span>No recent activity recorded.</span></div>`;
                     lucide.createIcons();
                 } else {
@@ -437,7 +440,12 @@
                         </div>`).join('');
                     lucide.createIcons();
                 }
-            } catch(e) { console.error("Log Error:", e); }
+            } catch(e) {
+                console.error("Log Error:", e);
+                const logContainer = document.getElementById('activity-log-container');
+                logContainer.innerHTML = `<div class="p-8 text-center text-red-400 text-sm flex flex-col items-center gap-2"><i data-lucide="alert-circle" class="w-8 h-8 opacity-50"></i><span>Failed to load activity log</span></div>`;
+                lucide.createIcons();
+            }
         }
         
         // --- ARCHIVE LOGIC ---

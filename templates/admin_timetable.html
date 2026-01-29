@@ -148,16 +148,9 @@
                 </button>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-sm text-left border-collapse table-fixed">
-                    <thead class="bg-gray-50 text-gray-500 font-bold uppercase text-xs">
-                        <tr>
-                            <th class="p-3 border w-24 text-center bg-gray-100">Time</th>
-                            <th class="p-3 border w-1/5 text-center">Monday</th>
-                            <th class="p-3 border w-1/5 text-center">Tuesday</th>
-                            <th class="p-3 border w-1/5 text-center">Wednesday</th>
-                            <th class="p-3 border w-1/5 text-center">Thursday</th>
-                            <th class="p-3 border w-1/5 text-center">Friday</th>
-                        </tr>
+                <table class="w-full text-sm text-left border-collapse min-w-[1100px]">
+                    <thead class="bg-gray-50 text-gray-500 font-bold uppercase text-xs" id="timetable-header">
+                        <!-- Header built dynamically by JS -->
                     </thead>
                     <tbody id="timetable-body" class="divide-y divide-gray-100">
                         <!-- Content Injected via JS -->
@@ -202,12 +195,31 @@
         });
 
         function initTimeTableGrid() {
-            // Renders the empty timetable structure
+            // Renders the empty timetable structure with days on rows and time slots on columns
+            const thead = document.getElementById('timetable-header');
             const tbody = document.getElementById('timetable-body');
-            tbody.innerHTML = timeSlots.map(slot => {
-                if(slot.type === 'break') return `<tr><td colspan="6" class="break-row">${slot.label}</td></tr>`;
-                const cells = days.map(day => `<td class="p-1 border align-top h-24 relative group bg-white hover:bg-gray-50 transition-colors" id="${day}-${slot.start}"></td>`).join('');
-                return `<tr><td class="p-3 border-r font-mono text-xs font-bold text-gray-500 bg-gray-50 text-center align-middle">${slot.label}</td>${cells}</tr>`;
+            
+            // Build header row with time slots as columns
+            const activeSlots = timeSlots.filter(s => !s.type);
+            let headerHTML = `<tr><th class="p-2 border w-24 text-center bg-gray-100">Day</th>`;
+            activeSlots.forEach((slot, idx) => {
+                // Check if next slot is a break
+                const slotIdx = timeSlots.indexOf(slot);
+                const nextSlot = timeSlots[slotIdx + 1];
+                const afterBreak = slotIdx > 0 && timeSlots[slotIdx - 1]?.type === 'break';
+                headerHTML += `<th class="p-2 border text-center text-[10px] whitespace-nowrap ${afterBreak ? 'border-l-2 border-l-gray-300' : ''}">${slot.label}</th>`;
+            });
+            headerHTML += `</tr>`;
+            thead.innerHTML = headerHTML;
+            
+            // Build rows for each day
+            tbody.innerHTML = days.map(day => {
+                let cells = activeSlots.map((slot, idx) => {
+                    const slotIdx = timeSlots.indexOf(slot);
+                    const afterBreak = slotIdx > 0 && timeSlots[slotIdx - 1]?.type === 'break';
+                    return `<td class="p-1 border align-top min-h-[70px] min-w-[100px] relative group bg-white hover:bg-gray-50 transition-colors ${afterBreak ? 'border-l-2 border-l-gray-300' : ''}" id="${day}-${slot.start}"></td>`;
+                }).join('');
+                return `<tr><td class="p-2 border-r font-bold text-xs text-gray-600 bg-gray-50 text-center align-middle whitespace-nowrap">${day}</td>${cells}</tr>`;
             }).join('');
         }
 
@@ -269,31 +281,40 @@
             initTimeTableGrid(); // Draw empty grid
             
             schedule.forEach(slot => {
-                const cellId = `${slot.day}-${slot.start_time}`; 
+                // Normalize day name: MONDAY -> Monday (to match cell IDs)
+                const dayName = slot.day.charAt(0).toUpperCase() + slot.day.slice(1).toLowerCase();
+                const cellId = `${dayName}-${slot.start_time}`; 
                 const cell = document.getElementById(cellId);
                 
                 if (cell) {
                     let bgColor = "bg-blue-50 border-blue-200 text-blue-800"; 
                     let icon = "book-open";
-                    if (slot.type === 'Practical') {
+                    
+                    // Special slots (Library, Mentor Meeting, etc.)
+                    if (slot.is_special_slot || slot.type === 'Special') {
+                        bgColor = "bg-purple-50 border-purple-200 text-purple-800";
+                        icon = "star";
+                    } else if (slot.type === 'Practical') {
                         bgColor = "bg-green-50 border-green-200 text-green-800";
                         icon = "flask-conical";
+                    } else if (slot.type === 'Tutorial') {
+                        bgColor = "bg-amber-50 border-amber-200 text-amber-800";
+                        icon = "users";
                     }
                     
-                    const batchBadge = slot.batch ? `<span class="text-[9px] font-bold uppercase bg-white/80 px-1.5 py-0.5 rounded border border-black/10 ml-1 shadow-sm tracking-wider">${slot.batch}</span>` : '';
+                    const batchBadge = slot.batch ? `<span class="text-[8px] font-bold uppercase bg-white/80 px-1 rounded">${slot.batch}</span>` : '';
+                    
+                    // For special slots, show slot name prominently without teacher/room details
+                    const teacherLine = slot.is_special_slot ? '' : `<div class="opacity-70 truncate text-[9px]">${slot.teacher}</div>`;
+                    const roomLine = (slot.room && slot.room !== '-' && slot.room !== 'TBD') ? `<span class="text-[8px] font-mono opacity-60">${slot.room}</span>` : '';
 
                     const cardHTML = `
-                    <div class="p-2 rounded-lg border ${bgColor} mb-1 shadow-sm hover:shadow-md transition-all h-full flex flex-col justify-between cursor-pointer">
-                        <div>
-                            <div class="font-bold text-xs flex justify-between items-start leading-tight mb-1">
-                                <span class="truncate pr-1" title="${slot.subject}">${slot.subject}</span>
-                                <i data-lucide="${icon}" class="w-3 h-3 opacity-50 flex-shrink-0"></i>
-                            </div>
-                            <div class="text-[10px] opacity-80 truncate">${slot.teacher}</div>
-                        </div>
-                        <div class="flex justify-between items-end mt-1 pt-1 border-t border-black/5">
-                            <span class="text-[9px] font-mono opacity-60">${slot.code}</span>
-                            <div class="flex items-center gap-1">${batchBadge}<span class="text-[9px] font-bold bg-white/50 px-1 rounded text-gray-700 flex items-center gap-0.5" title="Room"><i data-lucide="map-pin" class="w-2 h-2 inline"></i> ${slot.room || 'TBD'}</span></div>
+                    <div class="p-1.5 rounded border ${bgColor} mb-0.5 text-[10px] leading-tight">
+                        <div class="font-bold truncate" title="${slot.subject}">${slot.subject.length > 18 ? slot.subject.substring(0,16) + '..' : slot.subject}</div>
+                        ${teacherLine}
+                        <div class="flex justify-between items-center mt-0.5 pt-0.5 border-t border-black/5">
+                            ${roomLine}
+                            ${batchBadge}
                         </div>
                     </div>`;
                     
@@ -600,61 +621,139 @@
                         return;
                     }
 
-                    // Build table data
+                    // Build table data - Simple grid approach (autotable has limited rowspan support)
                     const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
                     const slotTimes = [
-                        { start: "08:45 AM", end: "09:40 AM", label: "08:45 - 09:40" },
-                        { start: "09:40 AM", end: "10:35 AM", label: "09:40 - 10:35" },
-                        { start: "10:50 AM", end: "11:45 AM", label: "10:50 - 11:45" },
-                        { start: "11:45 AM", end: "12:40 PM", label: "11:45 - 12:40" },
-                        { start: "01:40 PM", end: "02:35 PM", label: "01:40 - 02:35" },
-                        { start: "02:35 PM", end: "03:30 PM", label: "02:35 - 03:30" },
-                        { start: "03:45 PM", end: "04:40 PM", label: "03:45 - 04:40" },
-                        { start: "04:40 PM", end: "05:35 PM", label: "04:40 - 05:35" }
+                        { start: "08:45 AM", end: "09:40 AM", label: "08:45-09:40" },
+                        { start: "09:40 AM", end: "10:35 AM", label: "09:40-10:35" },
+                        { start: "10:50 AM", end: "11:45 AM", label: "10:50-11:45" },
+                        { start: "11:45 AM", end: "12:40 PM", label: "11:45-12:40" },
+                        { start: "01:40 PM", end: "02:35 PM", label: "01:40-02:35" },
+                        { start: "02:35 PM", end: "03:30 PM", label: "02:35-03:30" },
+                        { start: "03:45 PM", end: "04:40 PM", label: "03:45-04:40" },
+                        { start: "04:40 PM", end: "05:35 PM", label: "04:40-05:35" }
                     ];
 
-                    // Create a lookup map for schedule slots
+                    // Helper: Convert 12h time to minutes
+                    function timeToMinutes(timeStr) {
+                        if (!timeStr) return 0;
+                        const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+                        if (!match) return 0;
+                        let hours = parseInt(match[1]);
+                        const mins = parseInt(match[2]);
+                        const period = (match[3] || '').toUpperCase();
+                        if (period === 'PM' && hours !== 12) hours += 12;
+                        if (period === 'AM' && hours === 12) hours = 0;
+                        return hours * 60 + mins;
+                    }
+
+                    // Create lookup map: day-startTime -> slots[]
                     const slotMap = {};
                     scheduleData.schedule.forEach(slot => {
-                        const key = `${slot.day}-${slot.start_time}`;
+                        const dayName = (slot.day || '').charAt(0).toUpperCase() + (slot.day || '').slice(1).toLowerCase();
+                        const key = `${dayName}-${slot.start_time}`;
                         if (!slotMap[key]) slotMap[key] = [];
                         slotMap[key].push(slot);
                     });
 
-                    // Build table rows
-                    const tableHead = [['Time', ...daysOrder]];
-                    const tableBody = slotTimes.map(timeSlot => {
-                        const row = [timeSlot.label];
-                        daysOrder.forEach(day => {
+                    // Track which cells are "continued" from a previous slot
+                    const continuedCells = {};
+                    scheduleData.schedule.forEach(slot => {
+                        const dayName = (slot.day || '').charAt(0).toUpperCase() + (slot.day || '').slice(1).toLowerCase();
+                        const startMins = timeToMinutes(slot.start_time);
+                        const endMins = timeToMinutes(slot.end_time);
+                        
+                        // Check if this spans multiple slots
+                        slotTimes.forEach((s, idx) => {
+                            const slotStartMins = timeToMinutes(s.start);
+                            const slotEndMins = timeToMinutes(s.end);
+                            // If this slot starts after our slot start but before our slot end
+                            if (slotStartMins > startMins && slotStartMins < endMins) {
+                                const contKey = `${dayName}-${s.start}`;
+                                continuedCells[contKey] = { from: slot, text: '↑ Continued' };
+                            }
+                        });
+                    });
+
+                    // Build table with Days on rows, Time slots on columns
+                    const tableHead = [['Day', ...slotTimes.map(s => s.label)]];
+                    const tableBody = daysOrder.map(day => {
+                        const row = [{ content: day, styles: { fontStyle: 'bold', fillColor: [248, 250, 252], halign: 'center' } }];
+                        
+                        slotTimes.forEach(timeSlot => {
                             const key = `${day}-${timeSlot.start}`;
                             const slots = slotMap[key] || [];
-                            if (slots.length === 0) {
-                                row.push('-');
+                            const continued = continuedCells[key];
+                            
+                            if (slots.length === 0 && !continued) {
+                                row.push({ content: '-', styles: { halign: 'center', textColor: [180, 180, 180] } });
+                            } else if (slots.length === 0 && continued) {
+                                // Show continuation indicator
+                                row.push({ 
+                                    content: '← (cont.)', 
+                                    styles: { halign: 'center', textColor: [120, 120, 120], fontStyle: 'italic', fontSize: 6 } 
+                                });
                             } else {
                                 const cellContent = slots.map(s => {
-                                    let text = `${s.subject}\n${s.teacher}`;
-                                    if (s.batch) text += `\n[${s.batch}]`;
+                                    // Handle special slots differently
+                                    if (s.is_special_slot || s.type === 'Special') {
+                                        return s.subject || 'Special';
+                                    }
+                                    let text = s.code || '';
+                                    if (s.subject) text += (text ? '\n' : '') + (s.subject.length > 16 ? s.subject.substring(0, 14) + '..' : s.subject);
+                                    if (s.teacher && s.teacher !== '-') text += '\n' + s.teacher;
+                                    if (s.batch) text += ` [${s.batch}]`;
+                                    if (s.room && s.room !== 'TBD' && s.room !== '-') text += '\nRoom: ' + s.room;
                                     return text;
-                                }).join('\n---\n');
-                                row.push(cellContent);
+                                }).join('\n--\n');
+
+                                // Color based on type
+                                let bgColor = [255, 255, 255];
+                                const sType = ((slots[0] || {}).type || '').toLowerCase();
+                                const isSpecial = slots[0]?.is_special_slot || sType === 'special';
+                                
+                                if (isSpecial) {
+                                    bgColor = [243, 232, 255]; // Purple for special slots
+                                } else if (sType.includes('practical') || sType.includes('lab')) {
+                                    bgColor = [232, 245, 233];
+                                } else if (sType.includes('tutorial')) {
+                                    bgColor = [255, 243, 224];
+                                } else if (sType.includes('lecture')) {
+                                    bgColor = [227, 242, 253];
+                                }
+
+                                row.push({ 
+                                    content: cellContent, 
+                                    styles: { halign: 'center', valign: 'middle', fillColor: bgColor, fontSize: 6, cellPadding: 1.5 }
+                                });
                             }
                         });
                         return row;
                     });
 
+                    // Use landscape orientation for wider table
                     doc.autoTable({
                         head: tableHead,
                         body: tableBody,
                         startY,
                         theme: 'grid',
-                        headStyles: { fillColor: [72, 22, 109], textColor: 255, fontSize: 8, fontStyle: 'bold', halign: 'center' },
-                        styles: { fontSize: 7, cellPadding: 2, halign: 'center', valign: 'middle', overflow: 'linebreak' },
+                        headStyles: { fillColor: [72, 22, 109], textColor: 255, fontSize: 6, fontStyle: 'bold', halign: 'center', lineWidth: 0.3, lineColor: [255, 255, 255] },
+                        styles: { fontSize: 6, cellPadding: 1.5, halign: 'center', valign: 'middle', overflow: 'linebreak', lineWidth: 0.2, lineColor: [180, 180, 180] },
                         columnStyles: {
-                            0: { cellWidth: 25, fontStyle: 'bold', fillColor: [248, 250, 252] }
+                            0: { cellWidth: 18, fontStyle: 'bold', fillColor: [248, 250, 252] }
                         },
-                        alternateRowStyles: { fillColor: [250, 250, 255] },
-                        margin: { left: 14, right: 14 }
+                        margin: { left: 10, right: 10 }
                     });
+
+                    // Add legend
+                    const legendY = doc.lastAutoTable.finalY + 5;
+                    doc.setFontSize(7);
+                    doc.setTextColor(80, 80, 80);
+                    doc.text('Legend:', 14, legendY);
+                    doc.setFillColor(227, 242, 253); doc.rect(35, legendY - 3, 8, 4, 'F'); doc.setTextColor(0); doc.text('Lecture', 45, legendY);
+                    doc.setFillColor(232, 245, 233); doc.rect(70, legendY - 3, 8, 4, 'F'); doc.text('Lab/Practical', 80, legendY);
+                    doc.setFillColor(255, 243, 224); doc.rect(115, legendY - 3, 8, 4, 'F'); doc.text('Tutorial', 125, legendY);
+                    doc.setFillColor(243, 232, 255); doc.rect(153, legendY - 3, 8, 4, 'F'); doc.text('Special', 163, legendY);
 
                     // Add footer with generation timestamp
                     const pageH = doc.internal.pageSize.getHeight();
@@ -874,7 +973,9 @@
             }).join('');
 
             schedule.forEach(slot => {
-                const cellId = `preview-${slot.day}-${slot.start_time}`;
+                // Normalize day name: MONDAY -> Monday (to match cell IDs)
+                const dayName = slot.day.charAt(0).toUpperCase() + slot.day.slice(1).toLowerCase();
+                const cellId = `preview-${dayName}-${slot.start_time}`;
                 const cell = document.getElementById(cellId);
 
                 if (cell) {

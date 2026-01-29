@@ -59,6 +59,7 @@ from sql_connection import (
     , ElectiveSubjectPool, ElectiveAuditLog
     , MDMOfferingPool, MDMOutboundWindow, MDMWindowOffering, MDMOutboundSelection, MDMAuditLog
     , CrossSchoolOffering, ExternalStudentProfile
+    , TimetablePeriod, ScheduleChange, HolidayCalendar, LoadAllocationDetail
 )
 
 
@@ -1486,6 +1487,35 @@ def _get_student_batch_name(student: StudentProfile) -> str | None:
     return None
 
 
+def batch_names_match(schedule_batch: str, student_batch: str) -> bool:
+    """Check if schedule target_batch matches student's batch name flexibly.
+    
+    Handles cases like:
+    - Schedule stores 'A', student batch is 'Batch A' -> True
+    - Schedule stores 'Batch A', student batch is 'Batch A' -> True
+    - Schedule stores 'B', student batch is 'Batch A' -> False
+    """
+    if not schedule_batch:
+        return True  # No batch restriction, applies to all
+    if not student_batch:
+        return False  # Student has no batch but schedule requires one
+    
+    # Normalize for comparison
+    sched_lower = schedule_batch.lower().strip()
+    student_lower = student_batch.lower().strip()
+    
+    # Exact match
+    if sched_lower == student_lower:
+        return True
+    
+    # Extract just the letter/number (e.g., "Batch A" -> "a", "A" -> "a")
+    sched_suffix = sched_lower.replace('batch', '').strip()
+    student_suffix = student_lower.replace('batch', '').strip()
+    
+    # Compare extracted identifiers
+    return sched_suffix == student_suffix
+
+
 def _student_subject_attendance_payload(student: StudentProfile):
     if not student.current_section_id:
         return {
@@ -1559,7 +1589,7 @@ def _student_subject_attendance_payload(student: StudentProfile):
 
         applicable_ids = []
         for sess, target_batch in sessions:
-            if not target_batch or target_batch == my_batch_name:
+            if not target_batch or batch_names_match(target_batch, my_batch_name):
                 applicable_ids.append(sess.session_id)
 
         conducted = len(applicable_ids)
@@ -1745,9 +1775,10 @@ def _get_student_timetable_payload(student: StudentProfile):
     # Get active version for this section
     active_version_id = get_active_version_id(section.section_id)
 
+    # Use outerjoin to include special slots without subject/teacher
     query = (
         db.session.query(WeeklySchedule, Subject, StaffProfile, RoomMaster)
-        .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
+        .outerjoin(Subject, WeeklySchedule.subject_id == Subject.subject_id)
         .outerjoin(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
         .outerjoin(RoomMaster, WeeklySchedule.room_id == RoomMaster.room_id)
         .filter(WeeklySchedule.section_id == section.section_id)
@@ -1761,12 +1792,15 @@ def _get_student_timetable_payload(student: StudentProfile):
     day_order = {'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6}
     entries = []
     for sched, subj, teacher, room in slots:
-        # Batch filter
-        if sched.target_batch and sched.target_batch != my_batch_name:
+        # Batch filter - use flexible matching (e.g., "A" matches "Batch A")
+        if sched.target_batch and not batch_names_match(sched.target_batch, my_batch_name):
             continue
 
-        # Elective filter
-        if is_elective_type(subj.subject_type):
+        # Check if this is a special slot (Library, Mentor Meeting, etc.)
+        is_special = bool(sched.slot_label and not subj)
+        
+        # Elective filter (only for regular subjects)
+        if subj and is_elective_type(subj.subject_type):
             try:
                 is_approved = StudentElective.query.filter_by(
                     student_id=student.student_id,
@@ -1778,30 +1812,56 @@ def _get_student_timetable_payload(student: StudentProfile):
             except Exception:
                 pass
 
-        entries.append({
-            "schedule_id": sched.schedule_id,
-            "day_of_week": sched.day_of_week,
-            "day_index": day_order.get(sched.day_of_week, 99),
-            "start_time": sched.start_time.strftime('%H:%M') if sched.start_time else None,
-            "end_time": sched.end_time.strftime('%H:%M') if sched.end_time else None,
-            "session_type": sched.session_type,
-            "target_batch": sched.target_batch,
-            "subject": {
-                "subject_id": subj.subject_id,
-                "name": subj.name,
-                "code": subj.code,
-                "type": subj.subject_type,
-            },
-            "teacher": {
-                "staff_id": teacher.staff_id,
-                "name": teacher.full_name,
-            } if teacher else None,
-            "room": {
-                "room_id": room.room_id,
-                "room_number": room.room_number,
-                "room_type": room.room_type,
-            } if room else None,
-        })
+        # Normalize day_of_week from database (e.g., 'THURSDAY' -> 'Thursday') for consistent lookup
+        normalized_day = (sched.day_of_week or '').title()
+        
+        # Handle special slots
+        if is_special:
+            entries.append({
+                "schedule_id": sched.schedule_id,
+                "day_of_week": normalized_day,
+                "day_index": day_order.get(normalized_day, 99),
+                "start_time": sched.start_time.strftime('%H:%M') if sched.start_time else None,
+                "end_time": sched.end_time.strftime('%H:%M') if sched.end_time else None,
+                "session_type": "Special",
+                "target_batch": sched.target_batch,
+                "is_special_slot": True,
+                "slot_label": sched.slot_label,
+                "subject": {
+                    "subject_id": None,
+                    "name": sched.slot_label,
+                    "code": "SPECIAL",
+                    "type": "Special",
+                },
+                "teacher": None,
+                "room": None,
+            })
+        elif subj:
+            entries.append({
+                "schedule_id": sched.schedule_id,
+                "day_of_week": normalized_day,  # Return title case for frontend consistency
+                "day_index": day_order.get(normalized_day, 99),
+                "start_time": sched.start_time.strftime('%H:%M') if sched.start_time else None,
+                "end_time": sched.end_time.strftime('%H:%M') if sched.end_time else None,
+                "session_type": sched.session_type,
+                "target_batch": sched.target_batch,
+                "is_special_slot": False,
+                "subject": {
+                    "subject_id": subj.subject_id,
+                    "name": subj.name,
+                    "code": subj.code,
+                    "type": subj.subject_type,
+                },
+                "teacher": {
+                    "staff_id": teacher.staff_id,
+                    "name": teacher.full_name,
+                } if teacher else None,
+                "room": {
+                    "room_id": room.room_id,
+                    "room_number": room.room_number,
+                    "room_type": room.room_type,
+                } if room else None,
+            })
 
     entries.sort(key=lambda e: (e.get('day_index', 99), e.get('start_time') or ''))
     return {
@@ -1907,6 +1967,35 @@ def is_elective_type(type_str):
     if not type_str: return False
     t = type_str.lower()
     return "elective" in t or "open" in t
+
+
+def find_mentor_batch(section_id, batch_name):
+    """Find MentorBatch with flexible name matching.
+    
+    Handles cases where schedule stores 'A' but MentorBatch is named 'Batch A'.
+    Tries exact match first, then 'Batch X' format, then contains match.
+    """
+    if not batch_name:
+        return None
+    
+    # 1. Exact match
+    batch = MentorBatch.query.filter_by(section_id=section_id, batch_name=batch_name).first()
+    if batch:
+        return batch
+    
+    # 2. Try "Batch X" format (e.g., "A" -> "Batch A")
+    batch = MentorBatch.query.filter_by(section_id=section_id, batch_name=f"Batch {batch_name}").first()
+    if batch:
+        return batch
+    
+    # 3. Try contains match (case-insensitive)
+    batches = MentorBatch.query.filter_by(section_id=section_id).all()
+    batch_name_lower = batch_name.lower()
+    for b in batches:
+        if batch_name_lower in b.batch_name.lower() or b.batch_name.lower() in batch_name_lower:
+            return b
+    
+    return None
 
 
 def parse_semester_no(raw: str):
@@ -3900,7 +3989,8 @@ def staff_dashboard():
         def time_to_float(t): return t.hour + (t.minute / 60.0)
 
         for slot, section, subject in all_slots:
-            slot_day_idx = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6}.get(slot.day_of_week, 7)
+            # Normalize day_of_week from database (e.g., 'THURSDAY' -> 'Thursday') for consistent lookup
+            slot_day_idx = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6}.get(slot.day_of_week.title() if slot.day_of_week else '', 7)
 
             s_type = getattr(slot, 'session_type', 'Lecture')
             s_batch = getattr(slot, 'target_batch', None)
@@ -3928,7 +4018,7 @@ def staff_dashboard():
                     "time": f"{slot.start_time.strftime('%I:%M %p')} - {slot.end_time.strftime('%I:%M %p')}",
                     "class": f"{section.class_level}-{section.name}",
                     "subject": subject.name,
-                    "day": slot.day_of_week,
+                    "day": slot.day_of_week.title() if slot.day_of_week else '',  # Normalize to title case
                     "date_iso": slot_date.strftime('%Y-%m-%d'),
                     "date_display": slot_date.strftime('%d %b'),
                     "type": s_type,
@@ -3995,7 +4085,8 @@ def staff_dashboard():
                     if not tup:
                         continue
                     ws, sec, sub = tup
-                    slot_day_idx = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6}.get(ws.day_of_week, 7)
+                    # Normalize day_of_week from database (e.g., 'THURSDAY' -> 'Thursday') for consistent lookup
+                    slot_day_idx = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6}.get(ws.day_of_week.title() if ws.day_of_week else '', 7)
 
                     date_iso = d.strftime('%Y-%m-%d')
                     if (int(schedule_id), date_iso) in existing_keys:
@@ -4432,13 +4523,14 @@ def api_staff_find_adjustment_faculty():
             requester_id = req_slot.teacher_id
 
         # Validate date matches the req slot weekday (prevents mismatched swaps)
-        if req_date.strftime('%A') != req_slot.day_of_week:
+        # Normalize day comparison: Python strftime gives 'Thursday', DB may have 'THURSDAY'
+        if req_date.strftime('%A').upper() != (req_slot.day_of_week or '').upper():
             return jsonify([]), 200
 
         section_id = req_slot.section_id
         req_start = req_slot.start_time
         req_end = req_slot.end_time
-        req_day = req_slot.day_of_week
+        req_day = (req_slot.day_of_week or '').title()  # Normalize to 'Thursday' format
 
         day_to_idx = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6}
         req_day_idx = day_to_idx.get(req_day, 0)
@@ -4818,6 +4910,7 @@ def get_hod_stats():
         active_faculty_count = 0
         
         today_name = datetime.now().strftime("%A")
+        today_name_upper = today_name.upper()  # For DB comparison ('MONDAY', 'TUESDAY', etc.)
         today_date = datetime.now().date()
         current_time = datetime.now().time()
 
@@ -4832,7 +4925,7 @@ def get_hod_stats():
                 session_exists = SessionLog.query.filter_by(schedule_id=slot.schedule_id, session_date=today_date).first()
                 if session_exists:
                     conducted_total += 1
-                elif slot.day_of_week == today_name and current_time > slot.end_time:
+                elif (slot.day_of_week or '').upper() == today_name_upper and current_time > slot.end_time:
                     missed_today += 1
             
             sessions = SessionLog.query.filter_by(actual_teacher_id=f.staff_id).all()
@@ -5372,8 +5465,8 @@ def get_subject_report():
                 if mb: my_batch = mb.batch_name
 
             for sess, target_batch in sessions:
-                # Apply Session if Lecture OR Batch Matches
-                if not target_batch or target_batch == my_batch:
+                # Apply Session if Lecture OR Batch Matches (flexible matching)
+                if not target_batch or batch_names_match(target_batch, my_batch):
                     valid_sessions += 1
                     status = txn_map.get((s.student_id, sess.session_id), "Absent")
                     char = "A"
@@ -5610,13 +5703,13 @@ def get_attendance_sheet():
                               .filter(StudentElective.subject_id == subject.subject_id)
                               .filter(StudentElective.status == 'Approved'))
                 if slot.target_batch:
-                    target_batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
+                    target_batch_obj = find_mentor_batch(section.section_id, slot.target_batch)
                     if target_batch_obj:
                         base_query = base_query.filter(StudentProfile.mentor_batch_id == target_batch_obj.batch_id)
                 students = base_query.order_by(StudentProfile.admission_number).all()
             elif slot.target_batch:
                 # Batch-specific (lab sessions)
-                target_batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
+                target_batch_obj = find_mentor_batch(section.section_id, slot.target_batch)
                 if target_batch_obj: students = StudentProfile.query.filter_by(current_section_id=section.section_id, mentor_batch_id=target_batch_obj.batch_id).all()
             else:
                 # Core subject = all students in section
@@ -6526,8 +6619,8 @@ def student_dashboard():
             
             applicable_ids = []
             for sess, target_batch in sessions:
-                # Include if Lecture (No Batch) OR Batch matches Student
-                if not target_batch or target_batch == my_batch_name:
+                # Include if Lecture (No Batch) OR Batch matches Student (flexible matching)
+                if not target_batch or batch_names_match(target_batch, my_batch_name):
                     applicable_ids.append(sess.session_id)
             
             conducted = len(applicable_ids)
@@ -8496,6 +8589,1668 @@ def generate_timetable():
         db.session.rollback()
         print(f"Scheduler Error: {e}")
         return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# API: DUAL TIMETABLE GENERATION (Block + Regular)
+# ==========================================
+
+def is_resource_free_v2(day, start_str, end_str, teacher_id, section_id, batch=None,
+                        timetable_type=None, current_version_id=None):
+    """
+    Enhanced conflict checker for dual timetable system.
+
+    Key difference from original:
+    - Teacher conflicts are checked across ALL timetable types (Block + Regular)
+    - Section/batch conflicts are checked within the SAME timetable type
+
+    Args:
+        timetable_type: 'Block' or 'Regular' - affects section conflict scope
+        current_version_id: Exclude this version from conflict checks (for rebuilding)
+    """
+    start = datetime.strptime(start_str, "%H:%M").time()
+    end = datetime.strptime(end_str, "%H:%M").time()
+    # Normalize day to uppercase for database comparison
+    day_upper = day.upper() if day else ''
+
+    # Build base query excluding current draft version
+    def base_schedule_query():
+        q = WeeklySchedule.query.join(TimetableVersion)
+        if current_version_id:
+            q = q.filter(WeeklySchedule.version_id != current_version_id)
+        # Only check against active versions
+        q = q.filter(TimetableVersion.status == 'Active')
+        return q
+
+    # A. Teacher Check - ACROSS ALL TIMETABLE TYPES
+    # A teacher cannot be in two places at once, regardless of Block/Regular
+    if teacher_id and teacher_id != '--':  # Skip unassigned
+        teacher_conflict = base_schedule_query().filter(
+            WeeklySchedule.day_of_week == day_upper,
+            WeeklySchedule.teacher_id == teacher_id,
+            WeeklySchedule.start_time < end,
+            WeeklySchedule.end_time > start
+        ).first()
+
+        if teacher_conflict:
+            return False
+
+    # B. Class/Batch Check - WITHIN SAME TIMETABLE TYPE ONLY
+    # Block and Regular can overlap for students (they attend both)
+    section_query = base_schedule_query().filter(
+        WeeklySchedule.day_of_week == day_upper,
+        WeeklySchedule.section_id == section_id,
+        WeeklySchedule.start_time < end,
+        WeeklySchedule.end_time > start
+    )
+
+    # If timetable_type specified, only check conflicts within same type
+    if timetable_type:
+        section_query = section_query.filter(TimetableVersion.timetable_type == timetable_type)
+
+    conflict = section_query.first()
+
+    if conflict:
+        # If the existing slot is for the Whole Class, it's a conflict
+        if not conflict.target_batch:
+            return False
+        # If we want Whole Class but slot has a Batch, conflict
+        if not batch:
+            return False
+        # If batches match (Batch A vs Batch A), conflict
+        if conflict.target_batch == batch:
+            return False
+        # If batches differ (Batch A vs Batch B), ALLOW (Parallel Lab)
+        if conflict.target_batch != batch:
+            return True
+
+    return True
+
+
+@app.route('/api/admin/generate_timetable_from_allocation', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def generate_timetable_from_allocation():
+    """
+    Generate timetable from LoadAllocationDetail records.
+
+    This is the new dual-timetable generator that:
+    1. Uses LoadAllocationDetail instead of SubjectAllocation
+    2. Supports timetable_type (Block/Regular)
+    3. Links to TimetablePeriod for date ranges
+    4. Handles unassigned slots (Respective Faculties)
+
+    Input JSON:
+    {
+        "section_id": 7,              # Optional: specific section only
+        "timetable_type": "Block",    # Required: 'Block' or 'Regular'
+        "period_id": 1,               # Optional: link to TimetablePeriod
+        "class_level": "SY"           # Optional: generate for all sections of this level
+    }
+    """
+    try:
+        data = request.json or {}
+        target_section_id = data.get('section_id')
+        timetable_type = data.get('timetable_type', 'Regular')  # 'Block' or 'Regular'
+        period_id = data.get('period_id')
+        class_level = data.get('class_level')  # Optional: SY, TY, etc.
+
+        if timetable_type not in ['Block', 'Regular']:
+            return jsonify({"error": "timetable_type must be 'Block' or 'Regular'"}), 400
+
+        # Track versions created per section
+        version_map = {}
+
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+        time_slots = get_time_slots()
+
+        faculty_daily_load = {}
+        schedule_log = []
+        failed_items = []
+
+        # Determine which sections to process
+        sections_query = ClassSection.query
+        if target_section_id:
+            sections_query = sections_query.filter_by(section_id=target_section_id)
+        elif class_level:
+            sections_query = sections_query.filter_by(class_level=class_level)
+
+        sections = sections_query.all()
+
+        if not sections:
+            return jsonify({"error": "No sections found to generate timetable for"}), 404
+
+        for section in sections:
+            # Create draft version for this section with timetable_type
+            existing_draft = TimetableVersion.query.filter_by(
+                section_id=section.section_id,
+                timetable_type=timetable_type,
+                status='Draft'
+            ).first()
+
+            if existing_draft:
+                # Clear existing draft slots
+                WeeklySchedule.query.filter_by(version_id=existing_draft.version_id).delete()
+                draft_version = existing_draft
+                draft_version.version_label = f"{timetable_type} Auto-Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                draft_version.source_type = 'auto_generate'
+                draft_version.created_by_id = current_user.user_id
+                draft_version.period_id = period_id
+            else:
+                max_version = db.session.query(
+                    db.func.max(TimetableVersion.version_number)
+                ).filter_by(section_id=section.section_id).scalar() or 0
+
+                draft_version = TimetableVersion(
+                    section_id=section.section_id,
+                    version_number=max_version + 1,
+                    version_label=f"{timetable_type} Auto-Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                    status='Draft',
+                    created_by_id=current_user.user_id,
+                    source_type='auto_generate',
+                    timetable_type=timetable_type,
+                    period_id=period_id
+                )
+                db.session.add(draft_version)
+                db.session.flush()
+
+            version_map[section.section_id] = draft_version.version_id
+
+            # Get student count for room capacity
+            class_strength = StudentProfile.query.filter_by(
+                current_section_id=section.section_id
+            ).count()
+            if class_strength == 0:
+                class_strength = 60  # Default
+
+            # Get allocations from LoadAllocationDetail
+            allocations = LoadAllocationDetail.query.filter_by(
+                teaching_type=timetable_type,
+                section_id=section.section_id
+            ).all()
+
+            # Also get cross-class allocations (where class_level matches but section_id is null)
+            if section.class_level:
+                cross_class_allocations = LoadAllocationDetail.query.filter(
+                    LoadAllocationDetail.teaching_type == timetable_type,
+                    LoadAllocationDetail.section_id.is_(None),
+                    LoadAllocationDetail.class_level == section.class_level
+                ).all()
+                allocations.extend(cross_class_allocations)
+
+                # Also get allocations that apply to ALL classes (empty class_level)
+                all_class_allocations = LoadAllocationDetail.query.filter(
+                    LoadAllocationDetail.teaching_type == timetable_type,
+                    LoadAllocationDetail.section_id.is_(None),
+                    LoadAllocationDetail.class_level.is_(None)
+                ).all()
+                allocations.extend(all_class_allocations)
+
+            if not allocations:
+                schedule_log.append(f"No {timetable_type} allocations found for {section.name}")
+                continue
+
+            # Build queue - each LoadAllocationDetail row is already one session
+            queue = []
+            for alloc in allocations:
+                subject = Subject.query.get(alloc.subject_id)
+                if not subject:
+                    continue
+
+                # Skip MDM-Minor for auto-generation (needs student selection first)
+                if "MDM-Minor" in (subject.name or ""):
+                    continue
+
+                # Map session type to duration
+                session_type_map = {
+                    'L': ('Lecture', 1),
+                    'T': ('Tutorial', 1),
+                    'P': ('Practical', 2)
+                }
+
+                session_info = session_type_map.get(alloc.session_type, ('Lecture', 1))
+                session_name, duration = session_info
+
+                # Map batch from CSV format to schedule format
+                batch_map = {
+                    'A': 'Batch A',
+                    'B': 'Batch B',
+                    'C': 'Batch C',
+                    None: None,
+                    '-': None
+                }
+                batch = batch_map.get(alloc.batch, alloc.batch)
+
+                # Add sessions based on hours_per_week
+                sessions_needed = alloc.hours_per_week // duration if duration > 0 else alloc.hours_per_week
+                if sessions_needed == 0:
+                    sessions_needed = 1  # At least one session
+
+                for _ in range(sessions_needed):
+                    queue.append({
+                        "sub": subject,
+                        "teacher": alloc.teacher_id,
+                        "type": session_name,
+                        "batch": batch,
+                        "duration": duration,
+                        "is_unassigned": alloc.is_unassigned,
+                        "category": alloc.category
+                    })
+
+            # Prioritize: Practicals first (harder to place), then Lectures, then Tutorials
+            queue.sort(key=lambda x: (
+                0 if x['type'] == 'Practical' else (1 if x['type'] == 'Lecture' else 2),
+                0 if x['is_unassigned'] else 1  # Unassigned last (more flexible)
+            ))
+
+            # Placement algorithm
+            for item in queue:
+                placed = False
+                required_room_type = 'Laboratory' if item['type'] == 'Practical' else (
+                    'Tutorial Room' if item['type'] == 'Tutorial' else 'Classroom'
+                )
+                required_capacity = class_strength if not item['batch'] else (class_strength // 3)
+
+                # Try multiple passes
+                for _ in range(3):
+                    if placed:
+                        break
+                    for day in days:
+                        if placed:
+                            break
+
+                        for i, slot in enumerate(time_slots):
+                            if placed:
+                                break
+
+                            # Duration check
+                            if i + item['duration'] > len(time_slots):
+                                continue
+
+                            # Lunch guard (no 2hr lab starting at 11:45)
+                            if item['duration'] == 2 and slot['id'] == 4:
+                                continue
+
+                            start_str = slot['start']
+                            end_slot_idx = i + item['duration'] - 1
+                            end_str = time_slots[end_slot_idx]['end']
+
+                            # Faculty daily load check (skip for unassigned)
+                            if not item['is_unassigned'] and item['teacher']:
+                                current_load = faculty_daily_load.get((item['teacher'], day), 0)
+                                if current_load + item['duration'] > 4:
+                                    continue
+
+                            # Conflict check using enhanced checker
+                            if is_resource_free_v2(
+                                day, start_str, end_str,
+                                item['teacher'] if not item['is_unassigned'] else None,
+                                section.section_id,
+                                item['batch'],
+                                timetable_type=timetable_type,
+                                current_version_id=draft_version.version_id
+                            ):
+                                # Room check
+                                start_obj = datetime.strptime(start_str, "%H:%M").time()
+                                end_obj = datetime.strptime(end_str, "%H:%M").time()
+                                assigned_room = get_free_room(
+                                    day, start_obj, end_obj,
+                                    required_room_type, required_capacity
+                                )
+
+                                if assigned_room:
+                                    new_slot = WeeklySchedule(
+                                        section_id=section.section_id,
+                                        subject_id=item['sub'].subject_id,
+                                        teacher_id=item['teacher'] if not item['is_unassigned'] else None,
+                                        day_of_week=day,
+                                        start_time=start_obj,
+                                        end_time=end_obj,
+                                        session_type=item['type'],
+                                        target_batch=item['batch'],
+                                        room_id=assigned_room.room_id,
+                                        version_id=draft_version.version_id,
+                                        is_unassigned=item['is_unassigned']
+                                    )
+                                    db.session.add(new_slot)
+
+                                    if not item['is_unassigned'] and item['teacher']:
+                                        faculty_daily_load[(item['teacher'], day)] = (
+                                            faculty_daily_load.get((item['teacher'], day), 0) + item['duration']
+                                        )
+
+                                    placed = True
+                                    teacher_name = "TBD" if item['is_unassigned'] else (item['teacher'] or "Unknown")
+                                    batch_txt = f" [{item['batch']}]" if item['batch'] else ""
+                                    schedule_log.append(
+                                        f"[{timetable_type}] {section.name}{batch_txt} | {day} {start_str} | "
+                                        f"{item['sub'].name} ({item['type']}) | {teacher_name} | Room: {assigned_room.room_number}"
+                                    )
+                                    break
+
+                if not placed:
+                    batch_txt = f" [{item['batch']}]" if item['batch'] else ""
+                    failed_items.append(
+                        f"{section.name}{batch_txt}: {item['sub'].name} ({item['type']})"
+                    )
+
+        db.session.commit()
+
+        full_log = schedule_log + ["", "--- FAILED ITEMS ---"] + failed_items + [
+            "",
+            "=== IMPORTANT ===",
+            f"{timetable_type} schedule generated as DRAFT.",
+            "Go to Version Manager to preview and publish."
+        ]
+
+        return jsonify({
+            "message": f"{timetable_type} timetable generated as DRAFT",
+            "logs": full_log,
+            "versions_created": version_map,
+            "timetable_type": timetable_type,
+            "scheduled_count": len(schedule_log),
+            "failed_count": len(failed_items),
+            "note": "Use Version Manager to preview and publish the draft."
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        print(f"Dual Scheduler Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/load_allocation_preview', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def preview_load_allocation():
+    """
+    Preview parsed load allocation data before generating timetable.
+
+    Query params:
+    - section_id: Filter by section
+    - timetable_type: Filter by 'Block' or 'Regular'
+    - class_level: Filter by class level (SY, TY, etc.)
+    """
+    try:
+        section_id = request.args.get('section_id', type=int)
+        timetable_type = request.args.get('timetable_type')
+        class_level = request.args.get('class_level')
+
+        query = LoadAllocationDetail.query
+
+        if section_id:
+            query = query.filter_by(section_id=section_id)
+        if timetable_type:
+            query = query.filter_by(teaching_type=timetable_type)
+        if class_level:
+            query = query.filter(
+                db.or_(
+                    LoadAllocationDetail.class_level == class_level,
+                    LoadAllocationDetail.class_level.is_(None)  # Include cross-class
+                )
+            )
+
+        allocations = query.all()
+
+        result = []
+        for alloc in allocations:
+            subject = Subject.query.get(alloc.subject_id)
+            teacher = StaffProfile.query.get(alloc.teacher_id) if alloc.teacher_id else None
+            section = ClassSection.query.get(alloc.section_id) if alloc.section_id else None
+
+            result.append({
+                "id": alloc.id,
+                "teaching_type": alloc.teaching_type,
+                "subject_code": subject.code if subject else None,
+                "subject_name": subject.name if subject else None,
+                "teacher_name": teacher.name if teacher else ("TBD" if alloc.is_unassigned else None),
+                "teacher_id": alloc.teacher_id,
+                "is_unassigned": alloc.is_unassigned,
+                "session_type": alloc.session_type,
+                "section_name": section.name if section else "All Sections",
+                "class_level": alloc.class_level or "All Levels",
+                "batch": alloc.batch,
+                "hours_per_week": alloc.hours_per_week,
+                "category": alloc.category
+            })
+
+        # Group by teaching type for summary
+        block_count = len([r for r in result if r['teaching_type'] == 'Block'])
+        regular_count = len([r for r in result if r['teaching_type'] == 'Regular'])
+
+        return jsonify({
+            "allocations": result,
+            "summary": {
+                "total": len(result),
+                "block_count": block_count,
+                "regular_count": regular_count
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# API: TIMETABLE PERIOD MANAGEMENT
+# ==========================================
+
+@app.route('/api/admin/timetable_periods', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def list_timetable_periods():
+    """List all timetable periods (Block and Regular date ranges)."""
+    try:
+        academic_year = request.args.get('academic_year')
+        semester = request.args.get('semester', type=int)
+        timetable_type = request.args.get('timetable_type')
+
+        query = TimetablePeriod.query
+
+        if academic_year:
+            query = query.filter_by(academic_year=academic_year)
+        if semester:
+            query = query.filter_by(semester=semester)
+        if timetable_type:
+            query = query.filter_by(timetable_type=timetable_type)
+
+        periods = query.order_by(TimetablePeriod.start_date).all()
+
+        return jsonify([{
+            "id": p.id,
+            "name": p.name,
+            "timetable_type": p.timetable_type,
+            "academic_year": p.academic_year,
+            "semester": p.semester,
+            "start_date": p.start_date.isoformat() if p.start_date else None,
+            "end_date": p.end_date.isoformat() if p.end_date else None,
+            "status": p.status,
+            "created_at": p.created_at.isoformat() if p.created_at else None
+        } for p in periods]), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/timetable_periods', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def create_timetable_period():
+    """
+    Create a new timetable period (Block or Regular date range).
+
+    Input JSON:
+    {
+        "name": "Block Teaching Jan 2026",
+        "timetable_type": "Block",
+        "academic_year": "2025-26",
+        "semester": 2,
+        "start_date": "2026-01-06",
+        "end_date": "2026-02-07"
+    }
+    """
+    try:
+        data = request.json
+
+        required_fields = ['name', 'timetable_type', 'academic_year', 'semester', 'start_date', 'end_date']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        if data['timetable_type'] not in ['Block', 'Regular']:
+            return jsonify({"error": "timetable_type must be 'Block' or 'Regular'"}), 400
+
+        # Parse dates
+        start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+        end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+
+        if end_date <= start_date:
+            return jsonify({"error": "end_date must be after start_date"}), 400
+
+        # Check for overlapping periods of same type
+        overlap = TimetablePeriod.query.filter(
+            TimetablePeriod.timetable_type == data['timetable_type'],
+            TimetablePeriod.academic_year == data['academic_year'],
+            TimetablePeriod.semester == data['semester'],
+            TimetablePeriod.start_date <= end_date,
+            TimetablePeriod.end_date >= start_date
+        ).first()
+
+        if overlap:
+            return jsonify({
+                "error": f"Overlapping {data['timetable_type']} period exists: {overlap.name}"
+            }), 400
+
+        period = TimetablePeriod(
+            name=data['name'],
+            timetable_type=data['timetable_type'],
+            academic_year=data['academic_year'],
+            semester=data['semester'],
+            start_date=start_date,
+            end_date=end_date,
+            status='Draft',
+            created_by_id=current_user.user_id
+        )
+        db.session.add(period)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Timetable period created",
+            "id": period.id,
+            "name": period.name
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/timetable_periods/<int:period_id>', methods=['PUT'])
+@login_required
+@require_roles('Admin')
+def update_timetable_period(period_id):
+    """Update an existing timetable period."""
+    try:
+        period = TimetablePeriod.query.get_or_404(period_id)
+        data = request.json
+
+        if 'name' in data:
+            period.name = data['name']
+        if 'start_date' in data:
+            period.start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+        if 'end_date' in data:
+            period.end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+        if 'status' in data and data['status'] in ['Draft', 'Active', 'Completed']:
+            period.status = data['status']
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "Period updated",
+            "id": period.id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/timetable_periods/<int:period_id>/activate', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def activate_timetable_period(period_id):
+    """Activate a timetable period and deactivate others of same type/semester."""
+    try:
+        period = TimetablePeriod.query.get_or_404(period_id)
+
+        # Deactivate other periods of same type in same semester
+        TimetablePeriod.query.filter(
+            TimetablePeriod.id != period_id,
+            TimetablePeriod.timetable_type == period.timetable_type,
+            TimetablePeriod.academic_year == period.academic_year,
+            TimetablePeriod.semester == period.semester,
+            TimetablePeriod.status == 'Active'
+        ).update({'status': 'Completed'})
+
+        period.status = 'Active'
+        db.session.commit()
+
+        return jsonify({
+            "message": f"{period.timetable_type} period '{period.name}' is now active"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/timetable_periods/current', methods=['GET'])
+@login_required
+def get_current_periods():
+    """Get currently active Block and Regular periods based on today's date."""
+    try:
+        today = datetime.now().date()
+
+        current_periods = TimetablePeriod.query.filter(
+            TimetablePeriod.status == 'Active',
+            TimetablePeriod.start_date <= today,
+            TimetablePeriod.end_date >= today
+        ).all()
+
+        return jsonify({
+            "date": today.isoformat(),
+            "active_periods": [{
+                "id": p.id,
+                "name": p.name,
+                "timetable_type": p.timetable_type,
+                "start_date": p.start_date.isoformat(),
+                "end_date": p.end_date.isoformat()
+            } for p in current_periods]
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# API: HOLIDAY CALENDAR
+# ==========================================
+
+@app.route('/api/admin/holidays', methods=['GET'])
+@login_required
+def list_holidays():
+    """List holidays for academic year."""
+    try:
+        academic_year = request.args.get('academic_year')
+        dept_id = request.args.get('dept_id', type=int)
+
+        query = HolidayCalendar.query
+
+        if academic_year:
+            query = query.filter_by(academic_year=academic_year)
+        if dept_id:
+            query = query.filter(
+                db.or_(
+                    HolidayCalendar.dept_id == dept_id,
+                    HolidayCalendar.dept_id.is_(None)  # Include global holidays
+                )
+            )
+
+        holidays = query.order_by(HolidayCalendar.date).all()
+
+        return jsonify([{
+            "id": h.id,
+            "date": h.date.isoformat(),
+            "name": h.name,
+            "type": h.type,
+            "dept_id": h.dept_id,
+            "academic_year": h.academic_year
+        } for h in holidays]), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/holidays', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def create_holiday():
+    """Create a new holiday entry."""
+    try:
+        data = request.json
+
+        if not data.get('date') or not data.get('name') or not data.get('academic_year'):
+            return jsonify({"error": "date, name, and academic_year are required"}), 400
+
+        holiday = HolidayCalendar(
+            date=datetime.strptime(data['date'], '%Y-%m-%d').date(),
+            name=data['name'],
+            type=data.get('type', 'Full'),
+            dept_id=data.get('dept_id'),
+            academic_year=data['academic_year']
+        )
+        db.session.add(holiday)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Holiday added",
+            "id": holiday.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/holidays/bulk', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def bulk_create_holidays():
+    """Bulk upload holidays from a list."""
+    try:
+        data = request.json
+        holidays_data = data.get('holidays', [])
+        academic_year = data.get('academic_year')
+
+        if not holidays_data or not academic_year:
+            return jsonify({"error": "holidays list and academic_year required"}), 400
+
+        created = 0
+        for h in holidays_data:
+            if h.get('date') and h.get('name'):
+                holiday = HolidayCalendar(
+                    date=datetime.strptime(h['date'], '%Y-%m-%d').date(),
+                    name=h['name'],
+                    type=h.get('type', 'Full'),
+                    dept_id=h.get('dept_id'),
+                    academic_year=academic_year
+                )
+                db.session.add(holiday)
+                created += 1
+
+        db.session.commit()
+
+        return jsonify({
+            "message": f"Created {created} holidays",
+            "count": created
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/holidays/<int:holiday_id>', methods=['DELETE'])
+@login_required
+@require_roles('Admin')
+def delete_holiday(holiday_id):
+    """Delete a holiday entry."""
+    try:
+        holiday = HolidayCalendar.query.get_or_404(holiday_id)
+        db.session.delete(holiday)
+        db.session.commit()
+
+        return jsonify({"message": "Holiday deleted"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# API: SCHEDULE CHANGES (Runtime Modifications)
+# ==========================================
+
+CHANGE_TYPES = {
+    'FACULTY_SUB': 'Faculty Substitution',
+    'ROOM_CHANGE': 'Room Change',
+    'TIME_SWAP': 'Time Slot Change',
+    'CANCEL': 'Session Cancelled',
+    'MAKEUP': 'Makeup Session',
+    'BATCH_MERGE': 'Batch Merge',
+    'BATCH_SPLIT': 'Batch Split'
+}
+
+
+@app.route('/api/admin/schedule_changes', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def list_schedule_changes():
+    """List schedule changes with optional filters."""
+    try:
+        status = request.args.get('status', 'Active')
+        change_type = request.args.get('change_type')
+        from_date = request.args.get('from_date')
+        to_date = request.args.get('to_date')
+
+        query = ScheduleChange.query
+
+        if status:
+            query = query.filter_by(status=status)
+        if change_type:
+            query = query.filter_by(change_type=change_type)
+        if from_date:
+            from_dt = datetime.strptime(from_date, '%Y-%m-%d').date()
+            query = query.filter(ScheduleChange.effective_from >= from_dt)
+        if to_date:
+            to_dt = datetime.strptime(to_date, '%Y-%m-%d').date()
+            query = query.filter(
+                db.or_(
+                    ScheduleChange.effective_to <= to_dt,
+                    ScheduleChange.effective_to.is_(None)
+                )
+            )
+
+        changes = query.order_by(ScheduleChange.created_at.desc()).all()
+
+        result = []
+        for c in changes:
+            # Get original schedule details
+            original_schedule = None
+            if c.original_schedule_id:
+                ws = WeeklySchedule.query.get(c.original_schedule_id)
+                if ws:
+                    subject = Subject.query.get(ws.subject_id)
+                    original_schedule = {
+                        "day": ws.day_of_week,
+                        "start_time": ws.start_time.strftime('%H:%M') if ws.start_time else None,
+                        "end_time": ws.end_time.strftime('%H:%M') if ws.end_time else None,
+                        "subject_name": subject.name if subject else None
+                    }
+
+            result.append({
+                "id": c.id,
+                "change_type": c.change_type,
+                "change_type_label": CHANGE_TYPES.get(c.change_type, c.change_type),
+                "original_schedule": original_schedule,
+                "effective_from": c.effective_from.isoformat() if c.effective_from else None,
+                "effective_to": c.effective_to.isoformat() if c.effective_to else None,
+                "specific_dates": c.specific_dates,
+                "original_values": c.original_values,
+                "new_values": c.new_values,
+                "status": c.status,
+                "reason": c.reason,
+                "created_at": c.created_at.isoformat() if c.created_at else None
+            })
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/schedule_changes', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def create_schedule_change():
+    """
+    Create a runtime schedule change.
+
+    Input JSON:
+    {
+        "change_type": "FACULTY_SUB",
+        "original_schedule_id": 123,
+        "effective_from": "2026-01-20",
+        "effective_to": "2026-01-25",  // Optional - if null, applies indefinitely
+        "specific_dates": ["2026-01-20", "2026-01-22"],  // Optional - specific dates only
+        "new_values": {
+            "teacher_id": "1020487"  // New faculty
+        },
+        "reason": "Original faculty on leave"
+    }
+    """
+    try:
+        data = request.json
+
+        if not data.get('change_type') or data['change_type'] not in CHANGE_TYPES:
+            return jsonify({"error": f"Invalid change_type. Must be one of: {list(CHANGE_TYPES.keys())}"}), 400
+
+        if not data.get('effective_from'):
+            return jsonify({"error": "effective_from date is required"}), 400
+
+        if not data.get('new_values'):
+            return jsonify({"error": "new_values is required"}), 400
+
+        # Get original values if schedule_id provided
+        original_values = None
+        if data.get('original_schedule_id'):
+            ws = WeeklySchedule.query.get(data['original_schedule_id'])
+            if ws:
+                original_values = {
+                    "teacher_id": ws.teacher_id,
+                    "room_id": ws.room_id,
+                    "start_time": ws.start_time.strftime('%H:%M') if ws.start_time else None,
+                    "end_time": ws.end_time.strftime('%H:%M') if ws.end_time else None,
+                    "day_of_week": (ws.day_of_week or '').title()  # Normalize to title case
+                }
+
+        change = ScheduleChange(
+            change_type=data['change_type'],
+            original_schedule_id=data.get('original_schedule_id'),
+            effective_from=datetime.strptime(data['effective_from'], '%Y-%m-%d').date(),
+            effective_to=datetime.strptime(data['effective_to'], '%Y-%m-%d').date() if data.get('effective_to') else None,
+            specific_dates=data.get('specific_dates'),
+            original_values=original_values,
+            new_values=data['new_values'],
+            reason=data.get('reason'),
+            created_by_id=current_user.user_id
+        )
+        db.session.add(change)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Schedule change created",
+            "id": change.id,
+            "change_type": change.change_type
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/schedule_changes/<int:change_id>', methods=['PUT'])
+@login_required
+@require_roles('Admin')
+def update_schedule_change(change_id):
+    """Update a schedule change (e.g., extend dates, modify new values)."""
+    try:
+        change = ScheduleChange.query.get_or_404(change_id)
+        data = request.json
+
+        if 'effective_to' in data:
+            change.effective_to = datetime.strptime(data['effective_to'], '%Y-%m-%d').date() if data['effective_to'] else None
+        if 'new_values' in data:
+            change.new_values = data['new_values']
+        if 'status' in data and data['status'] in ['Active', 'Cancelled', 'Completed']:
+            change.status = data['status']
+        if 'reason' in data:
+            change.reason = data['reason']
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "Schedule change updated",
+            "id": change.id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/schedule_changes/<int:change_id>/cancel', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def cancel_schedule_change(change_id):
+    """Cancel an active schedule change."""
+    try:
+        change = ScheduleChange.query.get_or_404(change_id)
+        change.status = 'Cancelled'
+        db.session.commit()
+
+        return jsonify({"message": "Schedule change cancelled"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/substitution/assign', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def assign_substitution():
+    """
+    Quick faculty substitution for a schedule slot.
+
+    Input JSON:
+    {
+        "schedule_id": 123,
+        "substitute_teacher_id": "1020487",
+        "date": "2026-01-20",  // Single date
+        "reason": "Original faculty on medical leave"
+    }
+    """
+    try:
+        data = request.json
+
+        if not data.get('schedule_id') or not data.get('substitute_teacher_id') or not data.get('date'):
+            return jsonify({"error": "schedule_id, substitute_teacher_id, and date are required"}), 400
+
+        ws = WeeklySchedule.query.get_or_404(data['schedule_id'])
+
+        # Check if substitute is available
+        sub_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
+        day_of_week = sub_date.strftime('%A')
+        # Use uppercase for database comparison (DB stores 'MONDAY', 'TUESDAY', etc.)
+        day_of_week_upper = day_of_week.upper()
+
+        existing = WeeklySchedule.query.join(TimetableVersion).filter(
+            WeeklySchedule.teacher_id == data['substitute_teacher_id'],
+            WeeklySchedule.day_of_week == day_of_week_upper,
+            WeeklySchedule.start_time < ws.end_time,
+            WeeklySchedule.end_time > ws.start_time,
+            TimetableVersion.status == 'Active'
+        ).first()
+
+        if existing:
+            sub_teacher = StaffProfile.query.get(data['substitute_teacher_id'])
+            return jsonify({
+                "error": f"Substitute teacher has conflicting schedule",
+                "conflict": {
+                    "day": existing.day_of_week,
+                    "time": f"{existing.start_time.strftime('%H:%M')} - {existing.end_time.strftime('%H:%M')}"
+                }
+            }), 400
+
+        # Create the substitution change
+        change = ScheduleChange(
+            change_type='FACULTY_SUB',
+            original_schedule_id=ws.schedule_id,
+            effective_from=sub_date,
+            effective_to=sub_date,  # Single date substitution
+            original_values={"teacher_id": ws.teacher_id},
+            new_values={"teacher_id": data['substitute_teacher_id']},
+            reason=data.get('reason'),
+            created_by_id=current_user.user_id
+        )
+        db.session.add(change)
+        db.session.commit()
+
+        sub_teacher = StaffProfile.query.get(data['substitute_teacher_id'])
+        orig_teacher = StaffProfile.query.get(ws.teacher_id)
+        subject = Subject.query.get(ws.subject_id)
+
+        return jsonify({
+            "message": "Substitution assigned",
+            "change_id": change.id,
+            "details": {
+                "date": data['date'],
+                "subject": subject.name if subject else None,
+                "original_teacher": orig_teacher.name if orig_teacher else None,
+                "substitute_teacher": sub_teacher.name if sub_teacher else None
+            }
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/substitution/candidates', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def get_substitution_candidates():
+    """
+    Find available faculty for substitution at a given time.
+
+    Query params:
+    - schedule_id: The schedule needing substitution
+    - date: The date for substitution
+    """
+    try:
+        schedule_id = request.args.get('schedule_id', type=int)
+        date_str = request.args.get('date')
+
+        if not schedule_id or not date_str:
+            return jsonify({"error": "schedule_id and date are required"}), 400
+
+        ws = WeeklySchedule.query.get_or_404(schedule_id)
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        day_of_week = target_date.strftime('%A')
+        # Use uppercase for database comparison (DB stores 'MONDAY', 'TUESDAY', etc.)
+        day_of_week_upper = day_of_week.upper()
+
+        # Get all faculty who are NOT busy at this time
+        busy_teachers = db.session.query(WeeklySchedule.teacher_id).join(TimetableVersion).filter(
+            WeeklySchedule.day_of_week == day_of_week_upper,
+            WeeklySchedule.start_time < ws.end_time,
+            WeeklySchedule.end_time > ws.start_time,
+            TimetableVersion.status == 'Active',
+            WeeklySchedule.teacher_id.isnot(None)
+        ).distinct().all()
+
+        busy_ids = [t[0] for t in busy_teachers]
+
+        # Get all faculty NOT in busy list
+        available = StaffProfile.query.filter(
+            ~StaffProfile.staff_id.in_(busy_ids),
+            StaffProfile.role.in_(['Faculty', 'HOD'])
+        ).all()
+
+        # Get the subject to suggest qualified teachers
+        subject = Subject.query.get(ws.subject_id)
+
+        candidates = []
+        for staff in available:
+            # Check if this faculty teaches this subject in any section
+            teaches_subject = SubjectAllocation.query.filter_by(
+                teacher_id=staff.staff_id,
+                subject_id=ws.subject_id
+            ).first()
+
+            candidates.append({
+                "staff_id": staff.staff_id,
+                "name": staff.name,
+                "designation": staff.designation,
+                "teaches_this_subject": teaches_subject is not None,
+                "qualified": teaches_subject is not None  # Prioritize qualified
+            })
+
+        # Sort: qualified first, then by name
+        candidates.sort(key=lambda x: (0 if x['qualified'] else 1, x['name']))
+
+        return jsonify({
+            "schedule": {
+                "id": ws.schedule_id,
+                "day": ws.day_of_week,
+                "time": f"{ws.start_time.strftime('%H:%M')} - {ws.end_time.strftime('%H:%M')}",
+                "subject": subject.name if subject else None
+            },
+            "date": date_str,
+            "candidates": candidates
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/session/cancel', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def cancel_session():
+    """
+    Cancel a scheduled session for specific date(s).
+
+    Input JSON:
+    {
+        "schedule_id": 123,
+        "dates": ["2026-01-20", "2026-01-22"],
+        "reason": "Faculty unavailable"
+    }
+    """
+    try:
+        data = request.json
+
+        if not data.get('schedule_id') or not data.get('dates'):
+            return jsonify({"error": "schedule_id and dates are required"}), 400
+
+        ws = WeeklySchedule.query.get_or_404(data['schedule_id'])
+        dates = data['dates']
+
+        change = ScheduleChange(
+            change_type='CANCEL',
+            original_schedule_id=ws.schedule_id,
+            effective_from=datetime.strptime(min(dates), '%Y-%m-%d').date(),
+            effective_to=datetime.strptime(max(dates), '%Y-%m-%d').date(),
+            specific_dates=dates,
+            original_values={
+                "teacher_id": ws.teacher_id,
+                "room_id": ws.room_id
+            },
+            new_values={"cancelled": True},
+            reason=data.get('reason'),
+            created_by_id=current_user.user_id
+        )
+        db.session.add(change)
+        db.session.commit()
+
+        subject = Subject.query.get(ws.subject_id)
+
+        return jsonify({
+            "message": f"Session cancelled for {len(dates)} date(s)",
+            "change_id": change.id,
+            "subject": subject.name if subject else None,
+            "cancelled_dates": dates
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# API: UNIFIED TIMETABLE VIEW (Block + Regular with Changes)
+# ==========================================
+
+def _apply_schedule_changes(schedule_entry, target_date):
+    """
+    Apply active schedule changes to a schedule entry for a specific date.
+
+    Returns modified entry or None if cancelled.
+    """
+    schedule_id = schedule_entry.get('schedule_id')
+    if not schedule_id:
+        return schedule_entry
+
+    # Get active changes for this schedule on this date
+    changes = ScheduleChange.query.filter(
+        ScheduleChange.original_schedule_id == schedule_id,
+        ScheduleChange.status == 'Active',
+        ScheduleChange.effective_from <= target_date,
+        db.or_(
+            ScheduleChange.effective_to >= target_date,
+            ScheduleChange.effective_to.is_(None)
+        )
+    ).all()
+
+    modified_entry = dict(schedule_entry)
+    modified_entry['changes_applied'] = []
+
+    for change in changes:
+        # Check if specific dates are specified
+        if change.specific_dates:
+            date_str = target_date.isoformat()
+            if date_str not in change.specific_dates:
+                continue
+
+        # Apply the change
+        if change.change_type == 'CANCEL':
+            modified_entry['is_cancelled'] = True
+            modified_entry['changes_applied'].append({
+                'type': 'CANCEL',
+                'reason': change.reason
+            })
+            return modified_entry  # Cancelled, return early
+
+        elif change.change_type == 'FACULTY_SUB':
+            new_teacher_id = change.new_values.get('teacher_id')
+            if new_teacher_id:
+                teacher = StaffProfile.query.get(new_teacher_id)
+                modified_entry['teacher'] = {
+                    'staff_id': teacher.staff_id,
+                    'name': teacher.full_name if teacher else 'Unknown'
+                } if teacher else modified_entry.get('teacher')
+                modified_entry['is_substitution'] = True
+                modified_entry['original_teacher'] = change.original_values.get('teacher_id') if change.original_values else None
+                modified_entry['changes_applied'].append({
+                    'type': 'FACULTY_SUB',
+                    'reason': change.reason
+                })
+
+        elif change.change_type == 'ROOM_CHANGE':
+            new_room_id = change.new_values.get('room_id')
+            if new_room_id:
+                room = RoomMaster.query.get(new_room_id)
+                modified_entry['room'] = {
+                    'room_id': room.room_id,
+                    'room_number': room.room_number,
+                    'room_type': room.room_type
+                } if room else modified_entry.get('room')
+                modified_entry['is_room_changed'] = True
+                modified_entry['changes_applied'].append({
+                    'type': 'ROOM_CHANGE',
+                    'reason': change.reason
+                })
+
+    return modified_entry
+
+
+def _get_unified_timetable(section_id, target_date, student_batch=None, student=None):
+    """
+    Get unified timetable for a section on a specific date.
+
+    This function:
+    1. Determines which timetable type (Block/Regular) is active for the date
+    2. Fetches the appropriate schedules
+    3. Applies any runtime changes (substitutions, cancellations)
+    4. Returns the combined view
+    """
+    section = ClassSection.query.get(section_id)
+    if not section:
+        return {"error": "Section not found"}
+
+    day_of_week = target_date.strftime('%A')
+    # Use uppercase for database comparison (DB stores 'MONDAY', 'TUESDAY', etc.)
+    day_of_week_upper = day_of_week.upper()
+    if day_of_week in ['Saturday', 'Sunday']:
+        return {
+            "date": target_date.isoformat(),
+            "day_of_week": day_of_week,
+            "is_weekend": True,
+            "entries": []
+        }
+
+    # Check if it's a holiday
+    holiday = HolidayCalendar.query.filter(
+        HolidayCalendar.date == target_date,
+        db.or_(
+            HolidayCalendar.dept_id == section.dept_id,
+            HolidayCalendar.dept_id.is_(None)  # Global holidays
+        )
+    ).first()
+
+    if holiday:
+        return {
+            "date": target_date.isoformat(),
+            "day_of_week": day_of_week,
+            "is_holiday": True,
+            "holiday_name": holiday.name,
+            "holiday_type": holiday.type,
+            "entries": []
+        }
+
+    # Get active periods for this date
+    active_periods = TimetablePeriod.query.filter(
+        TimetablePeriod.status == 'Active',
+        TimetablePeriod.start_date <= target_date,
+        TimetablePeriod.end_date >= target_date
+    ).all()
+
+    active_types = [p.timetable_type for p in active_periods]
+
+    entries = []
+    day_order = {'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4}
+
+    # Get schedules for each active timetable type
+    for timetable_type in ['Block', 'Regular']:
+        # If no periods configured, show Regular by default
+        if active_periods and timetable_type not in active_types:
+            continue
+
+        # Get active version for this section and type
+        active_version = TimetableVersion.query.filter_by(
+            section_id=section_id,
+            timetable_type=timetable_type,
+            status='Active'
+        ).first()
+
+        if not active_version:
+            continue
+
+        # Get schedules for this day
+        query = (
+            db.session.query(WeeklySchedule, Subject, StaffProfile, RoomMaster)
+            .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
+            .outerjoin(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
+            .outerjoin(RoomMaster, WeeklySchedule.room_id == RoomMaster.room_id)
+            .filter(
+                WeeklySchedule.version_id == active_version.version_id,
+                WeeklySchedule.day_of_week == day_of_week_upper  # Use uppercase for DB comparison
+            )
+        )
+
+        slots = query.all()
+
+        for sched, subj, teacher, room in slots:
+            # Batch filter for student view
+            if student_batch and sched.target_batch and sched.target_batch != student_batch:
+                continue
+
+            # Elective filter for student view
+            if student and is_elective_type(subj.subject_type):
+                try:
+                    is_approved = StudentElective.query.filter_by(
+                        student_id=student.student_id,
+                        subject_id=subj.subject_id,
+                        status='Approved',
+                    ).first()
+                    if not is_approved:
+                        continue
+                except Exception:
+                    pass
+
+            entry = {
+                "schedule_id": sched.schedule_id,
+                "timetable_type": timetable_type,
+                "day_of_week": (sched.day_of_week or '').title(),  # Normalize to title case
+                "day_index": day_order.get((sched.day_of_week or '').title(), 99),
+                "start_time": sched.start_time.strftime('%H:%M') if sched.start_time else None,
+                "end_time": sched.end_time.strftime('%H:%M') if sched.end_time else None,
+                "session_type": sched.session_type,
+                "target_batch": sched.target_batch,
+                "is_unassigned": sched.is_unassigned,
+                "subject": {
+                    "subject_id": subj.subject_id,
+                    "name": subj.name,
+                    "code": subj.code,
+                    "type": subj.subject_type,
+                },
+                "teacher": {
+                    "staff_id": teacher.staff_id,
+                    "name": teacher.full_name,
+                } if teacher else {"staff_id": None, "name": "TBD"} if sched.is_unassigned else None,
+                "room": {
+                    "room_id": room.room_id,
+                    "room_number": room.room_number,
+                    "room_type": room.room_type,
+                } if room else None,
+            }
+
+            # Apply schedule changes
+            entry = _apply_schedule_changes(entry, target_date)
+            entries.append(entry)
+
+    # Sort by start time
+    entries.sort(key=lambda e: e.get('start_time') or '')
+
+    return {
+        "date": target_date.isoformat(),
+        "day_of_week": day_of_week,
+        "section_id": section_id,
+        "class": f"{section.class_level}-{section.name}",
+        "active_periods": [{
+            "type": p.timetable_type,
+            "name": p.name
+        } for p in active_periods],
+        "entries": entries
+    }
+
+
+@app.route('/api/v1/student/timetable/week', methods=['GET'])
+def api_v1_student_timetable_week():
+    """
+    Get unified weekly timetable for current student.
+
+    This endpoint returns a combined Block + Regular timetable
+    based on which periods are active for the requested week.
+
+    Query params:
+    - week_start: Start date of the week (YYYY-MM-DD). Defaults to today's week.
+    """
+    try:
+        user = _require_mobile_auth()
+        _require_role(user, {'student'})
+    except PermissionError as e:
+        return jsonify({"error": str(e) if str(e) else "Unauthorized"}), 401
+
+    student = _get_student_or_404(user.user_id)
+    if not student or not student.current_section_id:
+        return jsonify({"error": "Student section not found"}), 404
+
+    # Parse week_start or use current week
+    week_start_str = request.args.get('week_start')
+    if week_start_str:
+        week_start = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+    else:
+        today = datetime.now().date()
+        week_start = today - timedelta(days=today.weekday())  # Monday
+
+    student_batch = _get_student_batch_name(student)
+
+    # Get timetable for each day of the week
+    week_data = []
+    for i in range(5):  # Monday to Friday
+        target_date = week_start + timedelta(days=i)
+        day_data = _get_unified_timetable(
+            student.current_section_id,
+            target_date,
+            student_batch=student_batch,
+            student=student
+        )
+        week_data.append(day_data)
+
+    return jsonify({
+        "week_start": week_start.isoformat(),
+        "week_end": (week_start + timedelta(days=4)).isoformat(),
+        "days": week_data
+    }), 200
+
+
+@app.route('/api/v1/faculty/schedule/week', methods=['GET'])
+def api_v1_faculty_schedule_week():
+    """
+    Get unified weekly schedule for current faculty member.
+
+    Shows all their classes across all sections, with substitution info.
+
+    Query params:
+    - week_start: Start date of the week (YYYY-MM-DD). Defaults to today's week.
+    """
+    try:
+        user = _require_mobile_auth()
+        _require_role(user, {'faculty', 'HOD'})
+    except PermissionError as e:
+        return jsonify({"error": str(e) if str(e) else "Unauthorized"}), 401
+
+    staff = StaffProfile.query.filter_by(staff_id=user.user_id).first()
+    if not staff:
+        return jsonify({"error": "Staff profile not found"}), 404
+
+    # Parse week_start or use current week
+    week_start_str = request.args.get('week_start')
+    if week_start_str:
+        week_start = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+    else:
+        today = datetime.now().date()
+        week_start = today - timedelta(days=today.weekday())
+
+    day_order = {'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4}
+    week_data = []
+
+    for i in range(5):
+        target_date = week_start + timedelta(days=i)
+        day_of_week = target_date.strftime('%A')
+        # Use uppercase for database comparison (DB stores 'MONDAY', 'TUESDAY', etc.)
+        day_of_week_upper = day_of_week.upper()
+
+        # Check for holiday
+        holiday = HolidayCalendar.query.filter(
+            HolidayCalendar.date == target_date,
+            db.or_(
+                HolidayCalendar.dept_id == staff.dept_id,
+                HolidayCalendar.dept_id.is_(None)
+            )
+        ).first()
+
+        if holiday:
+            week_data.append({
+                "date": target_date.isoformat(),
+                "day_of_week": day_of_week,
+                "is_holiday": True,
+                "holiday_name": holiday.name,
+                "entries": []
+            })
+            continue
+
+        # Get all schedules for this faculty on this day
+        query = (
+            db.session.query(WeeklySchedule, Subject, ClassSection, RoomMaster, TimetableVersion)
+            .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
+            .join(ClassSection, WeeklySchedule.section_id == ClassSection.section_id)
+            .join(TimetableVersion, WeeklySchedule.version_id == TimetableVersion.version_id)
+            .outerjoin(RoomMaster, WeeklySchedule.room_id == RoomMaster.room_id)
+            .filter(
+                WeeklySchedule.teacher_id == staff.staff_id,
+                WeeklySchedule.day_of_week == day_of_week_upper,  # Use uppercase for DB comparison
+                TimetableVersion.status == 'Active'
+            )
+        )
+
+        slots = query.all()
+        entries = []
+
+        for sched, subj, section, room, version in slots:
+            entry = {
+                "schedule_id": sched.schedule_id,
+                "timetable_type": version.timetable_type,
+                "start_time": sched.start_time.strftime('%H:%M') if sched.start_time else None,
+                "end_time": sched.end_time.strftime('%H:%M') if sched.end_time else None,
+                "session_type": sched.session_type,
+                "target_batch": sched.target_batch,
+                "subject": {
+                    "subject_id": subj.subject_id,
+                    "name": subj.name,
+                    "code": subj.code,
+                },
+                "section": {
+                    "section_id": section.section_id,
+                    "name": section.name,
+                    "class_level": section.class_level
+                },
+                "room": {
+                    "room_id": room.room_id,
+                    "room_number": room.room_number,
+                } if room else None,
+            }
+
+            # Apply changes
+            entry = _apply_schedule_changes(entry, target_date)
+            entries.append(entry)
+
+        # Also check for substitution duties (where this faculty is the substitute)
+        sub_changes = ScheduleChange.query.filter(
+            ScheduleChange.change_type == 'FACULTY_SUB',
+            ScheduleChange.status == 'Active',
+            ScheduleChange.effective_from <= target_date,
+            db.or_(
+                ScheduleChange.effective_to >= target_date,
+                ScheduleChange.effective_to.is_(None)
+            )
+        ).all()
+
+        for change in sub_changes:
+            if change.new_values.get('teacher_id') != staff.staff_id:
+                continue
+
+            # Check specific dates
+            if change.specific_dates:
+                if target_date.isoformat() not in change.specific_dates:
+                    continue
+
+            # Get original schedule
+            orig_sched = WeeklySchedule.query.get(change.original_schedule_id)
+            # Compare day_of_week using uppercase for DB values
+            if orig_sched and (orig_sched.day_of_week or '').upper() == day_of_week_upper:
+                subj = Subject.query.get(orig_sched.subject_id)
+                section = ClassSection.query.get(orig_sched.section_id)
+                room = RoomMaster.query.get(orig_sched.room_id) if orig_sched.room_id else None
+                orig_teacher = StaffProfile.query.get(change.original_values.get('teacher_id')) if change.original_values else None
+
+                entries.append({
+                    "schedule_id": orig_sched.schedule_id,
+                    "timetable_type": "Substitution",
+                    "start_time": orig_sched.start_time.strftime('%H:%M') if orig_sched.start_time else None,
+                    "end_time": orig_sched.end_time.strftime('%H:%M') if orig_sched.end_time else None,
+                    "session_type": orig_sched.session_type,
+                    "target_batch": orig_sched.target_batch,
+                    "is_substitution_duty": True,
+                    "original_teacher": orig_teacher.name if orig_teacher else "Unknown",
+                    "subject": {
+                        "subject_id": subj.subject_id,
+                        "name": subj.name,
+                        "code": subj.code,
+                    } if subj else None,
+                    "section": {
+                        "section_id": section.section_id,
+                        "name": section.name,
+                        "class_level": section.class_level
+                    } if section else None,
+                    "room": {
+                        "room_id": room.room_id,
+                        "room_number": room.room_number,
+                    } if room else None,
+                    "reason": change.reason
+                })
+
+        entries.sort(key=lambda e: e.get('start_time') or '')
+
+        week_data.append({
+            "date": target_date.isoformat(),
+            "day_of_week": day_of_week,
+            "entries": entries
+        })
+
+    return jsonify({
+        "staff_id": staff.staff_id,
+        "name": staff.name,
+        "week_start": week_start.isoformat(),
+        "week_end": (week_start + timedelta(days=4)).isoformat(),
+        "days": week_data
+    }), 200
+
+
+@app.route('/api/admin/timetable/unified_view', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def admin_unified_timetable_view():
+    """
+    Admin view of unified timetable for a section.
+
+    Query params:
+    - section_id: Required section ID
+    - date: Optional specific date (YYYY-MM-DD), defaults to today
+    """
+    try:
+        section_id = request.args.get('section_id', type=int)
+        date_str = request.args.get('date')
+
+        if not section_id:
+            return jsonify({"error": "section_id is required"}), 400
+
+        if date_str:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.now().date()
+
+        result = _get_unified_timetable(section_id, target_date)
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ==========================================
 # API: ELECTIVE MANAGEMENT (UPDATED)
 # ==========================================
@@ -10705,7 +12460,9 @@ def get_amc_stats():
         else:
             target_date = datetime.now().date()
             target_day_name = datetime.now().strftime("%A")
-            
+        
+        # Normalize to uppercase for database comparison
+        target_day_name_upper = target_day_name.upper()
         current_time = datetime.now().time()
         is_past_date = target_date < datetime.now().date()
 
@@ -10714,7 +12471,7 @@ def get_amc_stats():
                  .join(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
                  .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
                  .join(ClassSection, WeeklySchedule.section_id == ClassSection.section_id)
-                 .filter(WeeklySchedule.day_of_week == target_day_name))
+                 .filter(WeeklySchedule.day_of_week == target_day_name_upper))
         
         # Apply Filter if provided
         if section_id:
@@ -10739,7 +12496,7 @@ def get_amc_stats():
             
             # Strength Calc
             if slot.target_batch:
-                batch_obj = MentorBatch.query.filter_by(section_id=section.section_id, batch_name=slot.target_batch).first()
+                batch_obj = find_mentor_batch(section.section_id, slot.target_batch)
                 strength = StudentProfile.query.filter_by(mentor_batch_id=batch_obj.batch_id).count() if batch_obj else 0
             else:
                 strength = StudentProfile.query.filter_by(current_section_id=section.section_id).count()
@@ -11103,6 +12860,64 @@ def get_allocation_data():
         return jsonify({"allocations": allocated_data})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
+
+@app.route('/api/admin/section_course_structure', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def get_section_course_structure():
+    """Get course structure for a section - shows all subjects uploaded via bulk upload, grouped by semester."""
+    try:
+        section_id = request.args.get('section_id')
+        if not section_id:
+            return jsonify({"error": "Section ID required"}), 400
+
+        deny = _ensure_section_in_scope(int(section_id))
+        if deny:
+            return deny
+
+        # Get section info
+        section = ClassSection.query.get(section_id)
+        section_name = f"{section.class_level} - {section.name}" if section else "Unknown"
+
+        # Get all course structure entries for this section
+        structures = (db.session.query(SemesterCourseStructure, Subject)
+            .join(Subject, SemesterCourseStructure.subject_id == Subject.subject_id)
+            .filter(SemesterCourseStructure.section_id == section_id)
+            .order_by(SemesterCourseStructure.semester_no, Subject.name)
+            .all())
+
+        # Get existing allocations for this section
+        allocated_ids = set(a[0] for a in db.session.query(SubjectAllocation.subject_id)
+            .filter_by(section_id=section_id).all())
+
+        # Group by semester
+        semesters = {}
+        for struct, subj in structures:
+            sem_no = struct.semester_no
+            if sem_no not in semesters:
+                semesters[sem_no] = []
+            semesters[sem_no].append({
+                "subject_id": subj.subject_id,
+                "code": subj.code,
+                "name": subj.name,
+                "type": subj.subject_type or "Core",
+                "credits": subj.credits or 0,
+                "load": f"L:{subj.l_count} T:{subj.t_count} P:{subj.p_count}",
+                "is_allocated": subj.subject_id in allocated_ids
+            })
+
+        # Convert to sorted list
+        semester_list = [{"semester": k, "subjects": v} for k, v in sorted(semesters.items())]
+
+        return jsonify({
+            "section_name": section_name,
+            "semesters": semester_list,
+            "total_subjects": len(structures)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # @app.route('/api/admin/faculty_load_list', methods=['GET'])
 # def get_faculty_load_list():
 #     try:
@@ -11260,9 +13075,10 @@ def get_class_schedule():
         active_version_id = get_active_version_id(int(section_id))
 
         # 1. Get Time Slots (filtered by active version)
+        # Use outerjoin to include special slots without subject/teacher
         query = (db.session.query(WeeklySchedule, Subject, StaffProfile, RoomMaster)
-                 .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
-                 .join(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
+                 .outerjoin(Subject, WeeklySchedule.subject_id == Subject.subject_id)
+                 .outerjoin(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
                  .outerjoin(RoomMaster, WeeklySchedule.room_id == RoomMaster.room_id)
                  .filter(WeeklySchedule.section_id == section_id))
 
@@ -11274,16 +13090,31 @@ def get_class_schedule():
                  
         schedule_data = []
         for slot, subj, teacher, room in slots:
+            # Handle special slots (Library, Mentor Meeting, etc.)
+            if subj:
+                subject_name = subj.name
+                subject_code = subj.code
+                is_special = False
+            elif slot.slot_label:
+                subject_name = slot.slot_label
+                subject_code = "SPECIAL"
+                is_special = True
+            else:
+                subject_name = "Unassigned"
+                subject_code = "-"
+                is_special = False
+            
             schedule_data.append({
-                "day": slot.day_of_week,
+                "day": (slot.day_of_week or '').title(),  # Normalize to title case
                 "start_time": slot.start_time.strftime("%I:%M %p"),
                 "end_time": slot.end_time.strftime("%I:%M %p"),
-                "subject": subj.name,
-                "code": subj.code,
-                "type": slot.session_type,
+                "subject": subject_name,
+                "code": subject_code,
+                "type": slot.session_type or ("Special" if is_special else "Lecture"),
                 "batch": slot.target_batch,
-                "teacher": teacher.full_name,
-                "room": room.room_number if room else "TBD"
+                "teacher": teacher.full_name if teacher else ("-" if is_special else "TBD"),
+                "room": room.room_number if room else ("-" if is_special else "TBD"),
+                "is_special_slot": is_special
             })
             
         # 2. Get Subject List (ROBUST FETCH)
@@ -11381,27 +13212,41 @@ def get_version_schedule(version_id):
     if deny:
         return deny
 
+    # Use outerjoin to include slots without subject/teacher (special slots, unassigned)
     slots = (db.session.query(WeeklySchedule, Subject, StaffProfile, RoomMaster)
-             .join(Subject, WeeklySchedule.subject_id == Subject.subject_id)
-             .join(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
+             .outerjoin(Subject, WeeklySchedule.subject_id == Subject.subject_id)
+             .outerjoin(StaffProfile, WeeklySchedule.teacher_id == StaffProfile.staff_id)
              .outerjoin(RoomMaster, WeeklySchedule.room_id == RoomMaster.room_id)
              .filter(WeeklySchedule.version_id == version_id)
              .all())
 
     schedule_data = []
     for slot, subj, teacher, room in slots:
+        # Handle special slots and unassigned slots
+        if subj:
+            subject_name = subj.name
+            subject_code = subj.code
+        elif slot.slot_label:
+            subject_name = slot.slot_label
+            subject_code = "SPECIAL"
+        else:
+            subject_name = "Unassigned"
+            subject_code = "-"
+        
         schedule_data.append({
             "schedule_id": slot.schedule_id,
-            "day": slot.day_of_week,
+            "day": (slot.day_of_week or '').title(),  # Normalize to title case
             "start_time": slot.start_time.strftime("%I:%M %p"),
             "end_time": slot.end_time.strftime("%I:%M %p"),
-            "subject": subj.name,
-            "code": subj.code,
+            "subject": subject_name,
+            "code": subject_code,
             "type": slot.session_type,
             "batch": slot.target_batch,
-            "teacher": teacher.full_name,
-            "teacher_id": teacher.staff_id,
-            "room": room.room_number if room else "TBD"
+            "teacher": teacher.full_name if teacher else ("Unassigned" if slot.is_unassigned else "TBD"),
+            "teacher_id": teacher.staff_id if teacher else None,
+            "room": room.room_number if room else "TBD",
+            "is_unassigned": slot.is_unassigned,
+            "is_special_slot": bool(slot.slot_label and not subj)
         })
 
     return jsonify({
@@ -11411,7 +13256,9 @@ def get_version_schedule(version_id):
             "version_label": version.version_label,
             "status": version.status
         },
-        "schedule": schedule_data
+        "schedule": schedule_data,
+        "total_slots": len(schedule_data),
+        "unassigned_count": sum(1 for s in schedule_data if s.get("is_unassigned"))
     })
 
 
@@ -12407,6 +14254,196 @@ def upload_semester_course_structure():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/api/upload/load_allocation', methods=['POST'])
+@login_required
+@require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
+def upload_load_allocation():
+    """Upload load allocation CSV for dual timetable system (Block + Regular).
+
+    Expected CSV columns:
+      - Teaching Type: 'Block' or 'Regular'
+      - Course Code: Subject code
+      - Course Name: Subject name
+      - Category: PCC, Elective-I, MDM, etc.
+      - Assigned Faculty: Faculty name (or 'Respective Faculties')
+      - EMP_ID: Employee ID (or '--')
+      - Session Type: L, T, or P
+      - Program: BTech, MTech
+      - Class Level: FY, SY, TY, LY (or empty for all)
+      - Specialization: DA, SMAD, CORE (or empty)
+      - Batch: A, B, C, or - for whole class
+      - L, T, P: Hours per week
+
+    Behavior:
+      - Upserts Subjects by Course Code
+      - Creates LoadAllocationDetail records per row
+      - Supports "Respective Faculties" as unassigned slots
+      - Empty Class Level means applies to all classes (cross-class Block session)
+    """
+    try:
+        file = get_db_file_handle(request)
+        df = pd.read_csv(file, dtype=str).fillna('')
+
+        required_cols = ['Course Code', 'Course Name', 'Assigned Faculty', 'EMP_ID',
+                         'Session Type', 'Class Level', 'Specialization', 'Batch']
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            return jsonify({"error": f"Missing columns: {', '.join(missing)}"}), 400
+
+        # Generate upload batch ID for tracking
+        import uuid
+        upload_batch_id = str(uuid.uuid4())
+
+        def clean_int(val):
+            v = str(val).strip()
+            return int(v) if v.isdigit() else 0
+
+        errors = []
+        inserted_rows = 0
+        upserted_subjects = 0
+        skipped_rows = 0
+
+        # Get current academic year context
+        current_config = AcademicConfig.query.filter_by(is_current=True).first()
+        academic_year = current_config.year_label if current_config else None
+        current_semester = current_config.current_semester if current_config else None
+
+        for idx, row in df.iterrows():
+            teaching_type = str(row.get('Teaching Type', 'Regular')).strip()
+            if teaching_type not in ['Block', 'Regular']:
+                teaching_type = 'Regular'  # Default to Regular if not specified
+
+            course_code = str(row.get('Course Code', '')).strip()
+            course_name = str(row.get('Course Name', '')).strip()
+            category = str(row.get('Category', '')).strip()
+            assigned_faculty = str(row.get('Assigned Faculty', '')).strip()
+            emp_id = str(row.get('EMP_ID', '')).strip()
+            session_type = str(row.get('Session Type', '')).strip().upper()
+            class_level = str(row.get('Class Level', '')).strip() or None
+            specialization = str(row.get('Specialization', '')).strip() or None
+            batch_val = str(row.get('Batch', '')).strip()
+            pattern = str(row.get('Pattern', '')).strip() or None
+
+            # Skip rows without course code or session type
+            if not course_code or not session_type:
+                skipped_rows += 1
+                if not course_code and not course_name:
+                    continue  # Completely empty row
+                errors.append(f"Row {idx+2}: Missing Course Code or Session Type")
+                continue
+
+            # Validate session type
+            if session_type not in ['L', 'T', 'P']:
+                skipped_rows += 1
+                errors.append(f"Row {idx+2}: Invalid Session Type '{session_type}', must be L, T, or P")
+                continue
+
+            # Handle "Respective Faculties" or placeholder faculty
+            is_unassigned = 'respective' in assigned_faculty.lower() or emp_id in ['--', '-', '']
+
+            # Find or create teacher
+            teacher_id = None
+            if not is_unassigned and emp_id and emp_id not in ['--', '-']:
+                # Try to find staff by EMP_ID
+                staff = StaffProfile.query.filter_by(employee_id=emp_id).first()
+                if staff:
+                    teacher_id = staff.staff_id
+                else:
+                    # Try to find by username
+                    user = UserMaster.query.filter_by(username=emp_id).first()
+                    if user:
+                        staff = StaffProfile.query.get(user.user_id)
+                        if staff:
+                            teacher_id = staff.staff_id
+                    if not teacher_id:
+                        errors.append(f"Row {idx+2}: Faculty with EMP_ID '{emp_id}' not found")
+
+            # Find or create subject
+            subject = Subject.query.filter_by(code=course_code).first()
+            if not subject:
+                l_val = clean_int(row.get('L', '0'))
+                t_val = clean_int(row.get('T', '0'))
+                p_val = clean_int(row.get('P', '0'))
+                credits_val = clean_int(row.get('Credits', '0'))
+
+                subject = Subject(
+                    name=course_name or course_code,
+                    code=course_code,
+                    subject_type=category or 'Core',
+                    l_count=l_val,
+                    t_count=t_val,
+                    p_count=p_val,
+                    credits=credits_val,
+                )
+                db.session.add(subject)
+                db.session.flush()
+                upserted_subjects += 1
+            else:
+                # Update name if provided
+                if course_name:
+                    subject.name = course_name
+
+            # Find section if class_level and specialization specified
+            section_id = None
+            if class_level and specialization:
+                section = _resolve_class_section_for_csv(class_level, specialization)
+                if section:
+                    section_id = section.section_id
+                else:
+                    errors.append(f"Row {idx+2}: Section '{class_level}-{specialization}' not found")
+
+            # Determine hours based on session type
+            hours = 1
+            if session_type == 'L':
+                hours = clean_int(row.get('L', '1')) or 1
+            elif session_type == 'T':
+                hours = clean_int(row.get('T', '1')) or 1
+            elif session_type == 'P':
+                hours = clean_int(row.get('P', '2')) or 2
+
+            # Handle batch
+            batch = None if batch_val in ['-', ''] else batch_val
+
+            # Create LoadAllocationDetail record
+            allocation = LoadAllocationDetail(
+                teaching_type=teaching_type,
+                subject_id=subject.subject_id,
+                teacher_id=teacher_id,
+                is_unassigned=is_unassigned,
+                session_type=session_type,
+                section_id=section_id,
+                class_level=class_level,
+                batch=batch,
+                hours_per_week=hours,
+                category=category,
+                pattern=pattern,
+                academic_year=academic_year,
+                semester=current_semester,
+                upload_batch_id=upload_batch_id,
+            )
+            db.session.add(allocation)
+            inserted_rows += 1
+
+        db.session.commit()
+        log_activity("Bulk Import", f"Uploaded load allocation ({inserted_rows} rows, batch {upload_batch_id[:8]})")
+
+        return jsonify({
+            "message": f"Load allocation uploaded: {inserted_rows} rows.",
+            "upload_batch_id": upload_batch_id,
+            "subjects_upserted": upserted_subjects,
+            "skipped": skipped_rows,
+            "errors": errors[:50] if len(errors) > 50 else errors,  # Limit errors returned
+            "total_errors": len(errors),
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("upload_load_allocation failed")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/upload/rooms', methods=['POST'])
 @login_required
 @require_roles('Admin')
@@ -12691,22 +14728,110 @@ def upload_schedule():
     try:
         scope_dept_ids = _get_admin_scope_dept_ids()
         file = get_db_file_handle(request)
-        df = pd.read_csv(file, dtype=str).fillna('')
+        
+        # Read file content to detect format
+        file_content = file.read()
+        file.seek(0)  # Reset file pointer
+        
+        # Detect if this is a master timetable format or clean CSV format
+        # Master format has "Academic Year" or specific header structure
+        content_preview = file_content.decode('utf-8', errors='ignore')[:500] if isinstance(file_content, bytes) else content_preview[:500]
+        
+        is_master_format = ('Academic Year' in content_preview or 
+                           'W.E.F.' in content_preview or 
+                           'Day ↓ Time →' in content_preview or
+                           'Course Code' in content_preview and 'Faculty_Abbreviation' in content_preview)
+        
+        if is_master_format:
+            # Use the extraction script to convert master timetable to clean format
+            try:
+                from tools.extrac_timetable import process_timetable_from_content
+                df = process_timetable_from_content(file_content)
+                df = df.fillna('')
+                app.logger.info(f"Converted master timetable format: {len(df)} rows extracted")
+            except ImportError:
+                # Fallback: try alternative import path
+                import sys
+                import os
+                sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tools'))
+                from extrac_timetable import process_timetable_from_content
+                df = process_timetable_from_content(file_content)
+                df = df.fillna('')
+            except Exception as conv_err:
+                app.logger.error(f"Failed to convert master timetable: {conv_err}")
+                return jsonify({"error": f"Failed to convert master timetable format: {str(conv_err)}"}), 400
+        else:
+            # Standard clean CSV format
+            df = pd.read_csv(file, dtype=str).fillna('')
+
+        # Build abbreviation lookup caches for faster matching
+        subjects_by_abbrev = {s.abbreviation.upper(): s for s in Subject.query.filter(Subject.abbreviation.isnot(None)).all() if s.abbreviation}
+        subjects_by_code = {s.code: s for s in Subject.query.all()}
+        staff_by_abbrev = {s.abbreviation.upper(): s for s in StaffProfile.query.filter(StaffProfile.abbreviation.isnot(None)).all() if s.abbreviation}
+        staff_by_emp_code = {s.employee_code: s for s in StaffProfile.query.all()}
 
         # Track versions created per section (creates DRAFT versions)
         sections_processed = {}  # section_id -> version_id
         success = 0
         errors = []
+        missing_faculty = {}  # Track missing faculty: employee_code -> {name, courses}
+        missing_subjects = {}  # Track missing subjects: subject_code -> course_name
 
         for index, row in df.iterrows():
             # 1. Basic Lookups
-            subject = Subject.query.filter_by(code=str(row['Subject Code']).strip()).first()
-            teacher = StaffProfile.query.filter_by(employee_code=str(row['Employee Code']).strip()).first()
+            subject_code = str(row['Subject Code']).strip()
+            employee_code = str(row['Employee Code']).strip()
+            course_name = str(row.get('Course Name', '')).strip()
+            faculty_abbrev = str(row.get('Faculty_Abbreviation', '')).strip().upper() if 'Faculty_Abbreviation' in row else ''
+            subject_abbrev = str(row.get('Abbreviation_course', '')).strip().upper() if 'Abbreviation_course' in row else ''
+            
+            # Try multiple lookup strategies for subject:
+            # 1. By subject code
+            # 2. By abbreviation
+            subject = None
+            if subject_code and subject_code not in ['?', '-', '']:
+                subject = subjects_by_code.get(subject_code)
+            if not subject and subject_abbrev:
+                subject = subjects_by_abbrev.get(subject_abbrev)
+            
+            # Try multiple lookup strategies for teacher:
+            # 1. By employee code
+            # 2. By faculty abbreviation
+            teacher = None
+            if employee_code and employee_code not in ['-', '']:
+                teacher = staff_by_emp_code.get(employee_code)
+            if not teacher and faculty_abbrev:
+                teacher = staff_by_abbrev.get(faculty_abbrev)
+            
             section = _resolve_class_section_for_csv(str(row['Class Level']).strip(), str(row['Section Name']).strip())
 
-            if not subject or not teacher or not section:
-                errors.append(f"Row {index}: Data missing (Subject/Teacher/Class not found)")
+            # Section is always required
+            if not section:
+                errors.append(f"Row {index}: Class/Section not found")
                 continue
+            
+            # Determine if this is a special slot (no subject/teacher required)
+            is_special_slot = subject_code in ['?', '-', ''] or employee_code in ['-', '']
+            
+            # Track missing subjects (but still allow slot creation)
+            if not is_special_slot and not subject and subject_code:
+                if subject_code not in missing_subjects:
+                    missing_subjects[subject_code] = course_name
+                errors.append(f"Row {index}: Subject '{subject_code}' ({course_name}) not found in database")
+                continue  # Can't create slot without subject
+            
+            # Track missing faculty (allow slot creation as unassigned)
+            is_faculty_missing = False
+            if not is_special_slot and not teacher and employee_code:
+                if employee_code not in missing_faculty:
+                    missing_faculty[employee_code] = {
+                        'courses': set(),
+                        'rows': []
+                    }
+                missing_faculty[employee_code]['courses'].add(course_name)
+                missing_faculty[employee_code]['rows'].append(index)
+                is_faculty_missing = True
+                # Don't skip - create slot as unassigned
 
             # Department scope validation for non-SuperAdmin
             if scope_dept_ids is not None:
@@ -12758,35 +14883,77 @@ def upload_schedule():
             raw_batch = str(row.get('Batch', '')).strip()
             target_batch = raw_batch if raw_batch else None
 
-            # Room Lookup
+            # Room Lookup - auto-create if not found
             room_num = str(row.get('Room Number', '')).strip()
-            room = RoomMaster.query.filter_by(room_number=room_num).first()
-            room_id = room.room_id if room else None
+            room_id = None
+            if room_num and room_num != '-':
+                room = RoomMaster.query.filter_by(room_number=room_num).first()
+                if not room:
+                    # Auto-create room based on session type
+                    room_type = 'Laboratory' if sess_type in ['Practical', 'Lab', 'Laboratory'] else 'Classroom'
+                    room = RoomMaster(
+                        room_number=room_num,
+                        room_type=room_type,
+                        capacity=60  # Default capacity
+                    )
+                    db.session.add(room)
+                    db.session.flush()  # Get room_id
+                room_id = room.room_id
 
             # 5. Save Slot with version_id
+            # Mark as unassigned if faculty is missing or it's a special slot
+            slot_is_unassigned = is_special_slot or is_faculty_missing
+            
             new_slot = WeeklySchedule(
                 section_id=section.section_id,
-                subject_id=subject.subject_id,
-                teacher_id=teacher.staff_id,
+                subject_id=subject.subject_id if subject else None,
+                teacher_id=teacher.staff_id if teacher else None,
                 day_of_week=str(row['Day']).strip(),
                 start_time=start,
                 end_time=end,
                 session_type=sess_type,
                 target_batch=target_batch,
                 room_id=room_id,
-                version_id=version_id  # Link to draft version
+                version_id=version_id,  # Link to draft version
+                is_unassigned=slot_is_unassigned,
+                slot_label=course_name if is_special_slot else (f"Pending: {employee_code}" if is_faculty_missing else None)
             )
             db.session.add(new_slot)
             success += 1
 
         db.session.commit()
         log_activity("Bulk Import", f"Uploaded Weekly Schedule ({success} slots) as DRAFT.")
-        return jsonify({
+        
+        # Build response with missing faculty suggestions
+        response = {
             "message": f"{success} slots created as DRAFT",
             "sections_affected": list(sections_processed.keys()),
             "note": "Schedule saved as draft. Use Version Manager to preview and publish.",
             "errors": errors
-        }), 201
+        }
+        
+        # Add missing faculty information for profile creation
+        if missing_faculty:
+            response["missing_faculty"] = [
+                {
+                    "employee_code": emp_code,
+                    "courses": list(info['courses']),
+                    "affected_rows": len(info['rows']),
+                    "action_required": "Create staff profile with this employee code to assign these slots"
+                }
+                for emp_code, info in missing_faculty.items()
+            ]
+            response["faculty_notice"] = f"{len(missing_faculty)} faculty member(s) not found in database. Slots created as 'Unassigned'. Create their profiles and re-upload or manually assign."
+        
+        # Add missing subjects information
+        if missing_subjects:
+            response["missing_subjects"] = [
+                {"code": code, "name": name}
+                for code, name in missing_subjects.items()
+            ]
+            response["subject_notice"] = f"{len(missing_subjects)} subject(s) not found. These rows were skipped. Please create the subjects first."
+        
+        return jsonify(response), 201
     except Exception:
         db.session.rollback()
         app.logger.exception("upload_schedule failed")
@@ -12826,6 +14993,183 @@ def upload_class_teachers():
         app.logger.exception("upload_class_teachers failed")
         return jsonify({"error": "Upload failed. Check file format."}), 500
 
+
+@app.route('/api/staff/create_placeholder', methods=['POST'])
+@login_required
+@require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
+def create_placeholder_staff():
+    """
+    Create placeholder staff profiles for adjunct/external faculty.
+    Used after bulk timetable upload reports missing faculty.
+    
+    Request body:
+    {
+        "faculty": [
+            {"employee_code": "1020312", "full_name": "Dr. Rashmi Nair", "designation": "Adjunct Faculty"},
+            {"employee_code": "TEMP123", "full_name": "Mr. Sumit Chuttar", "designation": "Guest Faculty"}
+        ],
+        "department_id": 1  // Optional: assign to department
+    }
+    """
+    try:
+        data = request.json
+        faculty_list = data.get('faculty', [])
+        dept_id = data.get('department_id')
+        
+        if not faculty_list:
+            return jsonify({"error": "No faculty data provided"}), 400
+        
+        created = []
+        errors = []
+        
+        for faculty in faculty_list:
+            emp_code = faculty.get('employee_code', '').strip()
+            full_name = faculty.get('full_name', '').strip()
+            designation = faculty.get('designation', 'Adjunct Faculty').strip()
+            email = faculty.get('email', '').strip()
+            
+            if not emp_code:
+                errors.append(f"Missing employee_code for entry")
+                continue
+            
+            # Check if already exists
+            existing = StaffProfile.query.filter_by(employee_code=emp_code).first()
+            if existing:
+                errors.append(f"Staff with employee_code '{emp_code}' already exists: {existing.full_name}")
+                continue
+            
+            # Generate email if not provided
+            if not email:
+                safe_name = emp_code.lower().replace(' ', '_')
+                email = f"{safe_name}@placeholder.edumatrix.edu"
+            
+            # Generate a placeholder name if not provided
+            if not full_name:
+                full_name = f"Faculty {emp_code}"
+            
+            # Create user account
+            user_id = str(uuid.uuid4())
+            temp_password = f"Temp@{emp_code[:4]}123"
+            
+            new_user = UserMaster(
+                user_id=user_id,
+                username=email,
+                password_hash=generate_password_hash(temp_password),
+                role='Staff',
+                is_active=True,
+                must_change_password=True
+            )
+            db.session.add(new_user)
+            
+            # Create staff profile
+            new_staff = StaffProfile(
+                staff_id=user_id,
+                employee_code=emp_code,
+                full_name=full_name,
+                designation=designation,
+                primary_department_id=dept_id,
+                is_placeholder=True  # Mark as placeholder for tracking
+            )
+            db.session.add(new_staff)
+            
+            created.append({
+                "employee_code": emp_code,
+                "full_name": full_name,
+                "email": email,
+                "temp_password": temp_password,
+                "designation": designation
+            })
+        
+        db.session.commit()
+        log_activity("Staff Creation", f"Created {len(created)} placeholder staff profiles")
+        
+        response = {
+            "message": f"{len(created)} placeholder staff profiles created",
+            "created": created,
+            "note": "These accounts have temporary passwords. Update profiles with actual details when available."
+        }
+        if errors:
+            response["errors"] = errors
+        
+        return jsonify(response), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("create_placeholder_staff failed")
+        return jsonify({"error": f"Failed to create staff profiles: {str(e)}"}), 500
+
+
+@app.route('/api/schedule/assign_missing_faculty', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def assign_missing_faculty_to_slots():
+    """
+    After creating placeholder staff, assign them to unassigned slots.
+    Matches slots by employee_code stored in slot_label.
+    
+    Request body:
+    {
+        "employee_codes": ["1020312", "TEMP123"]  // Optional: specific codes to process
+    }
+    """
+    try:
+        data = request.json or {}
+        specific_codes = data.get('employee_codes', [])
+        
+        # Find unassigned slots with pending faculty
+        query = WeeklySchedule.query.filter(
+            WeeklySchedule.is_unassigned == True,
+            WeeklySchedule.slot_label.like('Pending:%'),
+            WeeklySchedule.teacher_id.is_(None)
+        )
+        
+        unassigned_slots = query.all()
+        
+        assigned = 0
+        not_found = []
+        
+        for slot in unassigned_slots:
+            # Extract employee code from slot_label "Pending: XXXXX"
+            if not slot.slot_label or not slot.slot_label.startswith('Pending:'):
+                continue
+            
+            emp_code = slot.slot_label.replace('Pending:', '').strip()
+            
+            # Skip if not in specific list (when provided)
+            if specific_codes and emp_code not in specific_codes:
+                continue
+            
+            # Find staff by employee code
+            staff = StaffProfile.query.filter_by(employee_code=emp_code).first()
+            
+            if staff:
+                slot.teacher_id = staff.staff_id
+                slot.is_unassigned = False
+                slot.slot_label = None
+                assigned += 1
+            else:
+                if emp_code not in not_found:
+                    not_found.append(emp_code)
+        
+        db.session.commit()
+        log_activity("Schedule Update", f"Assigned {assigned} slots to previously missing faculty")
+        
+        response = {
+            "message": f"{assigned} slots assigned to faculty",
+            "assigned_count": assigned
+        }
+        
+        if not_found:
+            response["still_missing"] = not_found
+            response["note"] = f"{len(not_found)} employee code(s) still not found in database"
+        
+        return jsonify(response), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("assign_missing_faculty_to_slots failed")
+        return jsonify({"error": str(e)}), 500
 
 
 # In app.py
@@ -13358,6 +15702,193 @@ def get_mentor_logs():
 #     except Exception as e: return jsonify({"error": str(e)}), 500
 
 
+def _process_new_format_subject_allocation(df, dept_ids):
+    """
+    Process new-format subject allocation CSV.
+    Expected columns: Teaching Type, Course Code, Course Name, Pattern, Category, 
+    Abbreviation_course, Assigned Faculty, Faculty_Abbreviation, EMP_ID, Session Type,
+    Program, Class level, Specialization, Batch, L, T, P
+    """
+    stats = {
+        "subjects_created": 0,
+        "subjects_updated": 0,
+        "staff_updated": 0,
+        "staff_placeholders_created": 0,
+        "allocations_created": 0,
+        "allocations_skipped": 0,
+        "sections_not_found": [],
+        "errors": []
+    }
+    
+    # Build section lookup: (class_level, section_name) -> section_id
+    sections = ClassSection.query.all()
+    section_lookup = {}
+    for sec in sections:
+        section_lookup[(sec.class_level.upper(), sec.name.upper())] = sec.section_id
+    
+    # Build staff lookup by employee code
+    staff_by_emp_code = {s.employee_code: s for s in StaffProfile.query.all()}
+    
+    # Build subject lookup by code
+    subjects_by_code = {s.code: s for s in Subject.query.all()}
+    
+    for row_num, row in df.iterrows():
+        try:
+            course_code = str(row.get('Course Code', '')).strip()
+            course_name = str(row.get('Course Name', '')).strip()
+            pattern = str(row.get('Pattern', '')).strip()
+            category = str(row.get('Category', '')).strip()
+            abbreviation = str(row.get('Abbreviation_course', '')).strip()
+            faculty_name = str(row.get('Assigned Faculty', '')).strip()
+            faculty_abbrev = str(row.get('Faculty_Abbreviation', '')).strip()
+            emp_id = str(row.get('EMP_ID', '')).strip()
+            session_type = str(row.get('Session Type', '')).strip().upper()
+            program = str(row.get('Program', '')).strip()
+            class_level = str(row.get('Class level', '')).strip().upper()
+            specialization = str(row.get('Specialization', '')).strip().upper()
+            batch = str(row.get('Batch', '')).strip()
+            teaching_type = str(row.get('Teaching Type', 'Regular')).strip()
+            
+            l_count = int(row.get('L', 0) or 0)
+            t_count = int(row.get('T', 0) or 0)
+            p_count = int(row.get('P', 0) or 0)
+            
+            # Skip empty rows or special entries
+            if not course_name or faculty_name in ['Respective Faculties', '-', '']:
+                # Still update subject abbreviation if available
+                if course_code and abbreviation:
+                    subject = subjects_by_code.get(course_code)
+                    if subject and not subject.abbreviation:
+                        subject.abbreviation = abbreviation
+                        stats["subjects_updated"] += 1
+                continue
+            
+            # Skip if no valid employee ID
+            if not emp_id or emp_id in ['-', '--']:
+                continue
+            
+            # Map specialization variations: DA1/DA2 -> DA, Core1/Core2/Core3 -> CORE
+            section_name = specialization
+            if section_name.startswith('DA') and len(section_name) > 2 and section_name[2:].isdigit():
+                section_name = 'DA'
+            elif section_name.startswith('CORE') and len(section_name) > 4:
+                section_name = 'CORE'
+            
+            section_key = (class_level, section_name)
+            section_id = section_lookup.get(section_key)
+            
+            if not section_id:
+                # Try case variations
+                for (cl, sn), sid in section_lookup.items():
+                    if sn.upper() == section_name and cl.upper() == class_level:
+                        section_id = sid
+                        break
+            
+            if not section_id and section_name:
+                key = f"{section_name}|{class_level}"
+                if key not in stats["sections_not_found"]:
+                    stats["sections_not_found"].append(key)
+                continue
+            
+            # Create or update Subject
+            subject = subjects_by_code.get(course_code)
+            if not subject and course_code:
+                subject = Subject(
+                    code=course_code,
+                    name=course_name,
+                    abbreviation=abbreviation if abbreviation else None,
+                    category=category if category else None,
+                    pattern=pattern if pattern else None,
+                    subject_type=category or 'Core',
+                    l_count=l_count,
+                    t_count=t_count,
+                    p_count=p_count,
+                    credits=l_count + t_count + (p_count // 2)
+                )
+                db.session.add(subject)
+                db.session.flush()
+                subjects_by_code[course_code] = subject
+                stats["subjects_created"] += 1
+            elif subject:
+                # Update abbreviation and other fields if not set
+                if abbreviation and not subject.abbreviation:
+                    subject.abbreviation = abbreviation
+                if category and not subject.category:
+                    subject.category = category
+                if pattern and not subject.pattern:
+                    subject.pattern = pattern
+                stats["subjects_updated"] += 1
+            
+            # Find or create staff
+            staff = staff_by_emp_code.get(emp_id)
+            if staff:
+                # Update abbreviation if not set
+                if faculty_abbrev and not staff.abbreviation:
+                    staff.abbreviation = faculty_abbrev
+                    stats["staff_updated"] += 1
+            else:
+                # Create placeholder staff
+                new_uuid = str(uuid.uuid4())
+                placeholder_user = UserMaster(
+                    user_id=new_uuid,
+                    username=f"{emp_id}@placeholder.edu",
+                    password_hash=generate_password_hash("TempPass123!"),
+                    user_type='Staff',
+                    is_active=False,
+                    must_change_password=True
+                )
+                db.session.add(placeholder_user)
+                db.session.flush()  # CRITICAL: Commit user before creating profile
+                
+                staff = StaffProfile(
+                    staff_id=new_uuid,
+                    full_name=faculty_name,
+                    employee_code=emp_id,
+                    abbreviation=faculty_abbrev if faculty_abbrev else None,
+                    is_placeholder=True
+                )
+                db.session.add(staff)
+                db.session.flush()  # Flush profile too
+                staff_by_emp_code[emp_id] = staff
+                stats["staff_placeholders_created"] += 1
+            
+            # Create SubjectAllocation if we have section and subject
+            if section_id and subject:
+                # Check if allocation exists
+                existing = SubjectAllocation.query.filter_by(
+                    section_id=section_id,
+                    subject_id=subject.subject_id,
+                    session_type=session_type if session_type else None,
+                    target_batch=batch if batch and batch not in ['-', ''] else None
+                ).first()
+                
+                if not existing:
+                    allocation = SubjectAllocation(
+                        section_id=section_id,
+                        subject_id=subject.subject_id,
+                        teacher_id=staff.staff_id if staff else None,
+                        session_type=session_type if session_type else None,
+                        target_batch=batch if batch and batch not in ['-', ''] else None,
+                        teaching_type=teaching_type,
+                        faculty_abbreviation=faculty_abbrev if faculty_abbrev else None
+                    )
+                    db.session.add(allocation)
+                    stats["allocations_created"] += 1
+                else:
+                    stats["allocations_skipped"] += 1
+            
+        except Exception as row_error:
+            stats["errors"].append(f"Row {row_num + 2}: {str(row_error)}")
+    
+    db.session.commit()
+    
+    return jsonify({
+        "success": True,
+        "message": "Subject allocation upload completed (new format)",
+        "stats": stats
+    })
+
+
 # 1. UPDATE UPLOAD LOGIC (Save specific type)
 @app.route('/api/upload/subject_allocation', methods=['POST'])
 @login_required
@@ -13375,6 +15906,20 @@ def upload_subject_allocation():
             raise
         df = pd.read_csv(file, dtype=str).fillna('')
 
+        # Detect which format is being uploaded:
+        # NEW FORMAT: Has 'Abbreviation_course', 'Faculty_Abbreviation', 'EMP_ID', 'Specialization'
+        # OLD FORMAT: Has 'Section', 'Class Level', 'SEM', 'Employee Code'
+        
+        new_format_cols = ['Abbreviation_course', 'Faculty_Abbreviation', 'EMP_ID']
+        old_format_cols = ['Section', 'Class Level', 'SEM']
+        
+        is_new_format = all(c in df.columns for c in new_format_cols) or 'Specialization' in df.columns
+        
+        if is_new_format:
+            # === NEW FORMAT PROCESSING ===
+            return _process_new_format_subject_allocation(df, dept_ids)
+        
+        # === OLD FORMAT PROCESSING ===
         # Enforce structure-first workflow: allocation upload must reference an existing
         # SemesterCourseStructure row per (section, semester, subject).
         # Accept either 'SEM' or 'Sem' as the column name.
@@ -17150,6 +19695,418 @@ def api_student_mdm_my_courses():
             })
         
         return jsonify({"courses": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# API: BULK UPLOAD - SUBJECT ALLOCATION (NEW FORMAT)
+# ==========================================
+
+@app.route('/api/admin/bulk_upload/subject_allocation', methods=['POST'])
+@login_required
+@require_roles('Admin', 'SuperAdmin')
+def bulk_upload_subject_allocation():
+    """
+    Bulk upload subject allocations from the new-format CSV.
+    This creates/updates:
+    - Subjects (with abbreviations, categories, patterns)
+    - Staff profiles (with abbreviations) - updates existing or creates placeholders
+    - SubjectAllocations (teacher-subject-section mappings)
+    
+    Expected CSV columns:
+    Teaching Type, Course Code, Course Name, Pattern, Category, Abbreviation_course,
+    Assigned Faculty, Faculty_Abbreviation, EMP_ID, Session Type, Program, Class level,
+    Specialization, Batch, L, T, P
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        file = request.files['file']
+        if not file.filename.endswith('.csv'):
+            return jsonify({"error": "Only CSV files supported"}), 400
+        
+        content = file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(content))
+        
+        stats = {
+            "subjects_created": 0,
+            "subjects_updated": 0,
+            "staff_updated": 0,
+            "staff_placeholders_created": 0,
+            "allocations_created": 0,
+            "allocations_skipped": 0,
+            "sections_not_found": [],
+            "errors": []
+        }
+        
+        # Build section lookup: (class_level, section_name) -> section_id
+        sections = ClassSection.query.all()
+        section_lookup = {}
+        for sec in sections:
+            # Handle variations: DA1/DA2 -> DA, Core1/Core2/Core3 -> CORE
+            section_lookup[(sec.class_level.upper(), sec.name.upper())] = sec.section_id
+            # Also add exact match
+            section_lookup[(sec.class_level, sec.name)] = sec.section_id
+        
+        # Build staff lookup by employee code
+        staff_by_emp_code = {s.employee_code: s for s in StaffProfile.query.all()}
+        
+        # Build subject lookup by code
+        subjects_by_code = {s.code: s for s in Subject.query.all()}
+        
+        for row_num, row in enumerate(reader, start=2):
+            try:
+                course_code = (row.get('Course Code') or '').strip()
+                course_name = (row.get('Course Name') or '').strip()
+                pattern = (row.get('Pattern') or '').strip()
+                category = (row.get('Category') or '').strip()
+                abbreviation = (row.get('Abbreviation_course') or '').strip()
+                faculty_name = (row.get('Assigned Faculty') or '').strip()
+                faculty_abbrev = (row.get('Faculty_Abbreviation') or '').strip()
+                emp_id = (row.get('EMP_ID') or '').strip()
+                session_type = (row.get('Session Type') or '').strip().upper()
+                program = (row.get('Program') or '').strip()
+                class_level = (row.get('Class level') or '').strip().upper()
+                specialization = (row.get('Specialization') or '').strip().upper()
+                batch = (row.get('Batch') or '').strip()
+                teaching_type = (row.get('Teaching Type') or 'Regular').strip()
+                
+                l_count = int(row.get('L') or 0)
+                t_count = int(row.get('T') or 0)
+                p_count = int(row.get('P') or 0)
+                
+                # Skip empty rows or special entries
+                if not course_name or faculty_name in ['Respective Faculties', '-', '']:
+                    # Still update subject if course_code exists
+                    if course_code and abbreviation:
+                        subject = subjects_by_code.get(course_code)
+                        if subject and not subject.abbreviation:
+                            subject.abbreviation = abbreviation
+                            stats["subjects_updated"] += 1
+                    continue
+                
+                # Skip if no valid employee ID
+                if not emp_id or emp_id in ['-', '--', 'TEMP123']:
+                    # Create placeholder staff if needed
+                    if emp_id == 'TEMP123' and faculty_name:
+                        if emp_id not in staff_by_emp_code:
+                            new_uuid = str(uuid.uuid4())
+                            placeholder_user = UserMaster(
+                                user_id=new_uuid,
+                                username=f"temp_{emp_id}@placeholder.edu",
+                                password_hash=generate_password_hash("TempPass123!"),
+                                user_type='Staff',
+                                is_active=False
+                            )
+                            db.session.add(placeholder_user)
+                            db.session.flush()  # CRITICAL: Commit user before creating profile
+                            
+                            placeholder_staff = StaffProfile(
+                                staff_id=new_uuid,
+                                full_name=faculty_name,
+                                employee_code=emp_id,
+                                abbreviation=faculty_abbrev,
+                                is_placeholder=True
+                            )
+                            db.session.add(placeholder_staff)
+                            db.session.flush()
+                            staff_by_emp_code[emp_id] = placeholder_staff
+                            stats["staff_placeholders_created"] += 1
+                    continue
+                
+                # Determine section lookup key
+                # Map specialization variations: DA1/DA2 -> DA, Core1/Core2/Core3 -> CORE
+                section_name = specialization
+                if section_name.startswith('DA') and len(section_name) > 2:
+                    section_name = 'DA'  # DA1, DA2 -> DA
+                elif section_name.startswith('CORE') and len(section_name) > 4:
+                    section_name = 'CORE'  # Core1, Core2, Core3 -> CORE
+                
+                section_key = (class_level, section_name)
+                section_id = section_lookup.get(section_key)
+                
+                if not section_id:
+                    # Try without class level variations
+                    for (cl, sn), sid in section_lookup.items():
+                        if sn.upper() == section_name and cl.upper() == class_level:
+                            section_id = sid
+                            break
+                
+                if not section_id and section_name:
+                    if section_name not in [s.split('|')[0] for s in stats["sections_not_found"]]:
+                        stats["sections_not_found"].append(f"{section_name}|{class_level}")
+                    continue
+                
+                # Create or update Subject
+                subject = subjects_by_code.get(course_code)
+                if not subject and course_code:
+                    subject = Subject(
+                        code=course_code,
+                        name=course_name,
+                        abbreviation=abbreviation,
+                        category=category,
+                        pattern=pattern,
+                        subject_type=category or 'Core',
+                        l_count=l_count,
+                        t_count=t_count,
+                        p_count=p_count,
+                        credits=l_count + t_count + (p_count // 2)
+                    )
+                    db.session.add(subject)
+                    db.session.flush()  # Get subject_id
+                    subjects_by_code[course_code] = subject
+                    stats["subjects_created"] += 1
+                elif subject:
+                    # Update abbreviation and other fields if not set
+                    if abbreviation and not subject.abbreviation:
+                        subject.abbreviation = abbreviation
+                    if category and not subject.category:
+                        subject.category = category
+                    if pattern and not subject.pattern:
+                        subject.pattern = pattern
+                    stats["subjects_updated"] += 1
+                
+                # Find or create staff
+                staff = staff_by_emp_code.get(emp_id)
+                if staff:
+                    # Update abbreviation if not set
+                    if faculty_abbrev and not staff.abbreviation:
+                        staff.abbreviation = faculty_abbrev
+                        stats["staff_updated"] += 1
+                else:
+                    # Create placeholder staff
+                    new_uuid = str(uuid.uuid4())
+                    placeholder_user = UserMaster(
+                        user_id=new_uuid,
+                        username=f"{emp_id}@placeholder.edu",
+                        password_hash=generate_password_hash("TempPass123!"),
+                        user_type='Staff',
+                        is_active=False,
+                        must_change_password=True
+                    )
+                    db.session.add(placeholder_user)
+                    db.session.flush()  # CRITICAL: Commit user before creating profile
+                    
+                    staff = StaffProfile(
+                        staff_id=new_uuid,
+                        full_name=faculty_name,
+                        employee_code=emp_id,
+                        abbreviation=faculty_abbrev,
+                        is_placeholder=True
+                    )
+                    db.session.add(staff)
+                    db.session.flush()
+                    staff_by_emp_code[emp_id] = staff
+                    stats["staff_placeholders_created"] += 1
+                
+                # Create SubjectAllocation if we have section and subject
+                if section_id and subject:
+                    # Check if allocation exists
+                    existing = SubjectAllocation.query.filter_by(
+                        section_id=section_id,
+                        subject_id=subject.subject_id,
+                        session_type=session_type if session_type else None,
+                        target_batch=batch if batch and batch != '-' else None
+                    ).first()
+                    
+                    if not existing:
+                        allocation = SubjectAllocation(
+                            section_id=section_id,
+                            subject_id=subject.subject_id,
+                            teacher_id=staff.staff_id if staff else None,
+                            session_type=session_type if session_type else None,
+                            target_batch=batch if batch and batch != '-' else None,
+                            teaching_type=teaching_type,
+                            faculty_abbreviation=faculty_abbrev
+                        )
+                        db.session.add(allocation)
+                        stats["allocations_created"] += 1
+                    else:
+                        stats["allocations_skipped"] += 1
+                
+            except Exception as row_error:
+                stats["errors"].append(f"Row {row_num}: {str(row_error)}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            "success": True,
+            "message": "Subject allocation upload completed",
+            "stats": stats
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("bulk_upload_subject_allocation failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/bulk_upload/course_structure', methods=['POST'])
+@login_required
+@require_roles('Admin', 'SuperAdmin')
+def bulk_upload_course_structure():
+    """
+    Bulk upload semester course structure.
+    Creates/updates SemesterCourseStructure entries.
+    
+    Expected CSV columns:
+    Course Code, Course, Course Type, Section, SEM, Class Level, L, T, P, Credits
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        file = request.files['file']
+        if not file.filename.endswith('.csv'):
+            return jsonify({"error": "Only CSV files supported"}), 400
+        
+        content = file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(content))
+        
+        stats = {
+            "subjects_created": 0,
+            "subjects_updated": 0,
+            "structures_created": 0,
+            "structures_skipped": 0,
+            "sections_not_found": [],
+            "errors": []
+        }
+        
+        # Build section lookup
+        sections = ClassSection.query.all()
+        section_lookup = {}
+        for sec in sections:
+            section_lookup[(sec.class_level.upper(), sec.name.upper())] = sec.section_id
+        
+        # Build subject lookup
+        subjects_by_code = {s.code: s for s in Subject.query.all()}
+        
+        for row_num, row in enumerate(reader, start=2):
+            try:
+                course_code = (row.get('Course Code') or '').strip()
+                course_name = (row.get('Course') or row.get('Course Name') or '').strip()
+                course_type = (row.get('Course Type') or '').strip()
+                section_name = (row.get('Section') or '').strip().upper()
+                semester = row.get('SEM') or row.get('Semester') or ''
+                class_level = (row.get('Class Level') or '').strip().upper()
+                
+                l_count = int(row.get('L') or 0)
+                t_count = int(row.get('T') or 0)
+                p_count = int(row.get('P') or 0)
+                credits = int(row.get('Credits') or 0)
+                
+                # Skip empty rows
+                if not course_code or not course_name:
+                    continue
+                
+                # Parse semester number (handle Roman numerals)
+                semester_map = {'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7, 'VIII': 8}
+                if isinstance(semester, str):
+                    semester_no = semester_map.get(semester.strip().upper(), 0)
+                    if semester_no == 0:
+                        try:
+                            semester_no = int(semester)
+                        except:
+                            semester_no = 1
+                else:
+                    semester_no = int(semester) if semester else 1
+                
+                # Find section
+                section_id = section_lookup.get((class_level, section_name))
+                if not section_id:
+                    if f"{section_name}|{class_level}" not in stats["sections_not_found"]:
+                        stats["sections_not_found"].append(f"{section_name}|{class_level}")
+                    continue
+                
+                # Create or update subject
+                subject = subjects_by_code.get(course_code)
+                if not subject:
+                    subject = Subject(
+                        code=course_code,
+                        name=course_name,
+                        subject_type=course_type or 'Core',
+                        l_count=l_count,
+                        t_count=t_count,
+                        p_count=p_count,
+                        credits=credits
+                    )
+                    db.session.add(subject)
+                    db.session.flush()
+                    subjects_by_code[course_code] = subject
+                    stats["subjects_created"] += 1
+                else:
+                    # Update L/T/P if not set
+                    if l_count and not subject.l_count:
+                        subject.l_count = l_count
+                    if t_count and not subject.t_count:
+                        subject.t_count = t_count
+                    if p_count and not subject.p_count:
+                        subject.p_count = p_count
+                    if credits and not subject.credits:
+                        subject.credits = credits
+                    stats["subjects_updated"] += 1
+                
+                # Create SemesterCourseStructure
+                existing = SemesterCourseStructure.query.filter_by(
+                    section_id=section_id,
+                    subject_id=subject.subject_id,
+                    semester_no=semester_no
+                ).first()
+                
+                if not existing:
+                    structure = SemesterCourseStructure(
+                        section_id=section_id,
+                        subject_id=subject.subject_id,
+                        semester_no=semester_no
+                    )
+                    db.session.add(structure)
+                    stats["structures_created"] += 1
+                else:
+                    stats["structures_skipped"] += 1
+                    
+            except Exception as row_error:
+                stats["errors"].append(f"Row {row_num}: {str(row_error)}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            "success": True,
+            "message": "Course structure upload completed",
+            "stats": stats
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("bulk_upload_course_structure failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/lookup/abbreviations', methods=['GET'])
+@login_required
+@require_roles('Admin', 'SuperAdmin')
+def get_abbreviation_mappings():
+    """
+    Get all abbreviation mappings for subjects and staff.
+    Used by timetable upload to resolve abbreviations.
+    """
+    try:
+        subjects = Subject.query.filter(Subject.abbreviation.isnot(None)).all()
+        staff = StaffProfile.query.filter(StaffProfile.abbreviation.isnot(None)).all()
+        
+        return jsonify({
+            "subjects": {s.abbreviation: {
+                "subject_id": s.subject_id,
+                "code": s.code,
+                "name": s.name
+            } for s in subjects if s.abbreviation},
+            "staff": {s.abbreviation: {
+                "staff_id": s.staff_id,
+                "name": s.full_name,
+                "employee_code": s.employee_code
+            } for s in staff if s.abbreviation}
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

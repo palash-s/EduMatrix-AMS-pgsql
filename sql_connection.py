@@ -81,6 +81,9 @@ class StaffProfile(db.Model):
     employee_code = db.Column(db.String(50), unique=True, nullable=False)
     email_contact = db.Column(db.String(100))
     primary_department_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'))
+    
+    # Faculty abbreviation for timetable lookup (e.g., PB, SH, JN, RK)
+    abbreviation = db.Column(db.String(20), nullable=True, index=True)
 
     # Legacy/Admin scope (exists in initial migration)
     admin_access_dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=True)
@@ -93,6 +96,9 @@ class StaffProfile(db.Model):
     is_amc_member = db.Column(db.Boolean, default=False)
     is_amc_head = db.Column(db.Boolean, default=False)
     is_mdm_oe_coordinator = db.Column(db.Boolean, default=False)
+    
+    # Placeholder flag for adjunct/external faculty created during bulk upload
+    is_placeholder = db.Column(db.Boolean, default=False)
 
 
 class Department(db.Model):
@@ -180,6 +186,15 @@ class Subject(db.Model):
     code = db.Column(db.String(20), unique=True, nullable=False)
     dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'))
     subject_type = db.Column(db.String(50), default='Core')
+    
+    # Abbreviation used in timetable (e.g., OS, SE, CN, DEVOPS)
+    abbreviation = db.Column(db.String(20), nullable=True, index=True)
+    
+    # Category from allocation (e.g., PCC, ELECTIVE-I, HSSM-ENT, ELC, VSEC)
+    category = db.Column(db.String(50), nullable=True)
+    
+    # Pattern year (e.g., 2021, 2023)
+    pattern = db.Column(db.String(10), nullable=True)
 
     # NEW: Academic Load Structure (Hours per Week)
     l_count = db.Column(db.Integer, default=0) # Lecture Hours
@@ -212,7 +227,24 @@ class SubjectAllocation(db.Model):
     allocation_id = db.Column(db.Integer, primary_key=True)
     section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=False)
     subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=False)
-    teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=False)
+    teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)  # Nullable for "Respective Faculties"
+    
+    # Session type: L (Lecture), T (Tutorial), P (Practical)
+    session_type = db.Column(db.String(10), nullable=True)
+    
+    # Batch for practical sessions (A, B, C, etc.) - NULL means full class
+    target_batch = db.Column(db.String(20), nullable=True)
+    
+    # Teaching type: Regular, Block
+    teaching_type = db.Column(db.String(20), default='Regular')
+    
+    # Faculty abbreviation for quick lookup (e.g., PB, SH, JN)
+    faculty_abbreviation = db.Column(db.String(20), nullable=True)
+    
+    # Unique constraint: one teacher per subject per section per session_type per batch
+    __table_args__ = (
+        db.Index('ix_allocation_lookup', 'section_id', 'subject_id', 'session_type', 'target_batch'),
+    )
 
 
 class SemesterCourseStructure(db.Model):
@@ -243,6 +275,11 @@ class TimetableVersion(db.Model):
 
     # Status: 'Draft', 'Active', 'Archived'
     status = db.Column(db.String(20), nullable=False, default='Draft')
+
+    # Timetable type: 'Block' or 'Regular' (for dual-timetable system)
+    timetable_type = db.Column(db.String(20), default='Regular')
+    # Link to period configuration
+    period_id = db.Column(db.Integer, db.ForeignKey('timetable_period.id'), nullable=True)
 
     # Metadata
     created_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
@@ -278,6 +315,12 @@ class WeeklySchedule(db.Model):
 
     # Link to timetable version (nullable for migration compatibility)
     version_id = db.Column(db.Integer, db.ForeignKey('timetable_version.version_id'), nullable=True, index=True)
+
+    # For "Respective Faculties" entries - slot created but faculty TBD
+    is_unassigned = db.Column(db.Boolean, default=False)
+    
+    # Custom label for special slots (Library, Mentor Meeting, SCIL, etc.) when no subject assigned
+    slot_label = db.Column(db.String(100), nullable=True)
 
 # ==========================================
 # 4. MENTOR MANAGEMENT (NEW)
@@ -1043,6 +1086,125 @@ class MDMAuditLog(db.Model):
     old_value = db.Column(db.JSON, nullable=True)  # Previous state
     new_value = db.Column(db.JSON, nullable=True)  # New state
     details = db.Column(db.Text, nullable=True)    # Human-readable description
-    
+
     performed_by_id = db.Column(db.String(36), db.ForeignKey('user_master.user_id'), nullable=True)
     timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+
+# ==========================================
+# DUAL TIMETABLE SYSTEM (Block + Regular)
+# ==========================================
+
+class TimetablePeriod(db.Model):
+    """Date range configuration for Block Teaching vs Regular Teaching periods"""
+    __tablename__ = 'timetable_period'
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Period identification
+    name = db.Column(db.String(100), nullable=False)  # e.g., "Block Teaching Jan 2026"
+    timetable_type = db.Column(db.String(20), nullable=False)  # 'Block' or 'Regular'
+    academic_year = db.Column(db.String(20), nullable=False)   # '2025-26'
+    semester = db.Column(db.Integer, nullable=False)           # 1 (odd) or 2 (even)
+
+    # Date range (global dates, applies to all sections)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+
+    # Status: Draft, Active, Archived
+    status = db.Column(db.String(20), default='Draft')
+
+    # Metadata
+    created_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+
+class ScheduleChange(db.Model):
+    """Runtime changes to timetable (substitutions, room changes, cancellations)"""
+    __tablename__ = 'schedule_change'
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Change type: FACULTY_SUB, ROOM_CHANGE, TIME_SWAP, BATCH_MERGE, BATCH_SPLIT, SESSION_CANCEL, MAKEUP_CLASS
+    change_type = db.Column(db.String(30), nullable=False)
+
+    # What's being changed
+    original_schedule_id = db.Column(db.Integer, db.ForeignKey('weekly_schedule.schedule_id'), nullable=True)
+
+    # Effective date range (when this change applies)
+    effective_from = db.Column(db.Date, nullable=False)
+    effective_to = db.Column(db.Date, nullable=True)  # NULL = permanent
+
+    # For specific date overrides (e.g., single day substitution)
+    specific_dates = db.Column(db.JSON, nullable=True)  # List of specific dates if not continuous
+
+    # Change details (stored as JSON for flexibility)
+    original_values = db.Column(db.JSON, nullable=True)  # Snapshot before change
+    new_values = db.Column(db.JSON, nullable=False)      # New values
+
+    # Status: Active, Reverted, Expired
+    status = db.Column(db.String(20), default='Active')
+
+    # Audit
+    reason = db.Column(db.Text, nullable=True)
+    created_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    approved_by_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+
+
+class HolidayCalendar(db.Model):
+    """Institution-wide and department-specific holidays"""
+    __tablename__ = 'holiday_calendar'
+    id = db.Column(db.Integer, primary_key=True)
+
+    date = db.Column(db.Date, nullable=False)
+    name = db.Column(db.String(100), nullable=False)  # e.g., "Republic Day"
+    type = db.Column(db.String(30), default='Full')   # 'Full', 'Half', 'Optional'
+
+    # Scope (NULL = institution-wide)
+    dept_id = db.Column(db.Integer, db.ForeignKey('department.dept_id'), nullable=True)
+
+    academic_year = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+
+class LoadAllocationDetail(db.Model):
+    """Detailed load allocation from CSV - one row per session type + batch combination"""
+    __tablename__ = 'load_allocation_detail'
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Teaching type: 'Block' or 'Regular'
+    teaching_type = db.Column(db.String(20), nullable=False)
+
+    # Subject reference
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.subject_id'), nullable=False)
+
+    # Teacher (NULL if "Respective Faculties" placeholder)
+    teacher_id = db.Column(db.String(36), db.ForeignKey('staff_profile.staff_id'), nullable=True)
+    is_unassigned = db.Column(db.Boolean, default=False)  # True for "Respective Faculties"
+
+    # Session type: L (Lecture), T (Tutorial), P (Practical)
+    session_type = db.Column(db.String(10), nullable=False)  # 'L', 'T', 'P'
+
+    # Target section (NULL if applies to all classes - cross-class Block session)
+    section_id = db.Column(db.Integer, db.ForeignKey('class_section.section_id'), nullable=True)
+    class_level = db.Column(db.String(10), nullable=True)  # FY, SY, TY, LY (NULL = all)
+
+    # Batch for practicals (NULL = whole class)
+    batch = db.Column(db.String(20), nullable=True)  # 'A', 'B', 'C', or NULL
+
+    # Hours per week for this session
+    hours_per_week = db.Column(db.Integer, default=1)
+
+    # Category from CSV (PCC, Elective-I, MDM, etc.)
+    category = db.Column(db.String(50), nullable=True)
+
+    # Pattern/curriculum year
+    pattern = db.Column(db.String(10), nullable=True)  # '2023', '2021'
+
+    # Academic context
+    academic_year = db.Column(db.String(20), nullable=True)  # '2025-26'
+    semester = db.Column(db.Integer, nullable=True)  # 1 or 2
+
+    # Metadata
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    upload_batch_id = db.Column(db.String(36), nullable=True)  # Group rows from same upload

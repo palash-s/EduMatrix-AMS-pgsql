@@ -1,0 +1,73 @@
+Academic Year : 2025-26 Even Sem				,,,,,,,,,,,,,,,,,,,,
+W.E.F. 27th January 2026		,,,,,,,,,,,,,,,,,,,,
+Day ↓ Time →,Class Level,Section Name,08:45-9:40,9:40-10:35,10:35-10:50,10:50 - 11:45,11:45-12:40,12:40-1:40,1:40-2:35,2:35-3:30,03:30-03:40,3:40-4:30,Course Code,Course Name,Category,Abbreviation_course,Assigned Faculty,Faculty_Abbreviation,EMP_ID,Session Type
+MONDAY,SY,DA1,CNL:JN:S-609,CNL:JN:S-609,Short Break,OS:PB:N-609,SP:KL:N-607/ DV:IR:N-605,Long Break,SCIL:N-609,SE:SH:N-609,Short Break,Project Meeting,23IT2005,Operating System,PCC,OS,Prof. Pallavi Bhujbal,PB,1020446,L
+MONDAY,SY,DA2,WP:RR:S-611,WP:RR:S-611,Short Break,OS:PB:N-609,SP:KL:N-607/ DV:IR:N-605,Long Break,SCIL:N-609,SE:SH:N-609,Short Break,Project Meeting,23IT2004,Software Engineering,PCC,SE,Prof. Sachin Hiranwale,SH,1020748,L
+MONDAY,SY,SMAD,AAD:RK:S-604,,Short Break,SE:SH:S-601,CN:JN:S-601,Long Break,SCIL:N-609,OS:PB:S-601,Short Break,Project Meeting,23MIE5001,Entrepreneurship,HSSM-ENT,ENT,Mr. Sumit Chuttar,SC,TEMP123,L
+MONDAY,TY,Core1,AT:RAB:N-609,AS:RHB:N-609,Short Break,FAI:SS:N-609,DEVOPS:AJ:S-610,Long Break,DEVOPSL:AJ:S-610,DEVOPSL:AJ:S-610,Short Break,mentor meeting,23IT2002,Computer Network,PCC,CN,Prof. Rahul Bhole,RHB,1020487,L
+MONDAY,TY,Core2,AT:RAB:N-609,AS:RHB:N-609,Short Break,FAI:SS:N-609,DEVOPS:AJ:S-610,Long Break,FAIL:SS:S-610,FAIL:SS:S-610,Short Break,mentor meeting,23CSE2016,Research Paper Writing and Literature Survey,ELC,RW&LS,Prof.Jyoti Nandimath,JN,1020381,L
+MONDAY,TY,Core3,AT:RAB:N-609,AS:RHB:N-609,Short Break,FAI:SS:N-609,DEVOPS:AJ:S-610,Long Break,Library Slot,Library Slot,Short Break,mentor meeting,23IT2010,Project Based Learning - II,ELC,PBL-II,Respective Faculties,Respective Faculties,-,-
+MONDAY,TY,DA1,DEVOPS:RB:S-611,DEVOPS:RB:S-611,Short Break,ISML:AG:S-610    ,ISML:AG:S-610    ,Long Break,ISM:AG:N-605/SC:RN:N-607,UED:PK:N-605/       NLP:KL:N-607,Short Break,mentor meeting,23IT2008,Web Programming,VSEC,WP,Prof. Rahul Rathod,RR,1020750,P
+MONDAY,TY,DA2,DEVOPS:RB:S-611,DEVOPS:RB:S-611,Short Break,ISML:AG:S-610    ,ISML:AG:S-610    ,Long Break,ISM:AG:N-605/SC:RN:N-607,UED:PK:N-605/       NLP:KL:N-607,Short Break,mentor meeting,23IT2002,Computer Network Lab,PCC,CNL,Prof. Jyoti Nandimath,JN,1020381,P
+MONDAY,TY,SMAD,DEVOPS:AJ:S-610,DEVOPS:AJ:S-610,Short Break,UED:PK:S-601,AT:RAB:S-601,Long Break,FSBD:RK:S-601,FSBD:RK:S-601,Short Break,mentor meeting,23IT1106,Data Visualisation(Elective-I),ELECTIVE-I,DV,Prof. Dr.Ishwari Raskar,IR,1020709,L
+MONDAY,LY,Core1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT1107,Statistical Programming and Analysis,ELECTIVE-I,SP,Prof. Kalyani Lokhande,KL,1020447,L
+MONDAY,LY,Core2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT2008,Web Programming,VSEC,WP,Prof. Rohini Bhosale,RB,1020316,P
+MONDAY,LY,DA1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT2002,Computer Network,PCC,CN,Prof. Jyoti Nandimath,JN,1020381,L
+MONDAY,LY,DA2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23CSE2016,Research Paper Writing and Literature Survey,ELC,RW&LS,Prof. Reetika Kerketta,RK,1020022,L
+MONDAY,LY,SMAD,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT2008,Web Programming,VSEC,WP,Prof. Pranjali Khadse,PK,1020737,P
+TUESDAY,SY,DA1,OS:PB:N-605,CN:RK:N-605,Short Break,SE:SH:N-605,SP:KL:N-607/ DV:IR:N-605,Long Break,WP:RB:S-614,WP:RB:S-614,Short Break,mentor Meeting,24IT1105,Android Application Development,ELECTIVE-I,AAD,Prof. Reetika Kerketta,RK,1020022,P
+TUESDAY,SY,DA2,OS:PB:N-605,CN:RK:N-605,Short Break,SE:SH:N-605,SP:KL:N-607/ DV:IR:N-605,Long Break,WP:RR:S-611,WP:RR:S-611,Short Break,mentor Meeting,23IT3300,DevOps Engineering,PCC,DEVOPS,Prof. Ashvini jadhav,AJ,1020356,L
+TUESDAY,SY,SMAD,CN:JN:S-601,SE:SH:S-601,Short Break,WP:PK:S-614,WP:PK:S-614,Long Break,OS:PB:S-601,CN:JN:S-601,Short Break,mentor Meeting,23IT3300,DevOps Engineering,PCC,DEVOPS,Prof. Rohini Bhosale,RB,1020316,L
+TUESDAY,TY,Core1,AS:RHB:N-609,AT:RAB:N-609,Short Break,FAI:SS:N-609,LIBRARY SLOT,Long Break,APS:SCIL:N-605,APS:SCIL:N-605,Short Break,Project Meeting,23IT3300,DevOps Engineering Lab,PCC,DEVOPSL,Prof. Rohini Bhosale,RB,1020316,P
+TUESDAY,TY,Core2,AS:RHB:N-609,AT:RAB:N-609,Short Break,FAI:SS:N-609,LIBRARY SLOT,Long Break,APS:SCIL:N-605,APS:SCIL:N-605,Short Break,Project Meeting,23IT3300,DevOps Engineering Lab,PCC,DEVOPSL,Prof. Ashvini jadhav,AJ,1020356,P
+TUESDAY,TY,Core3,AS:RHB:N-609,AT:RAB:N-609,Short Break,FAI:SS:N-609,LIBRARY SLOT,Long Break,APS:SCIL:N-605,APS:SCIL:N-605,Short Break,Project Meeting,23IT3302,Foundation of Artificial Intelligence,PCC,FAI,Prof. Jyoti Nandimath,JN,1020381,L
+TUESDAY,TY,DA1,UED:PK:N-611/       NLP:KL:N-607,ISM:AG:N-611/SC:RN:N-607,Short Break,FAI:JN:S-611,DEVOPS:RB:S-611,Long Break,APS:SCIL:N-605,APS:SCIL:N-605,Short Break,Project Meeting,23IT3302,Foundation of Artificial Intelligence,PCC,FAI,Prof. Swati Singh,SS,1020493,L
+TUESDAY,TY,DA2,UED:PK:N-611/       NLP:KL:N-607,ISM:AG:N-611/SC:RN:N-607,Short Break,FAI:JN:S-611,DEVOPS:RB:S-611,Long Break,APS:SCIL:N-605,APS:SCIL:N-605,Short Break,Project Meeting,23IT3311,Automation Testing,ELECTIVE-III,AT,Prof. Rupali Bhatkhande,RAB,1020755,L
+TUESDAY,TY,SMAD,DEVOPSL:AJ:S-610,DEVOPSL:AJ:S-610,Short Break,AT:RAB:S-610,DEVOPS:AJ:S-610,Long Break,APS:SCIL:N-605,APS:SCIL:N-605,Short Break,Project Meeting,23IT3311,Automation Testing Lab,ELECTIVE-III,ATL,Prof. Rupali Bhatkhande,RAB,1020755,P
+TUESDAY,LY,Core1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT3317,Application Security,ELECTIVE-IV,AS,Prof. Rahul Bhole,RHB,1020487,L
+TUESDAY,LY,Core2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT3317,Application Security Lab,ELECTIVE-IV,ASL,Prof. Rahul Bhole,RHB,1020487,P
+TUESDAY,LY,DA1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT3310,Project Based Learning - IV,ELC,PBL-IV,-,-,-,P
+TUESDAY,LY,DA2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT3303,Foundation of Artificial Intelligence- Laboratory,PCC,FAIL,Prof. Kalyani Lokhande,KL,1020447,P
+TUESDAY,LY,SMAD,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT3303,Foundation of Artificial Intelligence- Laboratory,PCC,FAIL,Prof. Swati Singh,SS,1020493,P
+WEDNESDAY,SY,DA1,SE:SH:N-605,SP:KL:N-609/ DV:IR:N-605,Short Break,WP:RB:S-614,WP:RB:S-614,Long Break,OE:ONLINE,OE:ONLINE,Short Break,Project Meeting,23SCL4003,Aptitude and Professional Skills -  Industry Readiness,MDHDC,APS,-,-,-,L
+WEDNESDAY,SY,DA2,SE:SH:N-605,SP:KL:N-609/ DV:IR:N-605,Short Break,CNL:JN:S-609,CNL:JN:S-609,Long Break,OE:ONLINE,OE:ONLINE,Short Break,Project Meeting,25IT101,Foreign Language,AEC,ForL,-,-,-,L
+WEDNESDAY,SY,SMAD,AAD:RK:S-604,AAD:RK:S-604,Short Break,SE:SH:S-601,OS:PB:S-601,Long Break,OE:ONLINE,OE:ONLINE,Short Break,Project Meeting,23IT1108,User Experience Design,ELECTIVE-III,UED,Prof. Pranjali Khadse,PK,1020737,L
+WEDNESDAY,TY,Core1,DEVOPS:AJ:S-610,DEVOPS:AJ:S-610,Short Break,ATL:RAB:N-613,ATL:RAB:N-613,Long Break,Library Slot,Library Slot,Short Break,Project Meeting,23IT1108,User Experience Design Lab,ELECTIVE-III,UED,Prof. Pranjali Khadse,PK,1020737,P
+WEDNESDAY,TY,Core2,DEVOPS:AJ:S-610,DEVOPS:AJ:S-610,Short Break,ASL:RHB:N-611,ASL:RHB:N-611,Long Break,Library Slot,Library Slot,Short Break,Project Meeting,23IT3307,Natural Language Processing,ELECTIVE-III,NLP,Prof. Kalyani Lokhande,KL,1020447,L
+WEDNESDAY,TY,Core3,DEVOPS:AJ:S-610,DEVOPS:AJ:S-610,Short Break,DEVOPSL:AJ:S-610,DEVOPSL:AJ:S-610,Long Break,FAIL:SS:S-610,FAIL:SS:S-610,Short Break,Project Meeting,23IT3307,Natural Language Processing Lab,ELECTIVE-III,NLPL,Prof. Kalyani Lokhande,KL,1020447,P
+WEDNESDAY,TY,DA1,ISM:AG:N-609/SC:RN:N-607,FAI:JN:N-607,Short Break,UED:PK:N-605/       NLP:KL:S-607,LIBRARY SLOT,Long Break,Library Slot,Library Slot,Short Break,Project Meeting,23IT3309,Soft Computing,ELECTIVE-IV,SC,Dr. Rashmi Nair,RN,1020312,L
+WEDNESDAY,TY,DA2,ISM:AG:N-609/SC:RN:N-607,FAI:JN:N-607,Short Break,UED:PK:N-605/       NLP:KL:S-607,LIBRARY SLOT,Long Break,Library Slot,Library Slot,Short Break,Project Meeting,23IT3309,Soft Computing,ELECTIVE-IV,SCL,Dr. Rashmi Nair,RN,1020312,P
+WEDNESDAY,TY,SMAD,UED:PK:S-601,AT:RAB:S-601,Short Break,FSBDL:RK:S-611,FSBDL:RK:S-611,Long Break,Library Slot,Library Slot,Short Break,Project Meeting,23IT3304,Information Storage & Management,ELECTIVE-IV,ISM,Prof. Dr. Amit Gadekar,AG,1020808,L
+WEDNESDAY,LY,Core1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT3304,Information Storage & Management Lab,ELECTIVE-IV,ISML,Prof. Dr. Amit Gadekar,AG,1020808,P
+WEDNESDAY,LY,Core2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT3305,Full Stack Back-End Development,PCC,FSBD,Prof. Reetika Kerketta,RK,1020022,L
+WEDNESDAY,LY,DA1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,23IT3305,Full Stack Back-End Development Lab,PCC,FSBDL,Prof. Reetika Kerketta,RK,1020022,P
+WEDNESDAY,LY,DA2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+WEDNESDAY,LY,SMAD,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+THURSDAY,SY,DA1,SP:KL:N-609/ DV:IR:N-605,CN:RK:N-609,Short Break,OS:PB:N-609,CN:RK:N-609,Long Break,SCIL:N-609,Library Slot,Short Break,Project Meeting,,,,,,,,
+THURSDAY,SY,DA2,SP:KL:N-609/ DV:IR:N-605,CN:RK:N-609,Short Break,OS:PB:N-609,CN:RK:N-609,Long Break,SCIL:N-609,Library Slot,Short Break,Project Meeting,,,,,,,,
+THURSDAY,SY,SMAD,OS:PB:S-601,SE:SH:S-601,Short Break,CNL:JN:S-609,CNL:JN:S-609,Long Break,SCIL:N-609,Library Slot,Short Break,Project Meeting,,,,,,,,
+THURSDAY,TY,Core1,AS:RHB:N-605,APS:SCIL:N-605,Short Break,FAI:SS:N-605,Library Slot,Long Break,ASL:RHB:N-611,ASL:RHB:N-611,Short Break,Project Meeting,,,,,,,,
+THURSDAY,TY,Core2,AS:RHB:N-605,APS:SCIL:N-605,Short Break,FAI:SS:N-605,Library Slot,Long Break,DEVOPSL:AJ:S-610,DEVOPSL:AJ:S-610,Short Break,Project Meeting,,,,,,,,
+THURSDAY,TY,Core3,AS:RHB:N-605,APS:SCIL:N-605,Short Break,FAI:SS:N-605,Library Slot,Long Break,ATL:RAB:N-613,ATL:RAB:N-613,Short Break,Project Meeting,,,,,,,,
+THURSDAY,TY,DA1,FAI:JN:N-607,APS:SCIL:N-607,Short Break,UED:PK:N-611/       NLPL:KL:S-610,NLPL:KL:S-610,Long Break,FAIL:KL:S-609,FAIL:KL:S-609,Short Break,Project Meeting,,,,,,,,
+THURSDAY,TY,DA2,FAI:JN:N-607,APS:SCIL:N-607,Short Break,UED:PK:N-611/       NLPL:KL:S-610,NLPL:KL:S-610,Long Break,DEVOPSL:RB:S-611,DEVOPSL:RB:S-611,Short Break,Project Meeting,,,,,,,,
+THURSDAY,TY,SMAD,UED:PK:S-601,APS:SCIL:N-607,Short Break,ATL:RAB:N-613,ATL:RAB:N-613,Long Break,FSBD:RK:S-601,Library Slot,Short Break,Project Meeting,,,,,,,,
+THURSDAY,LY,Core1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+THURSDAY,LY,Core2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+THURSDAY,LY,DA1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+THURSDAY,LY,DA2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+THURSDAY,LY,SMAD,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+FRIDAY,SY,DA1,ENT:SC:N-609,ENT:SC:N-609,Short Break,SE:SH:N-609,OS:PB:N 609,Long Break,APS:SHD,APS:SHD,Short Break,Project Meeting,,,,,,,,
+FRIDAY,SY,DA2,ENT:SC:N-609,ENT:SC:N-609,Short Break,SE:SH:N-609,OS:PB:N 609,Long Break,APS:SHD,APS:SHD,Short Break,Project Meeting,,,,,,,,
+FRIDAY,SY,SMAD,ENT:SC:N-609,ENT:SC:N-609,Short Break,WP:PK:S-614,WP:PK:S-614,Long Break,APS:SHD,APS:SHD,Short Break,Project Meeting,,,,,,,,
+FRIDAY,TY,Core1,FAIL:SS:S-610,FAIL:SS:S-610,Short Break,AT:RAB:N-609,FAI:SS:N-609,Long Break,ForL:SHD: N-607,ForL:SHD: N-607,Short Break,Project Meeting,,,,,,,,
+FRIDAY,TY,Core2,ATL:RAB:N-613,ATL:RAB:N-613,Short Break,AT:RAB:N-609,FAI:SS:N-609,Long Break,ForL:SHD: N-607,ForL:SHD: N-607,Short Break,Project Meeting,,,,,,,,
+FRIDAY,TY,Core3,ASL:RHB:N-611,ASL:RHB:N-611,Short Break,AT:RAB:N-609,FAI:SS:N-609,Long Break,ForL:SHD: N-607,ForL:SHD: N-607,Short Break,Project Meeting,,,,,,,,
+FRIDAY,TY,DA1,DEVOPSL:RB:S-611,DEVOPSL:RB:S-611,Short Break,FAI:JN:N-607,Library Slot,Long Break,ForL:SHD: N-607,ForL:SHD: N-607,Short Break,Project Meeting,,,,,,,,
+FRIDAY,TY,DA2,FAIL:KL:S-609,FAIL:KL:S-609,Short Break,FAI:JN:N-607,Library Slot,Long Break,ForL:SHD: N-607,ForL:SHD: N-607,Short Break,Project Meeting,,,,,,,,
+FRIDAY,TY,SMAD,UED:PK:S-601,Library Slot,Short Break,FSBDL:RK:S-611,,Long Break,ForL:SHD: N-607,ForL:SHD: N-607,Short Break,Project Meeting,,,,,,,,
+FRIDAY,LY,Core1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+FRIDAY,LY,Core2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+FRIDAY,LY,DA1,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+FRIDAY,LY,DA2,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
+FRIDAY,LY,SMAD,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,PP-II N-612,Long Break,PP-II N-612,PP-II N-612,Short Break,PP-II N-612,,,,,,,,
