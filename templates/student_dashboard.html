@@ -259,6 +259,10 @@
                 checkMDMOEWindows();
                 // ------------------------------
 
+                // --- ELECTIVE SELECTION CHECK ---
+                checkElectiveWindows();
+                // ---------------------------------
+
                 // Auto-refresh is disabled globally.
             } catch (e) { console.error(e); showToast("Session Error", "error"); window.location.href = '/'; }
         });
@@ -762,7 +766,7 @@
                 return;
             }
 
-            // Build a lookup map: day -> start_time -> entries[]
+            // Build a simple lookup map: day-startTime -> entries[]
             const slotMap = {};
             entries.forEach(e => {
                 const key = `${e.day_of_week}-${e.start_time}`;
@@ -770,57 +774,94 @@
                 slotMap[key].push(e);
             });
 
-            // Build the table HTML
+            // Helper to convert time to minutes for duration check
+            function timeToMinutes(t) {
+                if (!t) return 0;
+                const parts = t.split(':').map(Number);
+                return parts[0] * 60 + (parts[1] || 0);
+            }
+
+            // Track continuation cells for multi-hour sessions
+            const continuedCells = {};
+            entries.forEach(e => {
+                const startMins = timeToMinutes(e.start_time);
+                const endMins = timeToMinutes(e.end_time);
+                
+                // Check each time slot to see if this session spans into it
+                TIME_SLOTS.forEach(slot => {
+                    if (slot.type === 'break') return;
+                    const slotStartMins = timeToMinutes(slot.start);
+                    // If slot starts after our start but before our end, it's a continuation
+                    if (slotStartMins > startMins && slotStartMins < endMins) {
+                        const contKey = `${e.day_of_week}-${slot.start}`;
+                        continuedCells[contKey] = e;
+                    }
+                });
+            });
+
+            // Build the table HTML - Days on rows, Time slots on columns
+            const activeSlots = TIME_SLOTS.filter(s => !s.type);
+            
             let html = `
                 <div class="overflow-x-auto">
-                    <table class="w-full text-xs border-collapse min-w-[700px]">
+                    <table class="w-full text-xs border-collapse min-w-[800px]">
                         <thead class="bg-gray-100">
                             <tr>
-                                <th class="p-2 border border-gray-200 bg-gray-50 w-20 text-center font-bold text-gray-500">Time</th>
-                                ${DAYS_ORDER.map(d => `<th class="p-2 border border-gray-200 text-center font-bold text-gray-600">${d}</th>`).join('')}
+                                <th class="p-2 border border-gray-200 bg-gray-50 w-20 text-center font-bold text-gray-500">Day</th>
+                                ${activeSlots.map(s => `<th class="p-2 border border-gray-200 text-center font-bold text-gray-600 text-[10px] whitespace-nowrap">${s.label}</th>`).join('')}
                             </tr>
                         </thead>
                         <tbody>
             `;
 
-            TIME_SLOTS.forEach(slot => {
-                if (slot.type === 'break') {
-                    html += `
-                        <tr>
-                            <td colspan="${DAYS_ORDER.length + 1}" class="p-1 bg-gray-50 text-center text-[10px] font-bold text-gray-400 border border-gray-100">${slot.label}</td>
-                        </tr>
-                    `;
-                } else {
-                    html += `<tr>`;
-                    html += `<td class="p-2 border border-gray-200 bg-gray-50 text-center font-mono text-[10px] font-bold text-gray-500 align-middle">${slot.label}</td>`;
+            DAYS_ORDER.forEach(day => {
+                html += `<tr>`;
+                html += `<td class="p-2 border border-gray-200 bg-gray-50 text-center font-bold text-gray-600 align-middle">${day}</td>`;
 
-                    DAYS_ORDER.forEach(day => {
-                        const key = `${day}-${slot.start}`;
-                        const cellEntries = slotMap[key] || [];
+                activeSlots.forEach(slot => {
+                    const key = `${day}-${slot.start}`;
+                    const cellEntries = slotMap[key] || [];
+                    const continued = continuedCells[key];
+                    
+                    if (cellEntries.length === 0 && !continued) {
+                        html += `<td class="p-1 border border-gray-100 bg-white min-w-[90px]"></td>`;
+                    } else if (cellEntries.length === 0 && continued) {
+                        // Show continuation indicator for multi-hour sessions
+                        html += `<td class="p-1 border border-gray-100 bg-gray-50 text-center align-middle min-w-[90px]">
+                            <span class="text-[9px] text-gray-400 italic">← cont.</span>
+                        </td>`;
+                    } else {
+                        html += `<td class="p-1 border border-gray-100 bg-white align-top min-w-[90px]">`;
+                        
+                        cellEntries.forEach(entry => {
+                            let bgColor = 'bg-blue-50 border-blue-200 text-blue-800';
+                            
+                            // Special slots (Library, Mentor Meeting, etc.)
+                            if (entry.is_special_slot || entry.session_type === 'Special') {
+                                bgColor = 'bg-purple-50 border-purple-200 text-purple-800';
+                            } else if (entry.session_type === 'Practical' || entry.session_type === 'Lab') {
+                                bgColor = 'bg-green-50 border-green-200 text-green-800';
+                            } else if (entry.session_type === 'Tutorial') {
+                                bgColor = 'bg-amber-50 border-amber-200 text-amber-800';
+                            }
 
-                        if (cellEntries.length === 0) {
-                            html += `<td class="p-1 border border-gray-100 bg-white"></td>`;
-                        } else {
-                            html += `<td class="p-1 border border-gray-100 bg-white align-top">`;
-                            cellEntries.forEach(entry => {
-                                let bgColor = 'bg-blue-50 border-blue-200 text-blue-800';
-                                if (entry.session_type === 'Practical') {
-                                    bgColor = 'bg-green-50 border-green-200 text-green-800';
-                                } else if (entry.session_type === 'Tutorial') {
-                                    bgColor = 'bg-amber-50 border-amber-200 text-amber-800';
-                                }
-
-                                const batchBadge = entry.target_batch
-                                    ? `<span class="text-[8px] font-bold uppercase bg-white/80 px-1 rounded">${entry.target_batch}</span>`
-                                    : '';
-                                const roomBadge = entry.room
-                                    ? `<span class="text-[8px] font-mono text-gray-500">${entry.room.room_number || ''}</span>`
-                                    : '';
+                            const batchBadge = entry.target_batch
+                                ? `<span class="text-[8px] font-bold uppercase bg-white/80 px-1 rounded">${entry.target_batch}</span>`
+                                : '';
+                            
+                            // For special slots, don't show teacher/room
+                            const isSpecial = entry.is_special_slot || entry.session_type === 'Special';
+                            const roomBadge = (!isSpecial && entry.room)
+                                ? `<span class="text-[8px] font-mono text-gray-500">${entry.room.room_number || ''}</span>`
+                                : '';
+                            const teacherLine = (!isSpecial && entry.teacher)
+                                ? `<div class="opacity-70 truncate">${entry.teacher?.name || '-'}</div>`
+                                : '';
 
                                 html += `
                                     <div class="p-1.5 rounded border ${bgColor} mb-1 text-[10px]">
                                         <div class="font-bold truncate" title="${entry.subject?.name || ''}">${entry.subject?.name || '-'}</div>
-                                        <div class="opacity-70 truncate">${entry.teacher?.name || '-'}</div>
+                                        ${teacherLine}
                                         <div class="flex justify-between mt-1">
                                             ${roomBadge}
                                             ${batchBadge}
@@ -833,7 +874,6 @@
                     });
 
                     html += `</tr>`;
-                }
             });
 
             html += `</tbody></table></div>`;
@@ -844,12 +884,160 @@
                     <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-blue-100 border border-blue-200"></span> Lecture</span>
                     <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-green-100 border border-green-200"></span> Practical</span>
                     <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-amber-100 border border-amber-200"></span> Tutorial</span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-purple-100 border border-purple-200"></span> Special</span>
                 </div>
             `;
 
             container.innerHTML = html;
             lucide.createIcons();
         }
+
+        // --- ELECTIVE SELECTION FUNCTIONS ---
+        async function checkElectiveWindows() {
+            try {
+                const res = await fetch(`/api/student/elective_windows?user_id=${userId}`);
+                const data = await res.json();
+                
+                const container = document.getElementById('elective-container');
+                if (!data.windows || data.windows.length === 0) {
+                    container.innerHTML = '';
+                    return;
+                }
+                
+                let html = '';
+                for (const w of data.windows) {
+                    const isExtension = w.status === 'Extension';
+                    const statusBadge = isExtension 
+                        ? '<span class="px-2 py-0.5 text-[10px] font-bold bg-yellow-100 text-yellow-700 rounded-full">EXTENSION</span>'
+                        : '<span class="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">OPEN</span>';
+                    
+                    const selectedOption = w.selection ? w.options.find(o => o.id === w.selection) : null;
+                    
+                    html += `
+                    <div class="bg-gradient-to-br from-teal-50 to-cyan-50 rounded-xl shadow-sm border border-teal-200 p-4 mb-4">
+                        <div class="flex justify-between items-start mb-3">
+                            <div class="flex items-center gap-2">
+                                <i data-lucide="book-open-check" class="w-5 h-5 text-teal-600"></i>
+                                <h3 class="text-sm font-bold text-teal-800">${w.bucket} Elective Selection</h3>
+                            </div>
+                            ${statusBadge}
+                        </div>
+                        <p class="text-xs text-gray-600 mb-2">Semester ${w.target_semester_no} - Select your preferred elective.</p>
+                        <p class="text-[10px] text-gray-500 mb-3"><i data-lucide="info" class="w-3 h-3 inline"></i> Min. batch size: ${w.min_batch_size} students</p>
+                        
+                        ${selectedOption ? `
+                            <div class="bg-white rounded-lg p-3 border border-green-200 mb-3">
+                                <p class="text-[10px] text-green-600 font-bold uppercase">Your Selection</p>
+                                <p class="text-sm font-bold text-gray-800">${selectedOption.code}: ${selectedOption.name}</p>
+                            </div>
+                        ` : ''}
+                        
+                        <button onclick="openElectiveSelectionModal(${w.window_id}, '${w.bucket}')" class="w-full py-2 bg-teal-600 text-white text-xs font-bold rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center gap-2">
+                            <i data-lucide="${selectedOption ? 'edit' : 'plus-circle'}" class="w-4 h-4"></i>
+                            ${selectedOption ? 'Change Selection' : 'Select Elective'}
+                        </button>
+                    </div>`;
+                }
+                
+                container.innerHTML = html;
+                lucide.createIcons();
+            } catch(e) {
+                console.error('Elective Window Check Error:', e);
+            }
+        }
+        
+        let currentElectiveWindowId = null;
+        async function openElectiveSelectionModal(windowId, bucket) {
+            currentElectiveWindowId = windowId;
+            
+            // Create modal if not exists
+            let modal = document.getElementById('elective-selection-modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'elective-selection-modal';
+                modal.className = 'fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm';
+                modal.innerHTML = `
+                    <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg max-h-[80vh] overflow-auto relative">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-lg font-bold mit-purple serif">Select <span id="elective-modal-bucket">Elective</span></h2>
+                            <button onclick="closeElectiveSelectionModal()" class="p-1 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <div id="elective-options-list" class="space-y-3"></div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            }
+            
+            document.getElementById('elective-modal-bucket').innerText = bucket;
+            modal.classList.remove('hidden');
+            
+            const list = document.getElementById('elective-options-list');
+            list.innerHTML = '<div class="text-center py-4"><div class="w-8 h-8 mx-auto aurora-loader rounded-full"></div><p class="text-xs text-gray-400 mt-2">Loading electives...</p></div>';
+            
+            try {
+                const res = await fetch(`/api/student/elective_windows?user_id=${userId}`);
+                const data = await res.json();
+                const window = data.windows.find(w => w.window_id === windowId);
+                
+                if (!window || !window.options || window.options.length === 0) {
+                    list.innerHTML = '<p class="text-center text-gray-500 py-4">No electives available.</p>';
+                    return;
+                }
+                
+                list.innerHTML = window.options.map(o => {
+                    const isSelected = window.selection === o.id;
+                    
+                    return `
+                        <div class="p-4 rounded-lg border ${isSelected ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-teal-300'} transition-colors">
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <h4 class="font-bold text-gray-800">${o.code}: ${o.name}</h4>
+                                </div>
+                                ${isSelected ? '<span class="text-xs font-bold px-2 py-1 rounded bg-green-100 text-green-700">SELECTED</span>' : ''}
+                            </div>
+                            <button onclick="submitElectiveSelection(${windowId}, ${o.id})" 
+                                class="mt-2 w-full py-2 ${isSelected ? 'bg-gray-400 cursor-not-allowed' : 'bg-teal-600 hover:bg-teal-700'} text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+                                ${isSelected ? 'disabled' : ''}>
+                                <i data-lucide="${isSelected ? 'check-circle' : 'check'}" class="w-4 h-4"></i>
+                                ${isSelected ? 'Currently Selected' : 'Select This Elective'}
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+                lucide.createIcons();
+            } catch(e) {
+                console.error('Elective Modal Error:', e);
+                list.innerHTML = '<p class="text-center text-red-500 py-4">Failed to load electives.</p>';
+            }
+        }
+        
+        function closeElectiveSelectionModal() {
+            const modal = document.getElementById('elective-selection-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+        
+        async function submitElectiveSelection(windowId, subjectId) {
+            try {
+                const res = await fetch('/api/student/submit_elective', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, window_id: windowId, subject_id: subjectId })
+                });
+                const result = await res.json();
+                
+                if (res.ok) {
+                    showToast(result.message || 'Elective selection saved!', 'success');
+                    closeElectiveSelectionModal();
+                    checkElectiveWindows(); // Refresh the container
+                } else {
+                    showToast(result.error || 'Failed to save selection', 'error');
+                }
+            } catch(e) {
+                console.error('Submit Elective Error:', e);
+                showToast('Network error. Please try again.', 'error');
+            }
+        }
+        // --- END ELECTIVE SELECTION FUNCTIONS ---
 
         // --- MDM/OE SELECTION FUNCTIONS ---
         async function checkMDMOEWindows() {
