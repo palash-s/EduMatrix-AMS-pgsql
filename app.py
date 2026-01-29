@@ -3777,7 +3777,27 @@ def staff_dashboard():
                 mentee_count += StudentProfile.query.filter_by(mentor_batch_id=b.batch_id).count()
 
         # --- 4. STATS (Load & Attendance) ---
-        weekly_load = WeeklySchedule.query.filter_by(teacher_id=staff.staff_id).count()
+        # Calculate weekly load from Subject L/T/P counts via SubjectAllocation
+        load_allocations = (db.session.query(SubjectAllocation, Subject)
+            .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
+            .filter(SubjectAllocation.teacher_id == staff.staff_id)
+            .all())
+
+        seen_allocations = set()
+        weekly_load = 0
+
+        for alloc, subject in load_allocations:
+            # Dedupe: same subject+section+session_type counts once (regardless of batch)
+            alloc_key = (alloc.subject_id, alloc.section_id, alloc.session_type)
+
+            if alloc_key not in seen_allocations:
+                if alloc.session_type == 'L':
+                    weekly_load += subject.l_count or 0
+                elif alloc.session_type == 'T':
+                    weekly_load += subject.t_count or 0
+                elif alloc.session_type == 'P':
+                    weekly_load += subject.p_count or 0
+                seen_allocations.add(alloc_key)
         
         my_sessions = SessionLog.query.filter_by(actual_teacher_id=staff.staff_id).all()
         session_ids = [s.session_id for s in my_sessions]
@@ -4479,6 +4499,82 @@ def staff_dashboard():
         })
     except Exception as e:
         print(f"CRITICAL ERROR in Staff Dashboard: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/staff/load_breakdown', methods=['GET'])
+@login_required
+@require_roles('Staff')
+def api_staff_load_breakdown():
+    """
+    Returns detailed breakdown of weekly load calculation for the logged-in faculty.
+    Shows each subject allocation with L/T/P hours.
+    """
+    try:
+        user_id = current_user.user_id
+        staff = StaffProfile.query.filter_by(staff_id=user_id).first()
+
+        if not staff:
+            return jsonify({"error": "Staff profile not found"}), 404
+
+        # Get all allocations with subject and section details
+        allocations = (db.session.query(SubjectAllocation, Subject, ClassSection)
+            .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
+            .join(ClassSection, SubjectAllocation.section_id == ClassSection.section_id)
+            .filter(SubjectAllocation.teacher_id == staff.staff_id)
+            .order_by(ClassSection.class_level, ClassSection.name, Subject.code)
+            .all())
+
+        # Build breakdown with deduplication tracking
+        seen_allocations = set()
+        breakdown = []
+        total_hours = 0
+
+        for alloc, subject, section in allocations:
+            alloc_key = (alloc.subject_id, alloc.section_id, alloc.session_type)
+            is_duplicate = alloc_key in seen_allocations
+
+            # Determine hours for this session type
+            hours = 0
+            if alloc.session_type == 'L':
+                hours = subject.l_count or 0
+            elif alloc.session_type == 'T':
+                hours = subject.t_count or 0
+            elif alloc.session_type == 'P':
+                hours = subject.p_count or 0
+
+            # Only add to total if not a duplicate
+            if not is_duplicate:
+                total_hours += hours
+                seen_allocations.add(alloc_key)
+
+            session_type_labels = {'L': 'Lecture', 'T': 'Tutorial', 'P': 'Practical'}
+
+            breakdown.append({
+                "subject_code": subject.code,
+                "subject_name": subject.name,
+                "section": f"{section.class_level}-{section.name}",
+                "session_type": session_type_labels.get(alloc.session_type, alloc.session_type),
+                "batch": alloc.target_batch,
+                "l_count": subject.l_count or 0,
+                "t_count": subject.t_count or 0,
+                "p_count": subject.p_count or 0,
+                "hours_added": hours if not is_duplicate else 0,
+                "is_duplicate": is_duplicate,
+                "duplicate_reason": f"Same subject+section+session already counted" if is_duplicate else None
+            })
+
+        return jsonify({
+            "staff_name": staff.full_name,
+            "staff_id": staff.staff_id,
+            "total_weekly_hours": total_hours,
+            "breakdown": breakdown,
+            "note": "Batched practicals (A/B/C) for same subject+section are counted once as they run in parallel."
+        }), 200
+
+    except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

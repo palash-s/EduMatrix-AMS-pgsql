@@ -77,10 +77,10 @@
                     <p class="text-xs text-gray-500 uppercase tracking-wider" id="profile-dept">...</p>
                 </div>
             </div>
-            <!-- Load -->
-            <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex justify-between items-center">
-                <div><p class="text-xs text-gray-400 font-bold uppercase">Weekly Load</p><h3 class="text-3xl font-black mit-purple mt-1" id="stat-classes">--</h3></div>
-                <div class="p-3 bg-purple-50 rounded-full text-purple-600"><i data-lucide="bar-chart-2" class="w-6 h-6"></i></div>
+            <!-- Load (Clickable) -->
+            <div onclick="openLoadBreakdownModal()" class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex justify-between items-center cursor-pointer hover:shadow-md hover:border-purple-200 transition-all group">
+                <div><p class="text-xs text-gray-400 font-bold uppercase group-hover:text-purple-600">Weekly Load</p><h3 class="text-3xl font-black mit-purple mt-1" id="stat-classes">--</h3><p class="text-xs text-gray-400 mt-1">Click for breakdown</p></div>
+                <div class="p-3 bg-purple-50 rounded-full text-purple-600 group-hover:bg-purple-100"><i data-lucide="bar-chart-2" class="w-6 h-6"></i></div>
             </div>
             <!-- Attendance -->
             <div class="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex justify-between items-center">
@@ -159,6 +159,50 @@
 
 
     <!-- MODALS -->
+
+<!-- Weekly Load Breakdown Modal -->
+    <div id="load-breakdown-modal" class="fixed inset-0 bg-black/50 hidden z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-4xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-purple-50 to-white">
+                <div>
+                    <h2 class="text-xl font-bold mit-purple serif">Weekly Load Breakdown</h2>
+                    <p class="text-xs text-gray-500">Detailed calculation of your teaching hours</p>
+                </div>
+                <button onclick="closeLoadBreakdownModal()" class="p-2 hover:bg-purple-100 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            </div>
+            <div class="flex-grow overflow-auto p-0">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-purple-50 text-gray-700 font-bold sticky top-0 z-10">
+                        <tr>
+                            <th class="p-4">Subject</th>
+                            <th class="p-4">Section</th>
+                            <th class="p-4">Session</th>
+                            <th class="p-4">Batch</th>
+                            <th class="p-4 text-center">L</th>
+                            <th class="p-4 text-center">T</th>
+                            <th class="p-4 text-center">P</th>
+                            <th class="p-4 text-right">Hours</th>
+                        </tr>
+                    </thead>
+                    <tbody id="load-breakdown-list" class="divide-y divide-gray-100">
+                        <tr><td colspan="8" class="p-8 text-center text-gray-400">Loading...</td></tr>
+                    </tbody>
+                    <tfoot class="bg-purple-100 font-bold sticky bottom-0">
+                        <tr>
+                            <td colspan="7" class="p-4 text-right">Total Weekly Hours:</td>
+                            <td class="p-4 text-right text-xl mit-purple" id="load-total-hours">--</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            <div class="p-4 bg-gray-50 border-t border-gray-200">
+                <p class="text-xs text-gray-500 flex items-center gap-2">
+                    <i data-lucide="info" class="w-4 h-4"></i>
+                    <span id="load-breakdown-note">Batched practicals (A/B/C) for same subject+section are counted once as they run in parallel.</span>
+                </p>
+            </div>
+        </div>
+    </div>
 
 <!-- History Modal (NEW) -->
     <div id="history-modal" class="fixed inset-0 bg-black/50 hidden z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
@@ -1160,6 +1204,63 @@
             lucide.createIcons();
         }
 
+
+        // --- NEW: WEEKLY LOAD BREAKDOWN MODAL ---
+        async function openLoadBreakdownModal() {
+            document.getElementById('load-breakdown-modal').classList.remove('hidden');
+            const list = document.getElementById('load-breakdown-list');
+            list.innerHTML = '<tr><td colspan="8" class="p-8 text-center text-gray-400">Loading...</td></tr>';
+
+            try {
+                const res = await fetch('/api/staff/load_breakdown');
+                const data = await res.json();
+
+                if (data.error) {
+                    list.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-red-500">${data.error}</td></tr>`;
+                    return;
+                }
+
+                if (data.breakdown.length === 0) {
+                    list.innerHTML = '<tr><td colspan="8" class="p-8 text-center text-gray-400">No subject allocations found.</td></tr>';
+                } else {
+                    list.innerHTML = data.breakdown.map(item => `
+                        <tr class="${item.is_duplicate ? 'bg-gray-50 text-gray-400' : 'hover:bg-purple-50/30'} transition-colors">
+                            <td class="p-4">
+                                <p class="font-semibold ${item.is_duplicate ? 'text-gray-400' : 'text-gray-800'}">${item.subject_code}</p>
+                                <p class="text-xs ${item.is_duplicate ? 'text-gray-400' : 'text-gray-500'}">${item.subject_name}</p>
+                            </td>
+                            <td class="p-4 text-sm font-medium">${item.section}</td>
+                            <td class="p-4">
+                                <span class="px-2 py-1 rounded text-xs font-bold ${
+                                    item.session_type === 'Lecture' ? 'bg-blue-100 text-blue-700' :
+                                    item.session_type === 'Tutorial' ? 'bg-green-100 text-green-700' :
+                                    'bg-orange-100 text-orange-700'
+                                }">${item.session_type}</span>
+                            </td>
+                            <td class="p-4 text-sm">${item.batch || '-'}</td>
+                            <td class="p-4 text-center text-sm">${item.l_count}</td>
+                            <td class="p-4 text-center text-sm">${item.t_count}</td>
+                            <td class="p-4 text-center text-sm">${item.p_count}</td>
+                            <td class="p-4 text-right font-bold ${item.is_duplicate ? 'text-gray-400 line-through' : 'mit-purple'}">
+                                ${item.is_duplicate ? `<span class="text-xs text-gray-400 block">duplicate</span>` : `+${item.hours_added}`}
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+
+                document.getElementById('load-total-hours').textContent = data.total_weekly_hours;
+                document.getElementById('load-breakdown-note').textContent = data.note;
+                lucide.createIcons();
+
+            } catch (err) {
+                console.error('Load breakdown error:', err);
+                list.innerHTML = '<tr><td colspan="8" class="p-8 text-center text-red-500">Failed to load breakdown</td></tr>';
+            }
+        }
+
+        function closeLoadBreakdownModal() {
+            document.getElementById('load-breakdown-modal').classList.add('hidden');
+        }
 
 
         // --- NEW: FULL HISTORY MODAL ---

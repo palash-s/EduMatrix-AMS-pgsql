@@ -51,14 +51,14 @@ services:
       - ams_network
 
   # 4. Cloudflare Quick Tunnel - Free public URL
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    restart: always
-    command: tunnel --url http://nginx:80
-    depends_on:
-      - nginx
-    networks:
-      - ams_network
+  # tunnel:
+  #   image: cloudflare/cloudflared:latest
+  #   restart: always
+  #   command: tunnel --url http://nginx:80
+  #   depends_on:
+  #     - nginx
+  #   networks:
+  #     - ams_network
 
 volumes:
   postgres_data:
