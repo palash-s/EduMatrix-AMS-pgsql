@@ -380,6 +380,13 @@ fun ParentDashboardContent(
             }
         }
 
+        // MDM/OE Cross-School Courses Section
+        if (data.mdmOeCourses.isNotEmpty()) {
+            item {
+                MDMCoursesSection(courses = data.mdmOeCourses)
+            }
+        }
+
         // Recent Activity Section
         if (data.events.isNotEmpty() || data.leaves.isNotEmpty()) {
             item {
@@ -1262,6 +1269,206 @@ fun CounselingLogModal(
             }
 
             Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+/**
+ * MDM/OE Cross-School Courses section for parent view.
+ */
+@Composable
+fun MDMCoursesSection(courses: List<MDMEnrolledCourse>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Public,
+                        contentDescription = null,
+                        tint = accentPurple(),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "CROSS-SCHOOL COURSES",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "MDM/Open Elective enrollments",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Surface(
+                    color = accentPurple().copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "${courses.size} Course${if (courses.size > 1) "s" else ""}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = accentPurple(),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            courses.forEach { course ->
+                MDMCourseCard(course = course)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Individual MDM/OE course card for parent view.
+ */
+@Composable
+fun MDMCourseCard(course: MDMEnrolledCourse) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = accentPurple().copy(alpha = 0.05f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                // Type and status badges
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(bottom = 4.dp)
+                ) {
+                    Surface(
+                        color = if (course.type == "MDM") accentPurple().copy(alpha = 0.15f) else StatusGreenLight,
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = course.type,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (course.type == "MDM") accentPurple() else StatusGreen,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Surface(
+                        color = if (course.status == "Confirmed") StatusGreenLight else StatusYellowLight,
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = course.status,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (course.status == "Confirmed") StatusGreen else StatusYellow,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                // Course name and code
+                Text(
+                    text = course.courseName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = course.courseCode,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Host school
+                course.hostSchoolName?.let { host ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Business,
+                            contentDescription = null,
+                            tint = accentPurple(),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = host,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = accentPurple()
+                        )
+                    }
+                }
+
+                // Credits
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Star,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "${course.credits} Credits",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // External marks/grade (if available)
+            if (course.externalMarks != null || course.externalGrade != null) {
+                Surface(
+                    color = StatusGreenLight,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "GRADE",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = course.externalGrade ?: course.externalMarks.toString(),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = StatusGreen
+                        )
+                    }
+                }
+            }
         }
     }
 }

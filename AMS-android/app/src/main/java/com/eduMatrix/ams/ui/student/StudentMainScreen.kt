@@ -29,6 +29,8 @@ object StudentNavRoutes {
     const val LEAVES = "student_leaves"
     const val FEEDBACK = "student_feedback"
     const val NOTIFICATIONS = "student_notifications"
+    const val ELECTIVES = "student_electives"
+    const val MDM = "student_mdm"
 }
 
 /**
@@ -127,6 +129,12 @@ fun StudentMainScreen(
                             restoreState = true
                         }
                     },
+                    onNavigateToElectives = {
+                        navController.navigate(StudentNavRoutes.ELECTIVES)
+                    },
+                    onNavigateToMDM = {
+                        navController.navigate(StudentNavRoutes.MDM)
+                    },
                     onLogout = onLogout
                 )
             }
@@ -157,6 +165,20 @@ fun StudentMainScreen(
             // Feedback
             composable(StudentNavRoutes.FEEDBACK) {
                 StudentFeedbackScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            // Electives
+            composable(StudentNavRoutes.ELECTIVES) {
+                StudentElectivesScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            // MDM / Open Elective
+            composable(StudentNavRoutes.MDM) {
+                StudentMDMScreen(
                     onBack = { navController.popBackStack() }
                 )
             }

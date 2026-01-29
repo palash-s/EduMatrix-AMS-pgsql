@@ -2561,6 +2561,25 @@ object ApiService {
                 )
             } else null
 
+            // Parse MDM/OE courses
+            val mdmOeCourses = json.getAsJsonArray("mdm_oe_courses")?.map { elem ->
+                val c = elem.asJsonObject
+                MDMEnrolledCourse(
+                    id = c.get("id").safeInt() ?: 0,
+                    courseCode = c.get("course_code").safeString() ?: "",
+                    courseName = c.get("course_name").safeString() ?: "",
+                    type = c.get("type").safeString() ?: "",
+                    credits = c.get("credits").safeInt() ?: 0,
+                    hostSchoolName = c.get("host_school_name").safeString(),
+                    schedulePattern = c.get("schedule_pattern").safeString(),
+                    status = c.get("status").safeString() ?: "",
+                    selectedAt = c.get("selected_at").safeString(),
+                    confirmedAt = c.get("confirmed_at").safeString(),
+                    externalMarks = c.get("external_marks").safeInt(),
+                    externalGrade = c.get("external_grade").safeString()
+                )
+            } ?: emptyList()
+
             return ParentDashboardData(
                 student = student,
                 stats = stats,
@@ -2572,7 +2591,8 @@ object ApiService {
                 leaves = leaves,
                 logs = logs,
                 results = results,
-                termGrant = termGrant
+                termGrant = termGrant,
+                mdmOeCourses = mdmOeCourses
             )
         }
     }
@@ -2724,6 +2744,389 @@ object ApiService {
             5 -> "May"; 6 -> "Jun"; 7 -> "Jul"; 8 -> "Aug"
             9 -> "Sep"; 10 -> "Oct"; 11 -> "Nov"; 12 -> "Dec"
             else -> ""
+        }
+    }
+
+    // ========================================
+    // ELECTIVE SELECTION APIs
+    // ========================================
+
+    /**
+     * Get open elective windows for a student.
+     * Returns windows with available options and current selection.
+     */
+    fun getElectiveWindows(baseUrl: String, accessToken: String, userId: String): ElectiveWindowsResponse {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/student/elective_windows?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load elective windows: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val windowsArr = json.getAsJsonArray("windows") ?: JsonArray()
+
+            val windows = windowsArr.map { elem ->
+                val w = elem.asJsonObject
+                val optionsArr = w.getAsJsonArray("options") ?: JsonArray()
+                val options = optionsArr.map { opt ->
+                    val o = opt.asJsonObject
+                    ElectiveOption(
+                        id = o.get("id").safeInt() ?: 0,
+                        name = o.get("name").safeString() ?: "",
+                        code = o.get("code").safeString() ?: ""
+                    )
+                }
+
+                ElectiveWindow(
+                    windowId = w.get("window_id").safeInt() ?: 0,
+                    targetSemesterNo = w.get("target_semester_no").safeInt() ?: 0,
+                    bucket = w.get("bucket").safeString() ?: "",
+                    status = w.get("status").safeString() ?: "",
+                    minBatchSize = w.get("min_batch_size").safeInt() ?: 12,
+                    selection = w.get("selection").safeInt(),
+                    options = options
+                )
+            }
+
+            return ElectiveWindowsResponse(windows)
+        }
+    }
+
+    /**
+     * Submit elective selection for a window.
+     */
+    fun submitElectiveSelection(
+        baseUrl: String,
+        accessToken: String,
+        userId: String,
+        windowId: Int,
+        subjectId: Int
+    ): String {
+        val payload = JsonObject().apply {
+            addProperty("user_id", userId)
+            addProperty("window_id", windowId)
+            addProperty("subject_id", subjectId)
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/student/submit_elective")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to submit selection: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            return json.get("message").safeString() ?: "Selection saved"
+        }
+    }
+
+    // ========================================
+    // MDM/OE (CROSS-SCHOOL) APIs
+    // ========================================
+
+    /**
+     * Get MDM/OE outbound windows for student.
+     * Returns windows with available courses and current selection.
+     */
+    fun getMDMWindows(baseUrl: String, accessToken: String): MDMWindowsResponse {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/student/mdm_outbound/windows")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load MDM windows: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val windowsArr = json.getAsJsonArray("windows") ?: JsonArray()
+
+            val windows = windowsArr.map { elem ->
+                val w = elem.asJsonObject
+
+                // Parse courses
+                val coursesArr = w.getAsJsonArray("courses") ?: JsonArray()
+                val courses = coursesArr.map { cElem ->
+                    val c = cElem.asJsonObject
+                    MDMCourse(
+                        id = c.get("id").safeInt() ?: 0,
+                        code = c.get("code").safeString() ?: "",
+                        name = c.get("name").safeString() ?: "",
+                        type = c.get("type").safeString() ?: "",
+                        credits = c.get("credits").safeInt() ?: 0,
+                        hostSchoolName = c.get("host_school_name").safeString(),
+                        schedulePattern = c.get("schedule_pattern").safeString(),
+                        description = c.get("description").safeString(),
+                        capacity = c.get("capacity").safeInt(),
+                        selections = c.get("selections").safeInt() ?: 0,
+                        available = c.get("available").safeInt()
+                    )
+                }
+
+                // Parse my_selection
+                val selElem = w.get("my_selection")
+                val mySelection = if (selElem != null && !selElem.isJsonNull && selElem.isJsonObject) {
+                    val s = selElem.asJsonObject
+                    MDMSelection(
+                        id = s.get("id").safeInt() ?: 0,
+                        poolId = s.get("pool_id").safeInt() ?: 0,
+                        status = s.get("status").safeString() ?: "",
+                        code = s.get("code").safeString(),
+                        name = s.get("name").safeString(),
+                        hostSchoolName = s.get("host_school_name").safeString()
+                    )
+                } else null
+
+                MDMWindow(
+                    id = w.get("id").safeInt() ?: 0,
+                    courseType = w.get("course_type").safeString() ?: "",
+                    status = w.get("status").safeString() ?: "",
+                    deadlineAt = w.get("deadline_at").safeString(),
+                    courses = courses,
+                    mySelection = mySelection
+                )
+            }
+
+            return MDMWindowsResponse(windows)
+        }
+    }
+
+    /**
+     * Select a MDM/OE course.
+     */
+    fun selectMDMCourse(
+        baseUrl: String,
+        accessToken: String,
+        windowId: Int,
+        poolId: Int
+    ): String {
+        val payload = JsonObject().apply {
+            addProperty("window_id", windowId)
+            addProperty("pool_id", poolId)
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/student/mdm_outbound/select")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to select course: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            return json.get("message").safeString() ?: "Course selected"
+        }
+    }
+
+    /**
+     * Get student's enrolled MDM/OE courses.
+     */
+    fun getMDMMyCourses(baseUrl: String, accessToken: String): MDMMyCoursesResponse {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/student/mdm_outbound/my_courses")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load enrolled courses: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val coursesArr = json.getAsJsonArray("courses") ?: JsonArray()
+
+            val courses = coursesArr.map { elem ->
+                val c = elem.asJsonObject
+                MDMEnrolledCourse(
+                    id = c.get("id").safeInt() ?: 0,
+                    courseCode = c.get("course_code").safeString() ?: "",
+                    courseName = c.get("course_name").safeString() ?: "",
+                    type = c.get("type").safeString() ?: "",
+                    credits = c.get("credits").safeInt() ?: 0,
+                    hostSchoolName = c.get("host_school_name").safeString(),
+                    schedulePattern = c.get("schedule_pattern").safeString(),
+                    status = c.get("status").safeString() ?: "",
+                    selectedAt = c.get("selected_at").safeString(),
+                    confirmedAt = c.get("confirmed_at").safeString(),
+                    externalMarks = c.get("external_marks").safeInt(),
+                    externalGrade = c.get("external_grade").safeString()
+                )
+            }
+
+            return MDMMyCoursesResponse(courses)
+        }
+    }
+
+    // ========================================
+    // HOD APIs
+    // ========================================
+
+    /**
+     * Get HOD dashboard with pending leave approvals.
+     */
+    fun getHodDashboard(baseUrl: String, accessToken: String, userId: String): HodDashboardResponse {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/hod/dashboard?user_id=$userId")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to load HOD dashboard: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+
+            // Parse stats
+            val statsJson = json.getAsJsonObject("stats")
+            val stats = HodStats(
+                students = statsJson.get("students").safeInt() ?: 0,
+                faculty = statsJson.get("faculty").safeInt() ?: 0,
+                attendance = statsJson.get("attendance").safeDouble() ?: 0.0,
+                pending = statsJson.get("pending").safeInt() ?: 0
+            )
+
+            // Parse faculty list
+            val facultyArr = json.getAsJsonArray("faculty_list") ?: JsonArray()
+            val facultyList = facultyArr.map { elem ->
+                val f = elem.asJsonObject
+                HodFacultyPerformance(
+                    name = f.get("name").safeString() ?: "",
+                    code = f.get("code").safeString() ?: "",
+                    load = f.get("load").safeInt() ?: 0,
+                    avgAtt = f.get("avg_att").safeDouble() ?: 0.0,
+                    isCritical = f.get("is_critical").safeBool() ?: false,
+                    missedToday = f.get("missed_today").safeInt() ?: 0,
+                    detentions = f.get("detentions").safeInt() ?: 0,
+                    roles = f.get("roles").safeString() ?: "",
+                    studentReach = f.get("student_reach").safeInt() ?: 0,
+                    riskSubject = f.get("risk_subject").safeString() ?: "",
+                    totalConducted = f.get("total_conducted").safeInt() ?: 0
+                )
+            }
+
+            // Parse approvals (pending leaves)
+            val approvalsArr = json.getAsJsonArray("approvals") ?: JsonArray()
+            val approvals = approvalsArr.map { elem ->
+                val a = elem.asJsonObject
+                HodLeaveApproval(
+                    leaveId = a.get("leave_id").safeInt() ?: 0,
+                    student = a.get("student").safeString() ?: "",
+                    roll = a.get("roll").safeString() ?: "",
+                    className = a.get("class").safeString() ?: "",
+                    days = a.get("days").safeDouble() ?: 0.0,
+                    reason = a.get("reason").safeString() ?: "",
+                    date = a.get("date").safeString() ?: ""
+                )
+            }
+
+            // Parse load adjustments
+            val adjustmentsArr = json.getAsJsonArray("load_adjustments") ?: JsonArray()
+            val loadAdjustments = adjustmentsArr.map { elem ->
+                val la = elem.asJsonObject
+
+                fun parseParty(key: String): AdjustmentParty {
+                    val p = la.getAsJsonObject(key) ?: JsonObject()
+                    return AdjustmentParty(
+                        id = p.get("id").safeString() ?: "",
+                        name = p.get("name").safeString() ?: "",
+                        code = p.get("code").safeString() ?: ""
+                    )
+                }
+
+                fun parseSlot(key: String): AdjustmentSlot {
+                    val s = la.getAsJsonObject(key) ?: JsonObject()
+                    return AdjustmentSlot(
+                        dateIso = s.get("date_iso").safeString(),
+                        dateDisplay = s.get("date_display").safeString(),
+                        day = s.get("day").safeString(),
+                        time = s.get("time").safeString(),
+                        subject = s.get("subject").safeString(),
+                        subjectCode = s.get("subject_code").safeString(),
+                        scheduleId = s.get("schedule_id").safeInt(),
+                        classDivision = s.get("class_division").safeString()
+                    )
+                }
+
+                HodLoadAdjustment(
+                    id = la.get("id").safeInt() ?: 0,
+                    status = la.get("status").safeString() ?: "",
+                    reason = la.get("reason").safeString(),
+                    createdAtDisplay = la.get("created_at_display").safeString(),
+                    classDivision = la.get("class_division").safeString() ?: "",
+                    requester = parseParty("requester"),
+                    adjuster = parseParty("adjuster"),
+                    requested = parseSlot("requested"),
+                    swap = parseSlot("swap")
+                )
+            }
+
+            return HodDashboardResponse(
+                deptName = json.get("dept_name").safeString() ?: "",
+                stats = stats,
+                facultyList = facultyList,
+                approvals = approvals,
+                loadAdjustments = loadAdjustments
+            )
+        }
+    }
+
+    /**
+     * Approve or reject a leave request as HOD.
+     */
+    fun hodApproveLeave(
+        baseUrl: String,
+        accessToken: String,
+        leaveId: Int,
+        action: String,  // "Approved" or "Rejected"
+        hodId: String,
+        remarks: String? = null
+    ): String {
+        val payload = JsonObject().apply {
+            addProperty("leave_id", leaveId)
+            addProperty("action", action)
+            addProperty("hod_id", hodId)
+            if (!remarks.isNullOrBlank()) {
+                addProperty("remarks", remarks)
+            }
+        }
+
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/api/hod/approve_leave")
+            .header("Authorization", "Bearer $accessToken")
+            .post(gson.toJson(payload).toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ApiException("Failed to process leave: ${parseError(body)}", response.code)
+            }
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            return json.get("message").safeString() ?: "Leave updated"
         }
     }
 
