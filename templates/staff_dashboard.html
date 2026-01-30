@@ -104,10 +104,19 @@
 
                 <!-- Upcoming (Fixed Height Scrollable) -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                    <button onclick="toggleUpcoming()" class="w-full flex justify-between p-5 hover:bg-gray-50 transition-colors group">
-                        <div class="flex items-center gap-3"><div class="p-2 bg-gray-100 rounded-lg group-hover:bg-purple-50"><i data-lucide="calendar-days" class="w-5 h-5 text-gray-500 group-hover:mit-purple"></i></div><h2 class="text-md font-semibold text-gray-700 group-hover:mit-purple">Upcoming Schedule</h2></div>
-                        <div class="flex items-center gap-3"><span id="upcoming-count" class="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-1 rounded-full">0</span><i id="upcoming-icon" data-lucide="chevron-down" class="w-5 h-5 text-gray-400 transition-transform duration-300"></i></div>
-                    </button>
+                    <div class="flex justify-between items-center p-5 border-b border-gray-50">
+                        <button onclick="toggleUpcoming()" class="flex-1 flex items-center gap-3 hover:opacity-80 transition-opacity group">
+                            <div class="p-2 bg-gray-100 rounded-lg group-hover:bg-purple-50">
+                                <i data-lucide="calendar-days" class="w-5 h-5 text-gray-500 group-hover:mit-purple"></i>
+                            </div>
+                            <h2 class="text-md font-semibold text-gray-700 group-hover:mit-purple">Upcoming Schedule</h2>
+                            <span id="upcoming-count" class="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-1 rounded-full">0</span>
+                            <i id="upcoming-icon" data-lucide="chevron-down" class="w-5 h-5 text-gray-400 transition-transform duration-300"></i>
+                        </button>
+                        <button onclick="openCalendarModal()" class="ml-3 px-3 py-1.5 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-1.5 shadow-sm">
+                            <i data-lucide="calendar" class="w-4 h-4"></i> View Calendar
+                        </button>
+                    </div>
                     <!-- UPDATED WRAPPER: Limits height to prevent layout shift -->
                     <div id="upcoming-wrapper" class="hidden border-t border-gray-100 bg-gray-50/30 p-2">
                         <div id="upcoming-days" class="flex flex-wrap gap-2 p-2"></div>
@@ -675,6 +684,86 @@
         </div>
     </div>
 
+    <!-- Calendar Schedule Modal -->
+    <div id="calendar-modal" class="hidden fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm">
+        <div class="bg-stone-50 rounded-2xl shadow-2xl w-full max-w-7xl max-h-[98vh] sm:max-h-[95vh] flex flex-col overflow-hidden relative">
+            <!-- Decorative background blobs -->
+            <div class="bg-purple-400 w-40 h-40 rounded-full absolute top-0 left-56 opacity-20 z-0 blur-3xl"></div>
+            <div class="bg-emerald-500 w-40 h-24 absolute top-0 left-0 opacity-20 z-0 blur-2xl"></div>
+            <div class="bg-sky-400 w-40 h-24 absolute top-40 left-0 opacity-20 z-0 blur-2xl"></div>
+
+            <!-- Modal Header -->
+            <div class="flex justify-between items-center p-4 sm:p-5 border-b bg-white/80 backdrop-blur-sm relative z-10 shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-purple-100 rounded-lg">
+                        <i data-lucide="calendar-days" class="w-5 h-5 sm:w-6 sm:h-6 text-purple-600"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-lg sm:text-xl text-gray-900">Schedule Calendar</h3>
+                        <p class="text-xs sm:text-sm text-gray-500">View your upcoming classes</p>
+                    </div>
+                </div>
+                <button onclick="closeCalendarModal()" class="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+                </button>
+            </div>
+
+            <!-- Modal Content - Scrollable -->
+            <div class="flex-1 overflow-y-auto p-4 sm:p-6 relative z-10 custom-scroll">
+                <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 sm:gap-6">
+
+                    <!-- Left Panel: Events List -->
+                    <div class="xl:col-span-4 flex flex-col order-2 xl:order-1">
+                        <div class="mb-3 sm:mb-4">
+                            <h2 class="font-semibold text-base sm:text-lg text-gray-900 mb-1">Upcoming Classes</h2>
+                            <p class="text-xs sm:text-sm text-gray-500">Don't miss your schedule</p>
+                        </div>
+                        <div id="calendar-events-list" class="space-y-3 sm:space-y-4 max-h-[40vh] xl:max-h-[60vh] overflow-y-auto pr-2 custom-scroll">
+                            <!-- Events will be rendered here -->
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Calendar Grid -->
+                    <div class="xl:col-span-8 bg-white rounded-2xl p-4 sm:p-6 shadow-sm flex flex-col order-1 xl:order-2">
+                        <div class="flex flex-row gap-2 sm:gap-4 items-center justify-between mb-4 sm:mb-5 shrink-0">
+                            <div class="flex items-center gap-2 sm:gap-4">
+                                <h5 id="calendar-month-title" class="text-base sm:text-xl font-semibold text-gray-900">January 2026</h5>
+                                <div class="flex items-center gap-0.5 sm:gap-1">
+                                    <button onclick="calendarPrevMonth()" class="text-purple-600 p-1.5 sm:p-2 rounded-lg transition-all duration-300 hover:text-white hover:bg-purple-600">
+                                        <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                                    </button>
+                                    <button onclick="calendarNextMonth()" class="text-purple-600 p-1.5 sm:p-2 rounded-lg transition-all duration-300 hover:text-white hover:bg-purple-600">
+                                        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <button onclick="calendarGoToToday()" class="py-1.5 sm:py-2 px-3 sm:px-4 rounded-lg bg-purple-600 text-white text-xs sm:text-sm font-medium transition-all duration-300 hover:bg-purple-700">
+                                Today
+                            </button>
+                        </div>
+
+                        <div class="border border-purple-200 rounded-xl overflow-hidden">
+                            <!-- Calendar Header - Sticky -->
+                            <div class="grid grid-cols-7 border-b border-purple-200 sticky top-0 z-10">
+                                <div class="py-2 sm:py-3 border-r border-purple-200 bg-purple-50 flex items-center justify-center text-xs sm:text-sm font-medium text-purple-600">Sun</div>
+                                <div class="py-2 sm:py-3 border-r border-purple-200 bg-purple-50 flex items-center justify-center text-xs sm:text-sm font-medium text-purple-600">Mon</div>
+                                <div class="py-2 sm:py-3 border-r border-purple-200 bg-purple-50 flex items-center justify-center text-xs sm:text-sm font-medium text-purple-600">Tue</div>
+                                <div class="py-2 sm:py-3 border-r border-purple-200 bg-purple-50 flex items-center justify-center text-xs sm:text-sm font-medium text-purple-600">Wed</div>
+                                <div class="py-2 sm:py-3 border-r border-purple-200 bg-purple-50 flex items-center justify-center text-xs sm:text-sm font-medium text-purple-600">Thu</div>
+                                <div class="py-2 sm:py-3 border-r border-purple-200 bg-purple-50 flex items-center justify-center text-xs sm:text-sm font-medium text-purple-600">Fri</div>
+                                <div class="py-2 sm:py-3 bg-purple-50 flex items-center justify-center text-xs sm:text-sm font-medium text-purple-600">Sat</div>
+                            </div>
+                            <!-- Calendar Body - Scrollable -->
+                            <div id="calendar-grid" class="grid grid-cols-7 max-h-[45vh] sm:max-h-[50vh] overflow-y-auto custom-scroll">
+                                <!-- Calendar days will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <img id="mit-logo-img" src="{{ url_for('static', filename='images/mit_logo.png') }}" style="display:none;" crossorigin="anonymous">
 
     <script>
@@ -720,8 +809,8 @@
             return amsFormatDateISO(d);
         }
 
-        function selectUpcomingDay(day) {
-            __amsUpcomingSelectedDay = day;
+        function selectUpcomingDay(dateISO) {
+            __amsUpcomingSelectedDay = dateISO;
             renderUpcomingDays();
             renderUpcomingSessions();
         }
@@ -730,35 +819,38 @@
             const daysWrap = document.getElementById('upcoming-days');
             if (!daysWrap) return;
 
-            const uniqueDays = [];
+            // Group by date_iso (exact date) instead of day name
+            const uniqueDates = [];
             const seen = new Set();
-            const dayToDateLabel = {};
+            const dateToMeta = {};
             for (const s of (__amsUpcomingSchedule || [])) {
-                const d = s && s.day ? String(s.day) : '';
-                if (!d || seen.has(d)) continue;
-                seen.add(d);
-                uniqueDays.push(d);
-                if (s && s.date_display) dayToDateLabel[d] = String(s.date_display);
+                const dateISO = s && s.date_iso ? String(s.date_iso) : '';
+                if (!dateISO || seen.has(dateISO)) continue;
+                seen.add(dateISO);
+                uniqueDates.push(dateISO);
+                dateToMeta[dateISO] = {
+                    day: s.day ? String(s.day).substring(0, 3) : '',
+                    display: s.date_display ? String(s.date_display) : ''
+                };
             }
 
-            if (uniqueDays.length === 0) {
+            if (uniqueDates.length === 0) {
                 daysWrap.innerHTML = '';
                 return;
             }
 
             if (!__amsUpcomingSelectedDay || !seen.has(__amsUpcomingSelectedDay)) {
-                __amsUpcomingSelectedDay = uniqueDays[0];
+                __amsUpcomingSelectedDay = uniqueDates[0];
             }
 
-            daysWrap.innerHTML = uniqueDays.map((d) => {
-                const isActive = d === __amsUpcomingSelectedDay;
+            daysWrap.innerHTML = uniqueDates.map((dateISO) => {
+                const isActive = dateISO === __amsUpcomingSelectedDay;
                 const base = 'px-3 py-1.5 rounded-full text-xs font-bold border transition-colors';
                 const active = 'bg-purple-600 text-white border-purple-600';
                 const inactive = 'bg-white text-gray-600 border-gray-200 hover:border-purple-200 hover:text-purple-700';
-                const dayShort = String(d).substring(0, 3);
-                const dateLabel = dayToDateLabel[d] ? ` ${dayToDateLabel[d]}` : '';
-                const label = `${dayShort}${dateLabel}`;
-                return `<button type="button" onclick="selectUpcomingDay('${String(d).replace(/'/g, "\\'")}')" class="${base} ${isActive ? active : inactive}">${label}</button>`;
+                const meta = dateToMeta[dateISO] || {};
+                const label = meta.display ? `${meta.day} ${meta.display}` : meta.day;
+                return `<button type="button" onclick="selectUpcomingDay('${dateISO}')" class="${base} ${isActive ? active : inactive}">${label}</button>`;
             }).join('');
         }
 
@@ -767,7 +859,8 @@
             if (!upList) return;
 
             const selected = __amsUpcomingSelectedDay;
-            const rows = (__amsUpcomingSchedule || []).filter((u) => (u && u.day) === selected);
+            // Filter by exact date_iso instead of day name
+            const rows = (__amsUpcomingSchedule || []).filter((u) => (u && u.date_iso) === selected);
 
             if (!rows.length) {
                 upList.innerHTML = `<p class="text-center text-gray-400 text-xs">No scheduled sessions for ${selected || 'this day'}.</p>`;
@@ -819,6 +912,246 @@
             }).join('');
             lucide.createIcons();
         }
+
+        // ======= CALENDAR MODAL FUNCTIONS =======
+        let __amsCalendarDate = new Date(); // Current viewing month/year
+
+        function openCalendarModal() {
+            document.getElementById('calendar-modal').classList.remove('hidden');
+            __amsCalendarDate = new Date(); // Reset to current month
+            renderCalendar();
+            lucide.createIcons();
+        }
+
+        function closeCalendarModal() {
+            document.getElementById('calendar-modal').classList.add('hidden');
+            amsMarkModalClosed();
+        }
+
+        function calendarPrevMonth() {
+            __amsCalendarDate.setMonth(__amsCalendarDate.getMonth() - 1);
+            renderCalendar();
+        }
+
+        function calendarNextMonth() {
+            __amsCalendarDate.setMonth(__amsCalendarDate.getMonth() + 1);
+            renderCalendar();
+        }
+
+        function calendarGoToToday() {
+            __amsCalendarDate = new Date();
+            renderCalendar();
+        }
+
+        function renderCalendar() {
+            renderCalendarGrid();
+            renderCalendarEvents();
+            lucide.createIcons();
+        }
+
+        function getSchedulesByDate() {
+            // Group upcoming schedule by date_iso
+            const byDate = {};
+            for (const s of (__amsUpcomingSchedule || [])) {
+                const dateISO = s && s.date_iso ? String(s.date_iso) : '';
+                if (!dateISO) continue;
+                if (!byDate[dateISO]) byDate[dateISO] = [];
+                byDate[dateISO].push(s);
+            }
+            return byDate;
+        }
+
+        function renderCalendarGrid() {
+            const grid = document.getElementById('calendar-grid');
+            const titleEl = document.getElementById('calendar-month-title');
+            if (!grid || !titleEl) return;
+
+            const year = __amsCalendarDate.getFullYear();
+            const month = __amsCalendarDate.getMonth();
+
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            titleEl.textContent = `${monthNames[month]} ${year}`;
+
+            // Get first day of month and total days
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const startDayOfWeek = firstDay.getDay(); // 0=Sun, 1=Mon...
+            const totalDays = lastDay.getDate();
+
+            // Get previous month's last days for padding
+            const prevMonthLastDay = new Date(year, month, 0).getDate();
+
+            // Get schedule data grouped by date
+            const schedulesByDate = getSchedulesByDate();
+            const today = new Date();
+            const todayISO = amsFormatDateISO(today);
+
+            // Color palette for events
+            const eventColors = [
+                { bg: 'bg-purple-50', text: 'text-purple-600', dot: 'bg-purple-600' },
+                { bg: 'bg-sky-50', text: 'text-sky-600', dot: 'bg-sky-600' },
+                { bg: 'bg-emerald-50', text: 'text-emerald-600', dot: 'bg-emerald-600' },
+                { bg: 'bg-amber-50', text: 'text-amber-600', dot: 'bg-amber-600' },
+                { bg: 'bg-rose-50', text: 'text-rose-600', dot: 'bg-rose-600' },
+            ];
+
+            let html = '';
+            let dayCounter = 1;
+            let nextMonthDay = 1;
+
+            // Total cells needed (6 rows * 7 days = 42)
+            for (let i = 0; i < 42; i++) {
+                let dayNum, isCurrentMonth, dateISO;
+
+                if (i < startDayOfWeek) {
+                    // Previous month days
+                    dayNum = prevMonthLastDay - startDayOfWeek + 1 + i;
+                    isCurrentMonth = false;
+                    const prevMonth = month === 0 ? 11 : month - 1;
+                    const prevYear = month === 0 ? year - 1 : year;
+                    dateISO = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                } else if (dayCounter <= totalDays) {
+                    // Current month days
+                    dayNum = dayCounter;
+                    isCurrentMonth = true;
+                    dateISO = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                    dayCounter++;
+                } else {
+                    // Next month days
+                    dayNum = nextMonthDay;
+                    isCurrentMonth = false;
+                    const nextMonth = month === 11 ? 0 : month + 1;
+                    const nextYear = month === 11 ? year + 1 : year;
+                    dateISO = `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                    nextMonthDay++;
+                }
+
+                const isToday = dateISO === todayISO;
+                const daySchedules = schedulesByDate[dateISO] || [];
+                const hasEvents = daySchedules.length > 0;
+
+                // Border classes for grid
+                const isLastCol = (i + 1) % 7 === 0;
+                const borderR = isLastCol ? '' : 'border-r';
+                const borderB = i < 35 ? 'border-b' : '';
+
+                // Background and text colors
+                const bgClass = isCurrentMonth ? 'bg-white' : 'bg-gray-50';
+                const textClass = isCurrentMonth ? (isToday ? 'text-white' : 'text-gray-900') : 'text-gray-400';
+
+                html += `
+                <div class="min-h-[50px] sm:min-h-[70px] xl:min-h-[80px] p-1.5 sm:p-2 ${bgClass} ${borderR} ${borderB} border-purple-200 transition-all duration-200 hover:bg-purple-50 cursor-pointer relative" onclick="selectCalendarDate('${dateISO}')">
+                    <span class="text-[10px] sm:text-xs font-semibold ${textClass} ${isToday ? 'w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center bg-purple-600' : ''}">${dayNum}</span>
+                    ${hasEvents ? renderCalendarDayEvents(daySchedules, eventColors) : ''}
+                </div>`;
+            }
+
+            grid.innerHTML = html;
+        }
+
+        function renderCalendarDayEvents(schedules, colors) {
+            // Show first event with details, rest as dots
+            if (schedules.length === 0) return '';
+
+            const first = schedules[0];
+            const colorIdx = Math.abs(hashString(first.subject || '')) % colors.length;
+            const color = colors[colorIdx];
+
+            const timeStart = (first.time || '').split(' - ')[0];
+            const subjectShort = (first.subject || '').substring(0, 10);
+
+            let html = `
+            <div class="absolute top-5 sm:top-7 left-0.5 sm:left-1 right-0.5 sm:right-1 p-0.5 sm:p-1 xl:px-2 rounded ${color.bg}">
+                <p class="hidden sm:block text-[8px] sm:text-[10px] font-medium ${color.text} truncate">${amsEscapeHtml(subjectShort)}</p>
+                <span class="hidden sm:block text-[8px] sm:text-[10px] font-normal ${color.text}">${timeStart}</span>
+                <div class="sm:hidden flex gap-0.5 items-center justify-center">
+                    <span class="w-1.5 h-1.5 rounded-full ${color.dot}"></span>
+                    ${schedules.length > 1 ? `<span class="text-[7px] ${color.text} font-bold">+${schedules.length - 1}</span>` : ''}
+                </div>
+            </div>`;
+
+            return html;
+        }
+
+        function hashString(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                hash |= 0;
+            }
+            return hash;
+        }
+
+        function selectCalendarDate(dateISO) {
+            // Scroll to and highlight the event in the events list
+            const eventEl = document.querySelector(`[data-calendar-date="${dateISO}"]`);
+            if (eventEl) {
+                eventEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                eventEl.classList.add('ring-2', 'ring-purple-400');
+                setTimeout(() => eventEl.classList.remove('ring-2', 'ring-purple-400'), 2000);
+            }
+        }
+
+        function renderCalendarEvents() {
+            const container = document.getElementById('calendar-events-list');
+            if (!container) return;
+
+            // Group by date
+            const byDate = getSchedulesByDate();
+            const sortedDates = Object.keys(byDate).sort();
+
+            if (sortedDates.length === 0) {
+                container.innerHTML = `<p class="text-center text-gray-400 py-8">No upcoming classes scheduled.</p>`;
+                return;
+            }
+
+            const eventColors = [
+                { border: 'border-l-purple-600', dot: 'bg-purple-600' },
+                { border: 'border-l-sky-400', dot: 'bg-sky-400' },
+                { border: 'border-l-emerald-500', dot: 'bg-emerald-500' },
+                { border: 'border-l-amber-500', dot: 'bg-amber-500' },
+                { border: 'border-l-rose-500', dot: 'bg-rose-500' },
+            ];
+
+            let html = '';
+            for (const dateISO of sortedDates) {
+                const schedules = byDate[dateISO];
+                for (const s of schedules) {
+                    const colorIdx = Math.abs(hashString(s.subject || '')) % eventColors.length;
+                    const color = eventColors[colorIdx];
+                    const timeDisplay = (s.time || '').toString();
+                    const dateDisplay = s.date_display || dateISO;
+                    const dayShort = (s.day || '').substring(0, 3);
+                    const isMDM = s.is_mdm_oe || false;
+                    const isExtra = s.is_extra_session || false;
+
+                    let badge = '';
+                    if (isMDM) {
+                        badge = `<span class="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">MDM/OE</span>`;
+                    } else if (isExtra) {
+                        badge = `<span class="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Extra</span>`;
+                    }
+
+                    html += `
+                    <div class="p-3 sm:p-4 rounded-lg sm:rounded-xl bg-white shadow-sm border-l-4 ${color.border} transition-all duration-200 hover:shadow-md" data-calendar-date="${dateISO}">
+                        <div class="flex items-center justify-between mb-1.5 sm:mb-2">
+                            <div class="flex items-center gap-1.5 sm:gap-2">
+                                <span class="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full ${color.dot}"></span>
+                                <p class="text-xs sm:text-sm font-medium text-gray-700">${dayShort}, ${dateDisplay} - ${timeDisplay}</p>
+                            </div>
+                        </div>
+                        <h6 class="text-sm sm:text-base font-semibold text-gray-900 mb-0.5 sm:mb-1">${amsEscapeHtml(s.subject || 'Class')}</h6>
+                        <div class="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                            <p class="text-xs sm:text-sm text-gray-500">${amsEscapeHtml(s.class || '')}</p>
+                            ${badge}
+                        </div>
+                    </div>`;
+                }
+            }
+
+            container.innerHTML = html;
+        }
+        // ======= END CALENDAR MODAL FUNCTIONS =======
 
         function shouldSkipAutoRefresh() {
             if (document.hidden) return true;

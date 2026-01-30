@@ -3667,7 +3667,7 @@ def api_v1_extra_sessions_create():
                     .filter(StudentElective.status == 'Approved')
                     .all())
     else:
-        students = StudentProfile.query.filter_by(current_section_id=section_id).all()
+        students = StudentProfile.query.filter_by(current_section_id=section_id).order_by(StudentProfile.admission_number).all()
 
     for student in students:
         send_notification(
@@ -3714,7 +3714,7 @@ def api_v1_extra_sessions_cancel(session_id):
                     .filter(StudentElective.status == 'Approved')
                     .all())
     else:
-        students = StudentProfile.query.filter_by(current_section_id=extra_session.section_id).all()
+        students = StudentProfile.query.filter_by(current_section_id=extra_session.section_id).order_by(StudentProfile.admission_number).all()
 
     for student in students:
         send_notification(
@@ -4679,25 +4679,29 @@ def api_staff_find_adjustment_faculty():
             for s in peer_section_slots:
                 if s.schedule_id == req_schedule_id:
                     continue
-                slot_day_idx = day_to_idx.get(s.day_of_week, 0)
-                delta = (slot_day_idx - req_day_idx) % 7
-                if delta == 0:
-                    delta = 7
-                slot_date = req_date + timedelta(days=delta)
 
                 # requester must be free at this swap slot time
                 if not requester_is_free(s.day_of_week, s.start_time, s.end_time):
                     continue
 
+                slot_day_idx = day_to_idx.get(s.day_of_week, 0)
                 subj = subject_map.get(s.subject_id)
-                slots_payload.append({
-                    'id': s.schedule_id,
-                    'day': s.day_of_week,
-                    'date_iso': slot_date.strftime('%Y-%m-%d'),
-                    'date_display': slot_date.strftime('%d %b'),
-                    'time': f"{s.start_time.strftime('%I:%M %p')} - {s.end_time.strftime('%I:%M %p')}",
-                    'subject': subj.name if subj else 'Subject',
-                })
+
+                # Generate dates for 3 weeks instead of just the next occurrence
+                for week_offset in range(3):
+                    delta = (slot_day_idx - req_day_idx) % 7
+                    if delta == 0:
+                        delta = 7
+                    slot_date = req_date + timedelta(days=delta + (week_offset * 7))
+
+                    slots_payload.append({
+                        'id': s.schedule_id,
+                        'day': s.day_of_week,
+                        'date_iso': slot_date.strftime('%Y-%m-%d'),
+                        'date_display': slot_date.strftime('%d %b'),
+                        'time': f"{s.start_time.strftime('%I:%M %p')} - {s.end_time.strftime('%I:%M %p')}",
+                        'subject': subj.name if subj else 'Subject',
+                    })
 
             if not slots_payload:
                 continue
@@ -5334,8 +5338,8 @@ def get_class_analytics():
         class_managed = ClassSection.query.filter_by(class_teacher_id=user_id).first()
         if not class_managed: return jsonify({"error": "No class assigned"}), 404
 
-        students = StudentProfile.query.filter_by(current_section_id=class_managed.section_id).all()
-        
+        students = StudentProfile.query.filter_by(current_section_id=class_managed.section_id).order_by(StudentProfile.admission_number).all()
+
         # Subject Analysis
         schedule_slots = WeeklySchedule.query.filter_by(section_id=class_managed.section_id).all()
         unique_subject_ids = set(slot.subject_id for slot in schedule_slots)
@@ -5708,8 +5712,8 @@ def get_attendance_sheet():
                     students = [{'external': True, 'obj': es} for es in external_students]
             else:
                 # Regular section with MDM subject
-                students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
-            
+                students = StudentProfile.query.filter_by(current_section_id=section.section_id).order_by(StudentProfile.admission_number).all()
+
             # Check existing session log for MDM (no schedule_id, use subject_id + section_id + date)
             existing_session = SessionLog.query.filter(
                 SessionLog.schedule_id.is_(None),
@@ -5752,7 +5756,7 @@ def get_attendance_sheet():
                             .order_by(StudentProfile.admission_number).all())
             else:
                 # Core subject = all students in section
-                students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
+                students = StudentProfile.query.filter_by(current_section_id=section.section_id).order_by(StudentProfile.admission_number).all()
 
             # Check existing session log for extra session
             existing_session = SessionLog.query.filter_by(extra_session_id=extra_session_id).first()
@@ -5806,10 +5810,10 @@ def get_attendance_sheet():
             elif slot.target_batch:
                 # Batch-specific (lab sessions)
                 target_batch_obj = find_mentor_batch(section.section_id, slot.target_batch)
-                if target_batch_obj: students = StudentProfile.query.filter_by(current_section_id=section.section_id, mentor_batch_id=target_batch_obj.batch_id).all()
+                if target_batch_obj: students = StudentProfile.query.filter_by(current_section_id=section.section_id, mentor_batch_id=target_batch_obj.batch_id).order_by(StudentProfile.admission_number).all()
             else:
                 # Core subject = all students in section
-                students = StudentProfile.query.filter_by(current_section_id=section.section_id).all()
+                students = StudentProfile.query.filter_by(current_section_id=section.section_id).order_by(StudentProfile.admission_number).all()
 
             # 2. Check Existing Session (Locked State)
             existing_session = SessionLog.query.filter_by(schedule_id=schedule_id, session_date=target_date).first()
@@ -5923,8 +5927,8 @@ def get_attendance_sheet():
                     "status_label": status_label # Hint for UI
                 })
         
-        student_list.sort(key=lambda x: x['name'])
-        
+        student_list.sort(key=lambda x: x['roll_no'])
+
         # Check if MDM/OE subject
         is_mdm_oe = getattr(subject, 'is_mdm_oe', False) or False
 
@@ -6346,7 +6350,7 @@ def create_extra_session():
                     type='info'
                 )
         else:
-            students = StudentProfile.query.filter_by(current_section_id=section_id).all()
+            students = StudentProfile.query.filter_by(current_section_id=section_id).order_by(StudentProfile.admission_number).all()
             for student in students:
                 send_notification(
                     student.student_id,
@@ -6432,7 +6436,7 @@ def cancel_extra_session(session_id):
                         .filter(StudentElective.status == 'Approved')
                         .all())
         else:
-            students = StudentProfile.query.filter_by(current_section_id=extra_session.section_id).all()
+            students = StudentProfile.query.filter_by(current_section_id=extra_session.section_id).order_by(StudentProfile.admission_number).all()
 
         for student in students:
             send_notification(
@@ -7181,7 +7185,7 @@ def get_defaulter_watchlist():
             # SAFETY VALVE: If less than 4 lectures done this month, don't calculate defaulters yet.
             if len(conducted_sessions_data) < 4: continue
 
-            students_in_class = StudentProfile.query.filter_by(current_section_id=section_id).all()
+            students_in_class = StudentProfile.query.filter_by(current_section_id=section_id).order_by(StudentProfile.admission_number).all()
 
             for student in students_in_class:
                 student_id = student.student_id
@@ -11049,6 +11053,164 @@ def api_manage_elective_window_enrollment():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/admin/elective_windows/<int:window_id>/upload_students', methods=['POST'])
+@login_required
+@require_roles('Admin')
+@limiter.limit(RATE_LIMIT_BULK)
+def upload_students_to_elective_window(window_id):
+    """
+    Bulk upload students to electives in a specific window.
+
+    CSV Format: admission_number OR student_id, subject_code
+    - Skips students who already have a selection in this window
+    - Creates StudentElective with status='Approved'
+    """
+    try:
+        window = ElectiveWindow.query.get_or_404(window_id)
+
+        if window.status == 'Closed':
+            return jsonify({"error": "Window is closed. Cannot upload to a closed window."}), 400
+
+        # Get valid offerings for this window
+        valid_offerings = {
+            o.subject_id: o
+            for o in ElectiveOffering.query.filter_by(
+                window_id=window_id
+            ).filter(ElectiveOffering.status.in_(['Open', 'Extension'])).all()
+        }
+
+        if not valid_offerings:
+            return jsonify({"error": "No active offerings in this window"}), 400
+
+        # Parse CSV
+        file = request.files.get('file')
+        if not file:
+            return jsonify({"error": "No file uploaded"}), 400
+
+        content = file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(content))
+
+        created = 0
+        skipped = {"already_selected": 0, "student_not_found": 0, "subject_not_in_window": 0}
+        errors = []
+
+        for idx, row in enumerate(reader):
+            try:
+                # Find student (support both identifiers)
+                student = None
+                admission_number = row.get('admission_number', '').strip()
+                student_id = row.get('student_id', '').strip()
+
+                if admission_number:
+                    student = StudentProfile.query.filter_by(
+                        admission_number=admission_number
+                    ).first()
+                elif student_id:
+                    student = StudentProfile.query.get(student_id)
+
+                if not student:
+                    skipped["student_not_found"] += 1
+                    errors.append(f"Row {idx + 2}: Student not found - {admission_number or student_id}")
+                    continue
+
+                # Find subject
+                subject_code = row.get('subject_code', '').strip()
+                subject = Subject.query.filter_by(code=subject_code).first()
+
+                if not subject or subject.subject_id not in valid_offerings:
+                    skipped["subject_not_in_window"] += 1
+                    errors.append(f"Row {idx + 2}: Subject '{subject_code}' not offered in this window")
+                    continue
+
+                # Check if already has selection in this window
+                existing = StudentElective.query.filter_by(
+                    student_id=student.student_id,
+                    window_id=window_id
+                ).first()
+
+                if existing:
+                    skipped["already_selected"] += 1
+                    continue
+
+                # Create approved selection
+                se = StudentElective(
+                    student_id=student.student_id,
+                    subject_id=subject.subject_id,
+                    window_id=window_id,
+                    status='Approved'
+                )
+                db.session.add(se)
+                created += 1
+
+            except Exception as row_err:
+                errors.append(f"Row {idx + 2}: {str(row_err)}")
+
+        db.session.commit()
+
+        # Audit log
+        audit = ElectiveAuditLog(
+            action_type='BULK_UPLOAD',
+            window_id=window_id,
+            details=f"Uploaded {created} students to electives",
+            performed_by_id=current_user.user_id
+        )
+        db.session.add(audit)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Upload complete",
+            "created": created,
+            "skipped": sum(skipped.values()),
+            "skipped_reasons": skipped,
+            "errors": errors[:10]
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/elective_windows/<int:window_id>/upload_template', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def download_elective_upload_template(window_id):
+    """Download CSV template for student upload with valid subject codes for this window."""
+    try:
+        window = ElectiveWindow.query.get_or_404(window_id)
+
+        # Get offerings for this window
+        offerings = db.session.query(ElectiveOffering, Subject).join(
+            Subject, ElectiveOffering.subject_id == Subject.subject_id
+        ).filter(
+            ElectiveOffering.window_id == window_id,
+            ElectiveOffering.status.in_(['Open', 'Extension'])
+        ).all()
+
+        # Build template content with example rows
+        lines = ["admission_number,subject_code"]
+        lines.append("# Valid subject codes for this window:")
+        for off, subj in offerings:
+            lines.append(f"# {subj.code} - {subj.name}")
+        lines.append("")
+        lines.append("# Example rows (delete these and add your data):")
+        if offerings:
+            lines.append(f"2024001234,{offerings[0][1].code}")
+            lines.append(f"2024001235,{offerings[0][1].code}")
+
+        content = "\n".join(lines)
+
+        return Response(
+            content,
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename=elective_upload_window_{window_id}.csv'}
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ==========================================
 # API: SIMPLIFIED ELECTIVE ROLLOUT (NEW)
 # ==========================================
@@ -11797,9 +11959,9 @@ def api_elective_rollout_bulk_close():
 def _finalize_single_window(window):
     """Helper to finalize a single window with auto-balance."""
     min_batch = int(window.min_batch_size or 12)
-    
+
     # Get students and selections
-    section_students = StudentProfile.query.filter_by(current_section_id=window.section_id).all()
+    section_students = StudentProfile.query.filter_by(current_section_id=window.section_id).order_by(StudentProfile.admission_number).all()
     student_ids = [s.student_id for s in section_students]
     
     selections = (StudentElective.query
@@ -11904,7 +12066,7 @@ def api_elective_rollout_send_reminders():
                 continue
             
             # Get students who haven't selected
-            all_students = StudentProfile.query.filter_by(current_section_id=window.section_id).all()
+            all_students = StudentProfile.query.filter_by(current_section_id=window.section_id).order_by(StudentProfile.admission_number).all()
             selected_ids = set(
                 r[0] for r in db.session.query(StudentElective.student_id)
                 .filter_by(window_id=window.id).all()
@@ -12122,7 +12284,7 @@ def get_student_directory():
             q = (db.session.query(StudentProfile, ClassSection)
                  .outerjoin(ClassSection, StudentProfile.current_section_id == ClassSection.section_id))
 
-        results = q.order_by(ClassSection.class_level, ClassSection.name, StudentProfile.full_name).all()
+        results = q.order_by(ClassSection.class_level, ClassSection.name, StudentProfile.admission_number).all()
         directory = {}
         for student, section in results:
             lvl = section.class_level if section else "Unassigned"
@@ -12240,9 +12402,8 @@ def assign_mentors():
             for s in students: s.mentor_batch_id = None
             db.session.delete(b)
         
-        # 2. Get Students & Sort
-        students = StudentProfile.query.filter_by(current_section_id=section_id).all()
-        students.sort(key=lambda x: x.admission_number) # Deterministic Sort
+        # 2. Get Students (sorted by admission number)
+        students = StudentProfile.query.filter_by(current_section_id=section_id).order_by(StudentProfile.admission_number).all()
         total_students = len(students)
         
         if total_students == 0: return jsonify({"error": "No students in class"}), 400
@@ -12375,9 +12536,7 @@ def auto_split_batches():
             for s in students: s.mentor_batch_id = None
             db.session.delete(b)
         
-        students = StudentProfile.query.filter_by(current_section_id=section_id).all()
-        # Sort Ascending by Admission/Roll
-        students.sort(key=lambda x: x.admission_number)
+        students = StudentProfile.query.filter_by(current_section_id=section_id).order_by(StudentProfile.admission_number).all()
         total = len(students)
 
         if total == 0: return jsonify({"error": "No students in class"}), 400
@@ -13499,7 +13658,7 @@ def _notify_timetable_change(section_id, version_id):
     section_name = f"{section.class_level} - {section.name}"
 
     # Notify all students in the section
-    students = StudentProfile.query.filter_by(current_section_id=section_id).all()
+    students = StudentProfile.query.filter_by(current_section_id=section_id).order_by(StudentProfile.admission_number).all()
     for student in students:
         send_notification(
             student.student_id,
@@ -15393,7 +15552,7 @@ def get_meeting_details():
         section = ClassSection.query.get(batch.section_id) if batch else None
 
         # Get all students in batch with attendance status
-        students = StudentProfile.query.filter_by(mentor_batch_id=meeting.batch_id).all()
+        students = StudentProfile.query.filter_by(mentor_batch_id=meeting.batch_id).order_by(StudentProfile.admission_number).all()
         attendance_map = {
             a.student_id: a for a in
             MeetingAttendance.query.filter_by(meeting_id=meeting_id).all()
@@ -16993,10 +17152,10 @@ def generate_term_grant():
         
         # 1. Clear old records for this class (Re-calculation)
         TermGrantRecord.query.filter_by(section_id=section_id).delete()
-        
+
         # 2. Fetch all students
-        students = StudentProfile.query.filter_by(current_section_id=section_id).all()
-        
+        students = StudentProfile.query.filter_by(current_section_id=section_id).order_by(StudentProfile.admission_number).all()
+
         # 3. Fetch all subjects for this class (for Marks check)
         allocations = SubjectAllocation.query.filter_by(section_id=section_id).all()
         subject_ids = [a.subject_id for a in allocations]
@@ -19510,8 +19669,8 @@ def api_mdm_report_outbound():
         if course_type:
             query = query.filter(MDMOfferingPool.type == course_type)
         
-        selections = query.order_by(MDMOfferingPool.code, StudentProfile.full_name).all()
-        
+        selections = query.order_by(MDMOfferingPool.code, StudentProfile.admission_number).all()
+
         # Group by course
         courses_map = {}
         for sel, student, course in selections:
