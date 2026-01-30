@@ -1,0 +1,371 @@
+Day,Start Time,End Time,Subject Code,Course Name,Employee Code,Class Level,Section Name,Session Type,Batch,Room Number
+MONDAY,08:45,10:35,23IT2002,Computer Network Lab,1020381,SY,DA,Practical,A,S-609
+MONDAY,10:50,11:45,23IT2005,Operating System,1020446,SY,DA,Lecture,,N-609
+MONDAY,11:45,12:40,23IT1107,Statistical Programming and Analysis,1020447,SY,DA,Lecture,,N-607
+MONDAY,11:45,12:40,23IT1106,Data Visualisation(Elective-I),1020709,SY,DA,Lecture,,N-605
+MONDAY,13:40,14:35,?,SCIL,-,SY,DA,Lecture,,
+MONDAY,14:35,15:30,23IT2004,Software Engineering,1020748,SY,DA,Lecture,,N-609
+MONDAY,15:40,16:30,?,Project Meeting,-,SY,DA,Lecture,,
+MONDAY,08:45,10:35,23IT2008,Web Programming,1020750,SY,DA,Practical,B,S-611
+MONDAY,10:50,11:45,23IT2005,Operating System,1020446,SY,DA,Lecture,,N-609
+MONDAY,11:45,12:40,23IT1107,Statistical Programming and Analysis,1020447,SY,DA,Lecture,,N-607
+MONDAY,11:45,12:40,23IT1106,Data Visualisation(Elective-I),1020709,SY,DA,Lecture,,N-605
+MONDAY,13:40,14:35,?,SCIL,-,SY,DA,Lecture,,
+MONDAY,14:35,15:30,23IT2004,Software Engineering,1020748,SY,DA,Lecture,,N-609
+MONDAY,15:40,16:30,?,Project Meeting,-,SY,DA,Lecture,,
+MONDAY,08:45,10:35,24IT1105,Android Application Development,1020022,SY,SMAD,Practical,,S-604
+MONDAY,10:50,11:45,23IT2004,Software Engineering,1020748,SY,SMAD,Lecture,,S-601
+MONDAY,11:45,12:40,23IT2002,Computer Network,1020381,SY,SMAD,Lecture,,S-601
+MONDAY,13:40,14:35,?,SCIL,-,SY,SMAD,Lecture,,
+MONDAY,14:35,15:30,23IT2005,Operating System,1020446,SY,SMAD,Lecture,,S-601
+MONDAY,15:40,16:30,?,Project Meeting,-,SY,SMAD,Lecture,,
+MONDAY,08:45,09:40,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+MONDAY,09:40,10:35,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-609
+MONDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+MONDAY,11:45,12:40,23IT3300,DevOps Engineering,1020356,TY,CORE,Lecture,,S-610
+MONDAY,13:40,15:30,23IT3300,DevOps Engineering Lab,1020356,TY,CORE,Practical,A,S-610
+MONDAY,15:40,16:30,?,Mentor Meeting,-,TY,CORE,Lecture,,
+MONDAY,08:45,09:40,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+MONDAY,09:40,10:35,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-609
+MONDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+MONDAY,11:45,12:40,23IT3300,DevOps Engineering,1020356,TY,CORE,Lecture,,S-610
+MONDAY,13:40,15:30,23IT3303,Foundation of Artificial Intelligence- Laboratory,1020493,TY,CORE,Practical,B,S-610
+MONDAY,15:40,16:30,?,Mentor Meeting,-,TY,CORE,Lecture,,
+MONDAY,08:45,09:40,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+MONDAY,09:40,10:35,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-609
+MONDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+MONDAY,11:45,12:40,23IT3300,DevOps Engineering,1020356,TY,CORE,Lecture,,S-610
+MONDAY,13:40,15:30,?,Library Slot,-,TY,CORE,Lecture,,
+MONDAY,15:40,16:30,?,Mentor Meeting,-,TY,CORE,Lecture,,
+MONDAY,08:45,10:35,23IT3300,DevOps Engineering,1020316,TY,DA,Lecture,,S-611
+MONDAY,10:50,12:40,23IT3304,Information Storage & Management Lab,1020808,TY,DA,Practical,A,S-610
+MONDAY,13:40,14:35,23IT3304,Information Storage & Management,1020808,TY,DA,Lecture,,N-605
+MONDAY,13:40,14:35,23IT3309,Soft Computing,1020312,TY,DA,Lecture,,N-607
+MONDAY,14:35,15:30,23IT1108,User Experience Design Lab,1020737,TY,DA,Practical,A,N-605
+MONDAY,14:35,15:30,23IT3307,Natural Language Processing,1020447,TY,DA,Lecture,,N-607
+MONDAY,15:40,16:30,?,Mentor Meeting,-,TY,DA,Lecture,,
+MONDAY,08:45,10:35,23IT3300,DevOps Engineering,1020316,TY,DA,Lecture,,S-611
+MONDAY,10:50,12:40,23IT3304,Information Storage & Management Lab,1020808,TY,DA,Practical,B,S-610
+MONDAY,13:40,14:35,23IT3304,Information Storage & Management,1020808,TY,DA,Lecture,,N-605
+MONDAY,13:40,14:35,23IT3309,Soft Computing,1020312,TY,DA,Lecture,,N-607
+MONDAY,14:35,15:30,23IT1108,User Experience Design Lab,1020737,TY,DA,Practical,B,N-605
+MONDAY,14:35,15:30,23IT3307,Natural Language Processing,1020447,TY,DA,Lecture,,N-607
+MONDAY,15:40,16:30,?,Mentor Meeting,-,TY,DA,Lecture,,
+MONDAY,08:45,10:35,23IT3300,DevOps Engineering,1020356,TY,SMAD,Lecture,,S-610
+MONDAY,10:50,11:45,23IT1108,User Experience Design Lab,1020737,TY,SMAD,Practical,,S-601
+MONDAY,11:45,12:40,23IT3311,Automation Testing,1020755,TY,SMAD,Lecture,,S-601
+MONDAY,13:40,15:30,23IT3305,Full Stack Back-End Development,1020022,TY,SMAD,Lecture,,S-601
+MONDAY,15:40,16:30,?,Mentor Meeting,-,TY,SMAD,Lecture,,
+MONDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+MONDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+MONDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+MONDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+MONDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+MONDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+MONDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+MONDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+MONDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+MONDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+MONDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+MONDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+MONDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+MONDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+MONDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+MONDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+MONDAY,08:45,10:35,?,PP-II,-,LY,SMAD,Lecture,,
+MONDAY,10:50,12:40,?,PP-II,-,LY,SMAD,Lecture,,
+MONDAY,13:40,15:30,?,PP-II,-,LY,SMAD,Lecture,,
+MONDAY,15:40,16:30,?,PP-II,-,LY,SMAD,Lecture,,
+TUESDAY,08:45,09:40,23IT2005,Operating System,1020446,SY,DA,Lecture,,N-605
+TUESDAY,09:40,10:35,23IT2002,Computer Network,1020022,SY,DA,Lecture,,N-605
+TUESDAY,10:50,11:45,23IT2004,Software Engineering,1020748,SY,DA,Lecture,,N-605
+TUESDAY,11:45,12:40,23IT1107,Statistical Programming and Analysis,1020447,SY,DA,Lecture,,N-607
+TUESDAY,11:45,12:40,23IT1106,Data Visualisation(Elective-I),1020709,SY,DA,Lecture,,N-605
+TUESDAY,13:40,15:30,23IT2008,Web Programming,1020316,SY,DA,Practical,A,S-614
+TUESDAY,15:40,16:30,?,Mentor Meeting,-,SY,DA,Lecture,,
+TUESDAY,08:45,09:40,23IT2005,Operating System,1020446,SY,DA,Lecture,,N-605
+TUESDAY,09:40,10:35,23IT2002,Computer Network,1020022,SY,DA,Lecture,,N-605
+TUESDAY,10:50,11:45,23IT2004,Software Engineering,1020748,SY,DA,Lecture,,N-605
+TUESDAY,11:45,12:40,23IT1107,Statistical Programming and Analysis,1020447,SY,DA,Lecture,,N-607
+TUESDAY,11:45,12:40,23IT1106,Data Visualisation(Elective-I),1020709,SY,DA,Lecture,,N-605
+TUESDAY,13:40,15:30,23IT2008,Web Programming,1020750,SY,DA,Practical,B,S-611
+TUESDAY,15:40,16:30,?,Mentor Meeting,-,SY,DA,Lecture,,
+TUESDAY,08:45,09:40,23IT2002,Computer Network,1020381,SY,SMAD,Lecture,,S-601
+TUESDAY,09:40,10:35,23IT2004,Software Engineering,1020748,SY,SMAD,Lecture,,S-601
+TUESDAY,10:50,12:40,23IT2008,Web Programming,1020737,SY,SMAD,Practical,,S-614
+TUESDAY,13:40,14:35,23IT2005,Operating System,1020446,SY,SMAD,Lecture,,S-601
+TUESDAY,14:35,15:30,23IT2002,Computer Network,1020381,SY,SMAD,Lecture,,S-601
+TUESDAY,15:40,16:30,?,Mentor Meeting,-,SY,SMAD,Lecture,,
+TUESDAY,08:45,09:40,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-609
+TUESDAY,09:40,10:35,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+TUESDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+TUESDAY,11:45,12:40,?,Library Slot,-,TY,CORE,Lecture,,
+TUESDAY,13:40,15:30,?,SCIL,-,TY,CORE,Lecture,,N-605
+TUESDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+TUESDAY,08:45,09:40,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-609
+TUESDAY,09:40,10:35,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+TUESDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+TUESDAY,11:45,12:40,?,Library Slot,-,TY,CORE,Lecture,,
+TUESDAY,13:40,15:30,?,SCIL,-,TY,CORE,Lecture,,N-605
+TUESDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+TUESDAY,08:45,09:40,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-609
+TUESDAY,09:40,10:35,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+TUESDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+TUESDAY,11:45,12:40,?,Library Slot,-,TY,CORE,Lecture,,
+TUESDAY,13:40,15:30,?,SCIL,-,TY,CORE,Lecture,,N-605
+TUESDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+TUESDAY,08:45,09:40,23IT1108,User Experience Design Lab,1020737,TY,DA,Practical,A,N-611
+TUESDAY,08:45,09:40,23IT3307,Natural Language Processing,1020447,TY,DA,Lecture,,N-607
+TUESDAY,09:40,10:35,23IT3304,Information Storage & Management,1020808,TY,DA,Lecture,,N-611
+TUESDAY,09:40,10:35,23IT3309,Soft Computing,1020312,TY,DA,Lecture,,N-607
+TUESDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020381,TY,DA,Lecture,,S-611
+TUESDAY,11:45,12:40,23IT3300,DevOps Engineering,1020316,TY,DA,Lecture,,S-611
+TUESDAY,13:40,15:30,?,SCIL,-,TY,DA,Lecture,,N-605
+TUESDAY,15:40,16:30,?,Project Meeting,-,TY,DA,Lecture,,
+TUESDAY,08:45,09:40,23IT1108,User Experience Design Lab,1020737,TY,DA,Practical,B,N-611
+TUESDAY,08:45,09:40,23IT3307,Natural Language Processing,1020447,TY,DA,Lecture,,N-607
+TUESDAY,09:40,10:35,23IT3304,Information Storage & Management,1020808,TY,DA,Lecture,,N-611
+TUESDAY,09:40,10:35,23IT3309,Soft Computing,1020312,TY,DA,Lecture,,N-607
+TUESDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020381,TY,DA,Lecture,,S-611
+TUESDAY,11:45,12:40,23IT3300,DevOps Engineering,1020316,TY,DA,Lecture,,S-611
+TUESDAY,13:40,15:30,?,SCIL,-,TY,DA,Lecture,,N-605
+TUESDAY,15:40,16:30,?,Project Meeting,-,TY,DA,Lecture,,
+TUESDAY,08:45,10:35,23IT3300,DevOps Engineering Lab,1020356,TY,SMAD,Practical,,S-610
+TUESDAY,10:50,11:45,23IT3311,Automation Testing,1020755,TY,SMAD,Lecture,,S-610
+TUESDAY,11:45,12:40,23IT3300,DevOps Engineering,1020356,TY,SMAD,Lecture,,S-610
+TUESDAY,13:40,15:30,?,SCIL,-,TY,SMAD,Lecture,,N-605
+TUESDAY,15:40,16:30,?,Project Meeting,-,TY,SMAD,Lecture,,
+TUESDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+TUESDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+TUESDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+TUESDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+TUESDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+TUESDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+TUESDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+TUESDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+TUESDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+TUESDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+TUESDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+TUESDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+TUESDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+TUESDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+TUESDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+TUESDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+TUESDAY,08:45,10:35,?,PP-II,-,LY,SMAD,Lecture,,
+TUESDAY,10:50,12:40,?,PP-II,-,LY,SMAD,Lecture,,
+TUESDAY,13:40,15:30,?,PP-II,-,LY,SMAD,Lecture,,
+TUESDAY,15:40,16:30,?,PP-II,-,LY,SMAD,Lecture,,
+WEDNESDAY,08:45,09:40,23IT2004,Software Engineering,1020748,SY,DA,Lecture,,N-605
+WEDNESDAY,09:40,10:35,23IT1107,Statistical Programming and Analysis,1020447,SY,DA,Lecture,,N-609
+WEDNESDAY,09:40,10:35,23IT1106,Data Visualisation(Elective-I),1020709,SY,DA,Lecture,,N-605
+WEDNESDAY,10:50,12:40,23IT2008,Web Programming,1020316,SY,DA,Practical,A,S-614
+WEDNESDAY,13:40,15:30,?,Open Elective,-,SY,DA,Lecture,,
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,SY,DA,Lecture,,
+WEDNESDAY,08:45,09:40,23IT2004,Software Engineering,1020748,SY,DA,Lecture,,N-605
+WEDNESDAY,09:40,10:35,23IT1107,Statistical Programming and Analysis,1020447,SY,DA,Lecture,,N-609
+WEDNESDAY,09:40,10:35,23IT1106,Data Visualisation(Elective-I),1020709,SY,DA,Lecture,,N-605
+WEDNESDAY,10:50,12:40,23IT2002,Computer Network Lab,1020381,SY,DA,Practical,B,S-609
+WEDNESDAY,13:40,15:30,?,Open Elective,-,SY,DA,Lecture,,
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,SY,DA,Lecture,,
+WEDNESDAY,08:45,10:35,24IT1105,Android Application Development,1020022,SY,SMAD,Practical,,S-604
+WEDNESDAY,10:50,11:45,23IT2004,Software Engineering,1020748,SY,SMAD,Lecture,,S-601
+WEDNESDAY,11:45,12:40,23IT2005,Operating System,1020446,SY,SMAD,Lecture,,S-601
+WEDNESDAY,13:40,15:30,?,Open Elective,-,SY,SMAD,Lecture,,
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,SY,SMAD,Lecture,,
+WEDNESDAY,08:45,10:35,23IT3300,DevOps Engineering,1020356,TY,CORE,Lecture,,S-610
+WEDNESDAY,10:50,12:40,23IT3311,Automation Testing Lab,1020755,TY,CORE,Practical,A,N-613
+WEDNESDAY,13:40,15:30,?,Library Slot,-,TY,CORE,Lecture,,
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+WEDNESDAY,08:45,10:35,23IT3300,DevOps Engineering,1020356,TY,CORE,Lecture,,S-610
+WEDNESDAY,10:50,12:40,23IT3317,Application Security Lab,1020487,TY,CORE,Practical,B,N-611
+WEDNESDAY,13:40,15:30,?,Library Slot,-,TY,CORE,Lecture,,
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+WEDNESDAY,08:45,10:35,23IT3300,DevOps Engineering,1020356,TY,CORE,Lecture,,S-610
+WEDNESDAY,10:50,12:40,23IT3300,DevOps Engineering Lab,1020356,TY,CORE,Practical,C,S-610
+WEDNESDAY,13:40,15:30,23IT3303,Foundation of Artificial Intelligence- Laboratory,1020493,TY,CORE,Practical,C,S-610
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+WEDNESDAY,08:45,09:40,23IT3304,Information Storage & Management,1020808,TY,DA,Lecture,,N-609
+WEDNESDAY,08:45,09:40,23IT3309,Soft Computing,1020312,TY,DA,Lecture,,N-607
+WEDNESDAY,09:40,10:35,23IT3302,Foundation of Artificial Intelligence,1020381,TY,DA,Lecture,,N-607
+WEDNESDAY,10:50,11:45,23IT1108,User Experience Design Lab,1020737,TY,DA,Practical,A,N-605
+WEDNESDAY,10:50,11:45,23IT3307,Natural Language Processing,1020447,TY,DA,Lecture,,S-607
+WEDNESDAY,11:45,12:40,?,Library Slot,-,TY,DA,Lecture,,
+WEDNESDAY,13:40,15:30,?,Library Slot,-,TY,DA,Lecture,,
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,TY,DA,Lecture,,
+WEDNESDAY,08:45,09:40,23IT3304,Information Storage & Management,1020808,TY,DA,Lecture,,N-609
+WEDNESDAY,08:45,09:40,23IT3309,Soft Computing,1020312,TY,DA,Lecture,,N-607
+WEDNESDAY,09:40,10:35,23IT3302,Foundation of Artificial Intelligence,1020381,TY,DA,Lecture,,N-607
+WEDNESDAY,10:50,11:45,23IT1108,User Experience Design Lab,1020737,TY,DA,Practical,B,N-605
+WEDNESDAY,10:50,11:45,23IT3307,Natural Language Processing,1020447,TY,DA,Lecture,,S-607
+WEDNESDAY,11:45,12:40,?,Library Slot,-,TY,DA,Lecture,,
+WEDNESDAY,13:40,15:30,?,Library Slot,-,TY,DA,Lecture,,
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,TY,DA,Lecture,,
+WEDNESDAY,08:45,09:40,23IT1108,User Experience Design Lab,1020737,TY,SMAD,Practical,,S-601
+WEDNESDAY,09:40,10:35,23IT3311,Automation Testing,1020755,TY,SMAD,Lecture,,S-601
+WEDNESDAY,10:50,12:40,23IT3305,Full Stack Back-End Development Lab,1020022,TY,SMAD,Practical,,S-611
+WEDNESDAY,13:40,15:30,?,Library Slot,-,TY,SMAD,Lecture,,
+WEDNESDAY,15:40,16:30,?,Project Meeting,-,TY,SMAD,Lecture,,
+WEDNESDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+WEDNESDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+WEDNESDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+WEDNESDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+WEDNESDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+WEDNESDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+WEDNESDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+WEDNESDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+WEDNESDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+WEDNESDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+WEDNESDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+WEDNESDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+WEDNESDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+WEDNESDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+WEDNESDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+WEDNESDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+WEDNESDAY,08:45,10:35,?,PP-II,-,LY,SMAD,Lecture,,
+WEDNESDAY,10:50,12:40,?,PP-II,-,LY,SMAD,Lecture,,
+WEDNESDAY,13:40,15:30,?,PP-II,-,LY,SMAD,Lecture,,
+WEDNESDAY,15:40,16:30,?,PP-II,-,LY,SMAD,Lecture,,
+THURSDAY,08:45,09:40,23IT1107,Statistical Programming and Analysis,1020447,SY,DA,Lecture,,N-609
+THURSDAY,08:45,09:40,23IT1106,Data Visualisation(Elective-I),1020709,SY,DA,Lecture,,N-605
+THURSDAY,09:40,10:35,23IT2002,Computer Network,1020022,SY,DA,Lecture,,N-609
+THURSDAY,10:50,11:45,23IT2005,Operating System,1020446,SY,DA,Lecture,,N-609
+THURSDAY,11:45,12:40,23IT2002,Computer Network,1020022,SY,DA,Lecture,,N-609
+THURSDAY,13:40,14:35,?,SCIL,-,SY,DA,Lecture,,
+THURSDAY,14:35,15:30,?,Library Slot,-,SY,DA,Lecture,,
+THURSDAY,15:40,16:30,?,Project Meeting,-,SY,DA,Lecture,,
+THURSDAY,08:45,09:40,23IT1107,Statistical Programming and Analysis,1020447,SY,DA,Lecture,,N-609
+THURSDAY,08:45,09:40,23IT1106,Data Visualisation(Elective-I),1020709,SY,DA,Lecture,,N-605
+THURSDAY,09:40,10:35,23IT2002,Computer Network,1020022,SY,DA,Lecture,,N-609
+THURSDAY,10:50,11:45,23IT2005,Operating System,1020446,SY,DA,Lecture,,N-609
+THURSDAY,11:45,12:40,23IT2002,Computer Network,1020022,SY,DA,Lecture,,N-609
+THURSDAY,13:40,14:35,?,SCIL,-,SY,DA,Lecture,,
+THURSDAY,14:35,15:30,?,Library Slot,-,SY,DA,Lecture,,
+THURSDAY,15:40,16:30,?,Project Meeting,-,SY,DA,Lecture,,
+THURSDAY,08:45,09:40,23IT2005,Operating System,1020446,SY,SMAD,Lecture,,S-601
+THURSDAY,09:40,10:35,23IT2004,Software Engineering,1020748,SY,SMAD,Lecture,,S-601
+THURSDAY,10:50,12:40,23IT2002,Computer Network Lab,1020381,SY,SMAD,Practical,,S-609
+THURSDAY,13:40,14:35,?,SCIL,-,SY,SMAD,Lecture,,
+THURSDAY,14:35,15:30,?,Library Slot,-,SY,SMAD,Lecture,,
+THURSDAY,15:40,16:30,?,Project Meeting,-,SY,SMAD,Lecture,,
+THURSDAY,08:45,09:40,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-605
+THURSDAY,09:40,10:35,?,SCIL,-,TY,CORE,Lecture,,N-605
+THURSDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-605
+THURSDAY,11:45,12:40,?,Library Slot,-,TY,CORE,Lecture,,
+THURSDAY,13:40,15:30,23IT3317,Application Security Lab,1020487,TY,CORE,Practical,A,N-611
+THURSDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+THURSDAY,08:45,09:40,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-605
+THURSDAY,09:40,10:35,?,SCIL,-,TY,CORE,Lecture,,N-605
+THURSDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-605
+THURSDAY,11:45,12:40,?,Library Slot,-,TY,CORE,Lecture,,
+THURSDAY,13:40,15:30,23IT3300,DevOps Engineering Lab,1020356,TY,CORE,Practical,B,S-610
+THURSDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+THURSDAY,08:45,09:40,23IT3317,Application Security,1020487,TY,CORE,Lecture,,N-605
+THURSDAY,09:40,10:35,?,SCIL,-,TY,CORE,Lecture,,N-605
+THURSDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-605
+THURSDAY,11:45,12:40,?,Library Slot,-,TY,CORE,Lecture,,
+THURSDAY,13:40,15:30,23IT3311,Automation Testing Lab,1020755,TY,CORE,Practical,C,N-613
+THURSDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+THURSDAY,08:45,09:40,23IT3302,Foundation of Artificial Intelligence,1020381,TY,DA,Lecture,,N-607
+THURSDAY,09:40,10:35,?,SCIL,-,TY,DA,Lecture,,N-607
+THURSDAY,10:50,11:45,23IT1108,User Experience Design Lab,1020737,TY,DA,Practical,A,N-611
+THURSDAY,10:50,11:45,23IT3307,Natural Language Processing Lab,1020447,TY,DA,Practical,A,S-610
+THURSDAY,11:45,12:40,23IT3307,Natural Language Processing Lab,1020447,TY,DA,Practical,A,S-610
+THURSDAY,13:40,15:30,23IT3303,Foundation of Artificial Intelligence- Laboratory,1020447,TY,DA,Practical,A,S-609
+THURSDAY,15:40,16:30,?,Project Meeting,-,TY,DA,Lecture,,
+THURSDAY,08:45,09:40,23IT3302,Foundation of Artificial Intelligence,1020381,TY,DA,Lecture,,N-607
+THURSDAY,09:40,10:35,?,SCIL,-,TY,DA,Lecture,,N-607
+THURSDAY,10:50,11:45,23IT1108,User Experience Design Lab,1020737,TY,DA,Practical,B,N-611
+THURSDAY,10:50,11:45,23IT3307,Natural Language Processing Lab,1020447,TY,DA,Practical,B,S-610
+THURSDAY,11:45,12:40,23IT3307,Natural Language Processing Lab,1020447,TY,DA,Practical,B,S-610
+THURSDAY,13:40,15:30,23IT3300,DevOps Engineering Lab,1020316,TY,DA,Practical,B,S-611
+THURSDAY,15:40,16:30,?,Project Meeting,-,TY,DA,Lecture,,
+THURSDAY,08:45,09:40,23IT1108,User Experience Design Lab,1020737,TY,SMAD,Practical,,S-601
+THURSDAY,09:40,10:35,?,SCIL,-,TY,SMAD,Lecture,,N-607
+THURSDAY,10:50,12:40,23IT3311,Automation Testing Lab,1020755,TY,SMAD,Practical,,N-613
+THURSDAY,13:40,14:35,23IT3305,Full Stack Back-End Development,1020022,TY,SMAD,Lecture,,S-601
+THURSDAY,14:35,15:30,?,Library Slot,-,TY,SMAD,Lecture,,
+THURSDAY,15:40,16:30,?,Project Meeting,-,TY,SMAD,Lecture,,
+THURSDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+THURSDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+THURSDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+THURSDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+THURSDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+THURSDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+THURSDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+THURSDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+THURSDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+THURSDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+THURSDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+THURSDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+THURSDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+THURSDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+THURSDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+THURSDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+THURSDAY,08:45,10:35,?,PP-II,-,LY,SMAD,Lecture,,
+THURSDAY,10:50,12:40,?,PP-II,-,LY,SMAD,Lecture,,
+THURSDAY,13:40,15:30,?,PP-II,-,LY,SMAD,Lecture,,
+THURSDAY,15:40,16:30,?,PP-II,-,LY,SMAD,Lecture,,
+FRIDAY,08:45,10:35,23MIE5001,Entrepreneurship,TEMP123,SY,DA,Lecture,,N-609
+FRIDAY,10:50,11:45,23IT2004,Software Engineering,1020748,SY,DA,Lecture,,N-609
+FRIDAY,11:45,12:40,23IT2005,Operating System,1020446,SY,DA,Lecture,,N 609
+FRIDAY,13:40,15:30,?,Aptitude & Professional Skills,-,SY,DA,Lecture,,
+FRIDAY,15:40,16:30,?,Project Meeting,-,SY,DA,Lecture,,
+FRIDAY,08:45,10:35,23MIE5001,Entrepreneurship,TEMP123,SY,DA,Lecture,,N-609
+FRIDAY,10:50,11:45,23IT2004,Software Engineering,1020748,SY,DA,Lecture,,N-609
+FRIDAY,11:45,12:40,23IT2005,Operating System,1020446,SY,DA,Lecture,,N 609
+FRIDAY,13:40,15:30,?,Aptitude & Professional Skills,-,SY,DA,Lecture,,
+FRIDAY,15:40,16:30,?,Project Meeting,-,SY,DA,Lecture,,
+FRIDAY,08:45,10:35,23MIE5001,Entrepreneurship,TEMP123,SY,SMAD,Lecture,,N-609
+FRIDAY,10:50,12:40,23IT2008,Web Programming,1020737,SY,SMAD,Practical,,S-614
+FRIDAY,13:40,15:30,?,Aptitude & Professional Skills,-,SY,SMAD,Lecture,,
+FRIDAY,15:40,16:30,?,Project Meeting,-,SY,SMAD,Lecture,,
+FRIDAY,08:45,10:35,23IT3303,Foundation of Artificial Intelligence- Laboratory,1020493,TY,CORE,Practical,A,S-610
+FRIDAY,10:50,11:45,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+FRIDAY,11:45,12:40,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+FRIDAY,13:40,15:30,?,Foreign Language,-,TY,CORE,Lecture,,N-607
+FRIDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+FRIDAY,08:45,10:35,23IT3311,Automation Testing Lab,1020755,TY,CORE,Practical,B,N-613
+FRIDAY,10:50,11:45,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+FRIDAY,11:45,12:40,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+FRIDAY,13:40,15:30,?,Foreign Language,-,TY,CORE,Lecture,,N-607
+FRIDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+FRIDAY,08:45,10:35,23IT3317,Application Security Lab,1020487,TY,CORE,Practical,C,N-611
+FRIDAY,10:50,11:45,23IT3311,Automation Testing,1020755,TY,CORE,Lecture,,N-609
+FRIDAY,11:45,12:40,23IT3302,Foundation of Artificial Intelligence,1020493,TY,CORE,Lecture,,N-609
+FRIDAY,13:40,15:30,?,Foreign Language,-,TY,CORE,Lecture,,N-607
+FRIDAY,15:40,16:30,?,Project Meeting,-,TY,CORE,Lecture,,
+FRIDAY,08:45,10:35,23IT3300,DevOps Engineering Lab,1020316,TY,DA,Practical,A,S-611
+FRIDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020381,TY,DA,Lecture,,N-607
+FRIDAY,11:45,12:40,?,Library Slot,-,TY,DA,Lecture,,
+FRIDAY,13:40,15:30,?,Foreign Language,-,TY,DA,Lecture,,N-607
+FRIDAY,15:40,16:30,?,Project Meeting,-,TY,DA,Lecture,,
+FRIDAY,08:45,10:35,23IT3303,Foundation of Artificial Intelligence- Laboratory,1020447,TY,DA,Practical,B,S-609
+FRIDAY,10:50,11:45,23IT3302,Foundation of Artificial Intelligence,1020381,TY,DA,Lecture,,N-607
+FRIDAY,11:45,12:40,?,Library Slot,-,TY,DA,Lecture,,
+FRIDAY,13:40,15:30,?,Foreign Language,-,TY,DA,Lecture,,N-607
+FRIDAY,15:40,16:30,?,Project Meeting,-,TY,DA,Lecture,,
+FRIDAY,08:45,09:40,23IT1108,User Experience Design Lab,1020737,TY,SMAD,Practical,,S-601
+FRIDAY,09:40,10:35,?,Library Slot,-,TY,SMAD,Lecture,,
+FRIDAY,10:50,12:40,23IT3305,Full Stack Back-End Development Lab,1020022,TY,SMAD,Practical,,S-611
+FRIDAY,13:40,15:30,?,Foreign Language,-,TY,SMAD,Lecture,,N-607
+FRIDAY,15:40,16:30,?,Project Meeting,-,TY,SMAD,Lecture,,
+FRIDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+FRIDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+FRIDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+FRIDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+FRIDAY,08:45,10:35,?,PP-II,-,LY,CORE,Lecture,,
+FRIDAY,10:50,12:40,?,PP-II,-,LY,CORE,Lecture,,
+FRIDAY,13:40,15:30,?,PP-II,-,LY,CORE,Lecture,,
+FRIDAY,15:40,16:30,?,PP-II,-,LY,CORE,Lecture,,
+FRIDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+FRIDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+FRIDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+FRIDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+FRIDAY,08:45,10:35,?,PP-II,-,LY,DA,Lecture,,
+FRIDAY,10:50,12:40,?,PP-II,-,LY,DA,Lecture,,
+FRIDAY,13:40,15:30,?,PP-II,-,LY,DA,Lecture,,
+FRIDAY,15:40,16:30,?,PP-II,-,LY,DA,Lecture,,
+FRIDAY,08:45,10:35,?,PP-II,-,LY,SMAD,Lecture,,
+FRIDAY,10:50,12:40,?,PP-II,-,LY,SMAD,Lecture,,
+FRIDAY,13:40,15:30,?,PP-II,-,LY,SMAD,Lecture,,
+FRIDAY,15:40,16:30,?,PP-II,-,LY,SMAD,Lecture,,

@@ -2,13 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Elective Management - MIT ADT</title>
+    <title>Elective Rollout - MIT ADT</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Merriweather:wght@700&display=swap');
         body { font-family: 'Inter', sans-serif; }
         .mit-purple { color: #48166d; } .bg-mit-purple { background-color: #48166d; }
+        .progress-ring { transition: stroke-dashoffset 0.5s ease-out; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800">
@@ -16,42 +17,108 @@
     <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-sm">
         <div class="flex items-center gap-4">
             <button onclick="window.location.href='/admin/dashboard'" class="p-2 hover:bg-gray-100 rounded-full"><i data-lucide="arrow-left" class="w-5 h-5 text-gray-600"></i></button>
-            <h1 class="text-xl font-bold text-gray-900 mit-purple" style="font-family: 'Merriweather', serif;">Elective Management</h1>
+            <h1 class="text-xl font-bold text-gray-900 mit-purple" style="font-family: 'Merriweather', serif;">Elective Rollout</h1>
         </div>
         <div class="flex gap-3">
-                <!-- Setup Dropdown remains for creating NEW configurations -->
-            <div>
-                <select id="class-select" onchange="onClassSelectionChanged()" class="p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white w-48">
-                    <option value="">-- Setup New Class --</option>
-                </select>
-                <div id="class-sem-hint" class="mt-1 text-[10px] text-gray-500 font-bold">Current Semester: -- • Suggested Target: --</div>
-            </div>
-            <button onclick="openSetupModal()" class="px-4 py-2 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-black flex items-center gap-2">
-                <i data-lucide="settings-2" class="w-4 h-4"></i> Setup Choices
+            <button onclick="openPoolUpload()" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2">
+                <i data-lucide="upload" class="w-4 h-4"></i> Upload Electives
+            </button>
+            <button onclick="openRolloutWizard()" class="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-sm font-bold rounded-lg hover:from-purple-700 hover:to-indigo-700 flex items-center gap-2 shadow-md">
+                <i data-lucide="rocket" class="w-4 h-4"></i> Start New Rollout
+            </button>
+            <button onclick="loadTemplates()" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-bold rounded-lg hover:bg-gray-50 flex items-center gap-2">
+                <i data-lucide="file-text" class="w-4 h-4"></i> Templates
             </button>
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        <!-- LEFT: Live Status (Accordion) -->
-        <div class="lg:col-span-1 space-y-4 h-[85vh] overflow-y-auto pr-2">
-            <div class="flex justify-between items-end mb-2">
-                <h2 class="text-sm font-bold text-gray-500 uppercase">Live Dashboard</h2>
-                <button onclick="loadLiveDashboard()" class="text-xs text-purple-600 hover:underline"><i data-lucide="refresh-cw" class="w-3 h-3 inline"></i> Refresh</button>
+    <main class="max-w-7xl mx-auto p-6">
+        <!-- Stats Bar -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-xl border border-gray-200 p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-bold text-gray-400 uppercase">Active Rollouts</p>
+                        <p class="text-2xl font-bold text-gray-900" id="stat-active-rollouts">-</p>
+                    </div>
+                    <div class="p-3 bg-purple-50 rounded-lg"><i data-lucide="layers" class="w-6 h-6 text-purple-600"></i></div>
+                </div>
             </div>
-            <div id="live-dashboard-list" class="space-y-4">
-                <div class="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">Loading live data...</div>
+            <div class="bg-white rounded-xl border border-gray-200 p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-bold text-gray-400 uppercase">Total Students</p>
+                        <p class="text-2xl font-bold text-gray-900" id="stat-total-students">-</p>
+                    </div>
+                    <div class="p-3 bg-blue-50 rounded-lg"><i data-lucide="users" class="w-6 h-6 text-blue-600"></i></div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl border border-gray-200 p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-bold text-gray-400 uppercase">Selected</p>
+                        <p class="text-2xl font-bold text-green-600" id="stat-selected">-</p>
+                    </div>
+                    <div class="p-3 bg-green-50 rounded-lg"><i data-lucide="check-circle" class="w-6 h-6 text-green-600"></i></div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl border border-gray-200 p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-bold text-gray-400 uppercase">Pending</p>
+                        <p class="text-2xl font-bold text-orange-600" id="stat-pending">-</p>
+                    </div>
+                    <div class="p-3 bg-orange-50 rounded-lg"><i data-lucide="clock" class="w-6 h-6 text-orange-600"></i></div>
+                </div>
             </div>
         </div>
 
-        <!-- RIGHT: Student Management -->
-        <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col h-[85vh] hidden" id="detail-panel">
-            <div class="p-6 border-b border-gray-100">
-                <div class="flex justify-between items-start mb-4">
+        <!-- Active Rollouts Dashboard -->
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h2 class="font-bold text-gray-800 flex items-center gap-2">
+                    <i data-lucide="activity" class="w-5 h-5 text-purple-600"></i> Active Rollouts
+                </h2>
+                <button onclick="loadDashboard()" class="text-xs text-purple-600 hover:underline flex items-center gap-1">
+                    <i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh
+                </button>
+            </div>
+            <div id="rollouts-container" class="p-4">
+                <div class="text-center py-12 text-gray-400">
+                    <i data-lucide="loader" class="w-8 h-8 mx-auto mb-3 animate-spin"></i>
+                    <p class="text-sm">Loading rollouts...</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ROLLOUT WIZARD MODAL -->
+    <div id="wizard-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+            <!-- Wizard Header -->
+            <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-indigo-50">
+                <div class="flex justify-between items-start">
                     <div>
-                        <h2 class="text-xl font-bold text-gray-900" id="detail-title">...</h2>
-                        <p class="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded inline-block mt-1" id="detail-type">...</p>
+                        <h2 class="text-xl font-bold mit-purple" style="font-family: 'Merriweather', serif;">Start Elective Rollout</h2>
+                        <p class="text-xs text-gray-500 mt-1">Launch elective selections for multiple sections at once</p>
+                    </div>
+                    <button onclick="closeWizard()" class="p-2 hover:bg-white rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-400"></i></button>
+                </div>
+                <!-- Progress Steps -->
+                <div class="flex items-center gap-2 mt-4">
+                    <div id="step-1-indicator" class="flex items-center gap-2">
+                        <div class="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-bold">1</div>
+                        <span class="text-xs font-bold text-purple-600">Select Sections</span>
+                    </div>
+                    <div class="flex-1 h-0.5 bg-gray-200 mx-2"></div>
+                    <div id="step-2-indicator" class="flex items-center gap-2 opacity-40">
+                        <div class="w-8 h-8 rounded-full bg-gray-300 text-white flex items-center justify-center text-sm font-bold">2</div>
+                        <span class="text-xs font-bold text-gray-400">Configure</span>
+                    </div>
+                    <div class="flex-1 h-0.5 bg-gray-200 mx-2"></div>
+                    <div id="step-3-indicator" class="flex items-center gap-2 opacity-40">
+                        <div class="w-8 h-8 rounded-full bg-gray-300 text-white flex items-center justify-center text-sm font-bold">3</div>
+                        <span class="text-xs font-bold text-gray-400">Launch</span>
                     </div>
                     <div class="flex gap-2 items-center">
                         <button onclick="openUploadModal()" class="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 flex items-center gap-1.5 shadow-sm">
@@ -62,17 +129,154 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
 
-                <div class="flex gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200" id="move-controls">
-                    <span class="text-xs font-bold text-gray-500 self-center w-20">Move To:</span>
-                    <select id="target-subject" class="flex-1 p-2 border rounded text-xs bg-white"><option>Select Target Subject...</option></select>
-                    <button onclick="performAction('Move')" class="bg-mit-purple text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-[#350f50]">Move</button>
+    <!-- TEMPLATES MODAL -->
+    <div id="templates-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-gray-200 flex justify-between items-center">
+                <h2 class="font-bold text-gray-800">Saved Templates</h2>
+                <button onclick="document.getElementById('templates-modal').classList.add('hidden')" class="p-2 hover:bg-gray-100 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-400"></i></button>
+            </div>
+            <div id="templates-list" class="flex-1 overflow-y-auto p-4">
+                <p class="text-center text-gray-400 py-8">Loading templates...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ELECTIVE POOL UPLOAD MODAL -->
+    <div id="pool-upload-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50">
+                <div>
+                    <h2 class="font-bold text-gray-800">Upload Elective Subjects</h2>
+                    <p class="text-xs text-gray-500 mt-1">Upload electives for rollout (independent of course structure)</p>
+                </div>
+                <button onclick="closePoolUpload()" class="p-2 hover:bg-white rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-400"></i></button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-6">
+                <!-- Info Banner -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <div class="flex gap-3">
+                        <i data-lucide="info" class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5"></i>
+                        <div class="text-sm text-blue-800">
+                            <p class="font-bold mb-1">Why Upload Electives Separately?</p>
+                            <ul class="list-disc list-inside text-xs space-y-1 text-blue-700">
+                                <li>Roll out electives <strong>before</strong> full course structure is ready</li>
+                                <li>Students can select electives during current semester for next semester</li>
+                                <li>Upload full course structure later (after results) - it will merge automatically</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Configuration -->
+                <div class="grid grid-cols-3 gap-4 mb-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Class Level</label>
+                        <select id="pool-class-level" class="w-full p-3 border border-gray-300 rounded-lg bg-white font-bold">
+                            <option value="">-- Select --</option>
+                            <option value="FY">FY</option>
+                            <option value="SY">SY</option>
+                            <option value="TY">TY</option>
+                            <option value="LY">LY</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Target Semester</label>
+                        <select id="pool-target-sem" class="w-full p-3 border border-gray-300 rounded-lg bg-white font-bold">
+                            <option value="">-- Select --</option>
+                            <option value="1">Semester 1</option>
+                            <option value="2">Semester 2</option>
+                            <option value="3">Semester 3</option>
+                            <option value="4">Semester 4</option>
+                            <option value="5">Semester 5</option>
+                            <option value="6">Semester 6</option>
+                            <option value="7">Semester 7</option>
+                            <option value="8">Semester 8</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Academic Year</label>
+                        <input type="text" id="pool-academic-year" class="w-full p-3 border border-gray-300 rounded-lg font-bold" placeholder="e.g., 2025-26">
+                    </div>
+                </div>
+                
+                <!-- CSV Upload -->
+                <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center mb-4 hover:border-purple-400 transition-colors" id="pool-drop-zone">
+                    <i data-lucide="upload-cloud" class="w-10 h-10 mx-auto text-gray-400 mb-3"></i>
+                    <p class="text-sm font-bold text-gray-700 mb-1">Drop CSV file here or click to browse</p>
+                    <p class="text-xs text-gray-500">Format: subject_code, subject_name, bucket, credits, ltp</p>
+                    <input type="file" id="pool-file-input" accept=".csv" class="hidden" onchange="handlePoolFile(this)">
+                    <button onclick="document.getElementById('pool-file-input').click()" class="mt-3 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-200">
+                        Choose File
+                    </button>
+                </div>
+                
+                <!-- Preview -->
+                <div id="pool-preview" class="hidden">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-bold text-gray-500 uppercase">Preview (<span id="pool-preview-count">0</span> subjects)</span>
+                        <button onclick="clearPoolPreview()" class="text-xs text-red-600 hover:underline">Clear</button>
+                    </div>
+                    <div id="pool-preview-list" class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50"></div>
+                </div>
+                
+                <!-- Sample Format & Download -->
+                <div class="mt-4 flex items-center justify-between">
+                    <details>
+                        <summary class="text-xs font-bold text-purple-600 cursor-pointer hover:underline">View Sample CSV Format</summary>
+                        <pre class="mt-2 p-3 bg-gray-900 text-green-400 rounded-lg text-xs overflow-x-auto">subject_code,subject_name,bucket,credits,ltp
+CS401E1,Machine Learning,Elective-I,3,3-0-0
+CS401E2,Cloud Computing,Elective-I,3,3-0-0
+CS401OE1,Data Analytics,Open Elective,3,3-0-0</pre>
+                    </details>
+                    <a href="/api/admin/elective_rollout/pool/template" download class="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-bold hover:bg-green-100 flex items-center gap-1">
+                        <i data-lucide="download" class="w-3 h-3"></i> Download Template
+                    </a>
                 </div>
             </div>
             
-            <div class="flex-grow overflow-y-auto p-0">
+            <div class="p-4 border-t border-gray-200 bg-gray-50 flex justify-between">
+                <button onclick="viewCurrentPool()" class="px-4 py-2 text-purple-600 hover:bg-purple-50 rounded-lg font-medium text-sm">
+                    <i data-lucide="eye" class="w-4 h-4 inline mr-1"></i> View Current Pool
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closePoolUpload()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancel</button>
+                    <button onclick="submitPoolUpload()" class="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700">
+                        <i data-lucide="upload" class="w-4 h-4 inline mr-1"></i> Upload
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DETAIL PANEL MODAL -->
+    <div id="detail-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div>
+                    <h2 class="font-bold text-gray-800" id="detail-title">Window Details</h2>
+                    <p class="text-xs text-gray-500" id="detail-subtitle">...</p>
+                </div>
+                <button onclick="closeDetailModal()" class="p-2 hover:bg-gray-200 rounded-full"><i data-lucide="x" class="w-5 h-5 text-gray-400"></i></button>
+            </div>
+            
+            <!-- Move Controls -->
+            <div class="p-4 border-b border-gray-100 bg-white">
+                <div class="flex gap-2 items-center">
+                    <span class="text-xs font-bold text-gray-500">Move Selected To:</span>
+                    <select id="target-subject" class="flex-1 p-2 border rounded-lg text-xs bg-white"></select>
+                    <button onclick="performAction('Move')" class="bg-mit-purple text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-[#350f50]">Move</button>
+                </div>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-0">
                 <table class="w-full text-left text-sm">
-                    <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10 shadow-sm">
+                    <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
                         <tr>
                             <th class="p-4 w-10 border-b"><input type="checkbox" onchange="toggleAll(this)"></th>
                             <th class="p-4 border-b">Student Name</th>
@@ -83,61 +287,17 @@
                     <tbody id="student-list" class="divide-y divide-gray-100"></tbody>
                 </table>
             </div>
-
-            <!-- Footer: Approval Actions -->
+            
             <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
                 <span class="text-xs text-gray-500 font-bold"><span id="selected-count">0</span> selected</span>
                 <div class="flex gap-3">
                     <button onclick="performAction('Reject')" class="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center gap-2">
                         <i data-lucide="x" class="w-4 h-4"></i> Reject
                     </button>
-                    <button onclick="performAction('Approve')" class="px-4 py-2 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 flex items-center gap-2 shadow-sm">
-                        <i data-lucide="check" class="w-4 h-4"></i> Approve Selection
+                    <button onclick="performAction('Approve')" class="px-4 py-2 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 flex items-center gap-2">
+                        <i data-lucide="check" class="w-4 h-4"></i> Approve
                     </button>
                 </div>
-            </div>
-        </div>
-    </main>
-
-    <!-- SETUP MODAL -->
-    <div id="setup-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
-            <h2 class="text-lg font-bold mb-2 mit-purple serif">Open Elective Choices</h2>
-            <p class="text-xs text-gray-500 mb-4">Select subjects to offer for this class.</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
-                <div>
-                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Current Class</label>
-                    <div id="setup-current-class" class="p-2 border rounded-lg text-xs bg-gray-50 text-gray-700 font-bold">--</div>
-                    <div class="mt-1 text-[10px] text-gray-500 font-bold">
-                        Current Semester: <span id="setup-current-sem" class="text-gray-700">--</span>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Target Semester</label>
-                    <select id="target-semester-select" class="w-full p-2 border rounded-lg text-xs bg-white" onchange="reloadStructureElectives()">
-                        <option value="">-- Select --</option>
-                        <option value="1">Sem 1</option>
-                        <option value="2">Sem 2</option>
-                        <option value="3">Sem 3</option>
-                        <option value="4">Sem 4</option>
-                        <option value="5">Sem 5</option>
-                        <option value="6">Sem 6</option>
-                        <option value="7">Sem 7</option>
-                        <option value="8">Sem 8</option>
-                    </select>
-                </div>
-            </div>
-            <div class="flex items-center justify-between mb-2">
-                <p class="text-[10px] text-gray-500 font-bold uppercase">Elective Buckets (from uploaded structure)</p>
-                <div class="flex items-center gap-2">
-                    <label class="text-[10px] text-gray-500 font-bold uppercase">Min Batch</label>
-                    <input id="min-batch-size" type="number" min="1" value="12" class="w-20 p-2 border rounded-lg text-xs bg-white" />
-                </div>
-            </div>
-            <div id="subject-checkboxes" class="max-h-80 overflow-y-auto space-y-3 border p-3 rounded mb-4 bg-gray-50"></div>
-            <div class="flex justify-end gap-2">
-                <button onclick="document.getElementById('setup-modal').classList.add('hidden')" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium text-xs">Cancel</button>
-                <button onclick="submitSetup()" class="px-6 py-2 bg-mit-purple text-white rounded-lg font-bold text-xs hover:bg-[#350f50]">Open Selection</button>
             </div>
         </div>
     </div>
@@ -193,313 +353,847 @@
 
     <script>
         lucide.createIcons();
-        let currentLiveStats = []; // Store full data structure
-        let currentSubId = null;
-        let currentSectionId = null;
+        
+        // Wizard State
+        let wizardStep = 1;
+        let wizardData = {
+            classLevel: null,
+            targetSemester: null,
+            sectionIds: [],
+            buckets: [],
+            minBatchSize: 12,
+            deadlineDays: 7
+        };
+        
+        // Detail panel state
         let currentWindowId = null;
-        let __amsAllClasses = [];
-        let __amsCachedTerm = null;
+        let currentSubjectId = null;
+        
+        // Pool upload state
+        let poolCsvData = [];
 
-        function amsExtractClassLevelFromDisplay(text) {
-            // Expected format: "SY - A" / "TY - DA" etc.
-            const parts = String(text || '').split(' - ');
-            return (parts[0] || '').trim().toUpperCase();
-        }
-
-        function amsProgramSemesterFromLevelAndTerm(level, termSemNo) {
-            // Mapping requested:
-            // FY: 1→1, 2→2
-            // SY: 1→3, 2→4
-            // TY: 1→5, 2→6
-            // LY: 1→7, 2→8
-            const offsets = { FY: 0, SY: 2, TY: 4, LY: 6 };
-            const off = offsets[String(level || '').toUpperCase()];
-            if (off === undefined) return null;
-            const t = parseInt(termSemNo, 10);
-            if (!t || t < 1) return null;
-            return off + t;
-        }
-
-        async function amsEnsureCurrentTermCached() {
-            if (__amsCachedTerm) return __amsCachedTerm;
-            try {
-                const termRes = await fetch('/api/current_term');
-                __amsCachedTerm = await termRes.json();
-                return __amsCachedTerm;
-            } catch (e) {
-                __amsCachedTerm = null;
-                return null;
-            }
-        }
-
-        function amsComputeProgramCurrentSemester(level, term) {
-            const termSemNo = term && term.semester_number ? parseInt(term.semester_number, 10) : null;
-            if (termSemNo && termSemNo > 2) return termSemNo; // already program-semester
-            return amsProgramSemesterFromLevelAndTerm(level, termSemNo);
-        }
-
-        async function onClassSelectionChanged() {
-            const sel = document.getElementById('class-select');
-            const className = (sel && sel.options[sel.selectedIndex]) ? sel.options[sel.selectedIndex].text : '';
-            const level = amsExtractClassLevelFromDisplay(className);
-            const hint = document.getElementById('class-sem-hint');
-            if (hint) hint.textContent = 'Current Semester: -- • Suggested Target: --';
-
-            if (!sel.value) {
-                return;
-            }
-
-            const term = await amsEnsureCurrentTermCached();
-            const programCur = amsComputeProgramCurrentSemester(level, term);
-            if (!programCur) {
-                if (hint) hint.textContent = 'Current Semester: -- • Suggested Target: --';
-                return;
-            }
-
-            const suggestedTarget = Math.min(8, programCur + 1);
-            if (hint) hint.textContent = `Current Semester: Sem ${programCur} • Suggested Target: Sem ${suggestedTarget}`;
-
-            // If setup modal is currently open, keep it in sync.
-            const modal = document.getElementById('setup-modal');
-            const modalVisible = modal && !modal.classList.contains('hidden');
-            if (modalVisible) {
-                const semEl = document.getElementById('setup-current-sem');
-                if (semEl) semEl.textContent = `Sem ${programCur}`;
-                const targetSel = document.getElementById('target-semester-select');
-                if (targetSel) targetSel.value = String(suggestedTarget);
-                await loadStructureElectives(sel.value);
-            }
-        }
-
+        // =====================
+        // INITIALIZATION
+        // =====================
         document.addEventListener('DOMContentLoaded', () => {
-            loadClasses(); // Populate dropdown
-            loadLiveDashboard(); // Populate Sidebar
+            loadDashboard();
+            
+            document.getElementById('wizard-save-template').addEventListener('change', (e) => {
+                document.getElementById('wizard-template-name').classList.toggle('hidden', !e.target.checked);
+            });
+            
+            // Set default academic year
+            const now = new Date();
+            const year = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+            document.getElementById('pool-academic-year').value = `${year}-${String(year + 1).slice(-2)}`;
+            
+            // Auto-suggest target semester based on class level
+            document.getElementById('pool-class-level').addEventListener('change', (e) => {
+                const level = e.target.value;
+                const semMap = { 'FY': '2', 'SY': '4', 'TY': '6', 'LY': '8' };
+                document.getElementById('pool-target-sem').value = semMap[level] || '';
+            });
+            
+            // Drag and drop for pool upload
+            const dropZone = document.getElementById('pool-drop-zone');
+            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-purple-500', 'bg-purple-50'); });
+            dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-purple-500', 'bg-purple-50'); });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-purple-500', 'bg-purple-50');
+                const file = e.dataTransfer.files[0];
+                if (file && file.name.endsWith('.csv')) {
+                    handlePoolFile({ files: [file] });
+                } else {
+                    showToast('Please upload a CSV file', 'error');
+                }
+            });
         });
 
-        async function loadClasses() {
-            const res = await fetch('/api/core/classes');
-            const data = await res.json();
-            __amsAllClasses = data.classes || [];
-            document.getElementById('class-select').innerHTML = '<option value="">-- Select Class --</option>' + data.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        // =====================
+        // ELECTIVE POOL UPLOAD
+        // =====================
+        function openPoolUpload() {
+            document.getElementById('pool-upload-modal').classList.remove('hidden');
+            lucide.createIcons();
         }
-
-        function reloadStructureElectives() {
-            const sectionId = document.getElementById('class-select').value;
-            if (!sectionId) return;
-            return loadStructureElectives(sectionId);
+        
+        function closePoolUpload() {
+            document.getElementById('pool-upload-modal').classList.add('hidden');
+            clearPoolPreview();
         }
-
-        async function loadStructureElectives(sectionId) {
-            const targetSemesterNo = document.getElementById('target-semester-select').value;
-            const container = document.getElementById('subject-checkboxes');
-            container.innerHTML = `<div class="p-6 text-center text-gray-400 text-sm">Loading electives...</div>`;
-
-            if (!targetSemesterNo) {
-                container.innerHTML = `<div class="text-center p-4 border-2 border-dashed border-gray-200 rounded-lg"><p class="text-xs text-gray-500 font-bold">Select Target Semester</p></div>`;
+        
+        function handlePoolFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const text = e.target.result;
+                const lines = text.split('\n').filter(l => l.trim());
+                
+                if (lines.length < 2) {
+                    showToast('CSV must have header row and at least one data row', 'error');
+                    return;
+                }
+                
+                const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                poolCsvData = [];
+                
+                for (let i = 1; i < lines.length; i++) {
+                    const values = lines[i].split(',').map(v => v.trim());
+                    if (values.length < 3) continue;
+                    
+                    const row = {};
+                    headers.forEach((h, idx) => {
+                        row[h] = values[idx] || '';
+                    });
+                    
+                    // Normalize field names
+                    row.subject_code = row.subject_code || row.code || '';
+                    row.subject_name = row.subject_name || row.name || '';
+                    row.bucket = row.bucket || row.type || '';
+                    row.credits = row.credits || '3';
+                    row.ltp = row.ltp || '3-0-0';
+                    
+                    if (row.subject_code && row.subject_name && row.bucket) {
+                        poolCsvData.push(row);
+                    }
+                }
+                
+                renderPoolPreview();
+            };
+            reader.readAsText(file);
+        }
+        
+        function renderPoolPreview() {
+            const preview = document.getElementById('pool-preview');
+            const list = document.getElementById('pool-preview-list');
+            const count = document.getElementById('pool-preview-count');
+            
+            if (poolCsvData.length === 0) {
+                preview.classList.add('hidden');
                 return;
             }
-
-            const res = await fetch(`/api/admin/semester_structure/electives?section_id=${encodeURIComponent(sectionId)}&target_semester_no=${encodeURIComponent(targetSemesterNo)}`);
-            const data = await res.json();
-
-            const groups = data.groups || {};
-            const buckets = Object.keys(groups);
-            if (buckets.length === 0) {
-                container.innerHTML = `<div class="text-center p-4 border-2 border-dashed border-gray-200 rounded-lg"><p class="text-xs text-gray-500 font-bold">No elective buckets found for this semester</p><p class="text-[10px] text-gray-400 mt-1">Upload semester course structure first.</p></div>`;
+            
+            preview.classList.remove('hidden');
+            count.textContent = poolCsvData.length;
+            
+            // Group by bucket
+            const grouped = {};
+            poolCsvData.forEach(row => {
+                const bucket = row.bucket;
+                if (!grouped[bucket]) grouped[bucket] = [];
+                grouped[bucket].push(row);
+            });
+            
+            let html = '';
+            for (const [bucket, subjects] of Object.entries(grouped)) {
+                html += `<div class="p-2 border-b border-gray-100 last:border-b-0">
+                    <div class="text-xs font-bold text-purple-600 mb-1">${bucket} (${subjects.length})</div>
+                    <div class="flex flex-wrap gap-1">`;
+                subjects.forEach(s => {
+                    html += `<span class="text-[10px] bg-gray-100 px-2 py-0.5 rounded">${s.subject_code}: ${s.subject_name}</span>`;
+                });
+                html += `</div></div>`;
+            }
+            
+            list.innerHTML = html;
+        }
+        
+        function clearPoolPreview() {
+            poolCsvData = [];
+            document.getElementById('pool-preview').classList.add('hidden');
+            document.getElementById('pool-file-input').value = '';
+        }
+        
+        async function submitPoolUpload() {
+            const classLevel = document.getElementById('pool-class-level').value;
+            const targetSem = document.getElementById('pool-target-sem').value;
+            const academicYear = document.getElementById('pool-academic-year').value.trim();
+            
+            if (!classLevel || !targetSem || !academicYear) {
+                showToast('Please select class level, target semester, and academic year', 'error');
                 return;
             }
+            
+            if (poolCsvData.length === 0) {
+                showToast('Please upload a CSV file with elective subjects', 'error');
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/admin/elective_rollout/pool/upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        class_level: classLevel,
+                        target_semester_no: parseInt(targetSem),
+                        academic_year: academicYear,
+                        subjects: poolCsvData
+                    })
+                });
+                
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Upload failed');
+                
+                showToast(data.message, 'success');
+                closePoolUpload();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+        
+        async function viewCurrentPool() {
+            const classLevel = document.getElementById('pool-class-level').value;
+            const targetSem = document.getElementById('pool-target-sem').value;
+            
+            let url = '/api/admin/elective_rollout/pool?';
+            if (classLevel) url += `class_level=${classLevel}&`;
+            if (targetSem) url += `target_semester_no=${targetSem}&`;
+            
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+                
+                if (!data.buckets || Object.keys(data.buckets).length === 0) {
+                    showToast('No electives in pool for this selection', 'info');
+                    return;
+                }
+                
+                // Show in preview area
+                poolCsvData = [];
+                for (const [bucket, subjects] of Object.entries(data.buckets)) {
+                    subjects.forEach(s => {
+                        poolCsvData.push({
+                            subject_code: s.code,
+                            subject_name: s.name,
+                            bucket: bucket
+                        });
+                    });
+                }
+                renderPoolPreview();
+                showToast(`Found ${poolCsvData.length} subjects in pool`, 'success');
+            } catch (e) {
+                showToast('Error loading pool', 'error');
+            }
+        }
 
-            container.innerHTML = buckets.map(bucket => {
-                const items = groups[bucket] || [];
-                const list = items.map(s => `
-                    <label class="flex items-center gap-3 p-3 bg-white hover:bg-purple-50 rounded-lg cursor-pointer border border-gray-200 transition-colors mb-2">
-                        <input type="checkbox" class="setup-check w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500" value="${s.id}" data-bucket="${bucket}">
-                        <div class="flex-1">
-                            <div class="flex justify-between items-center">
-                                <p class="text-sm font-bold text-gray-800">${s.name}</p>
-                                <span class="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-bold">${bucket}</span>
+        // =====================
+        // DASHBOARD
+        // =====================
+        async function loadDashboard() {
+            const container = document.getElementById('rollouts-container');
+            try {
+                const res = await fetch('/api/admin/elective_rollout/dashboard');
+                const data = await res.json();
+                
+                if (!data.rollouts || data.rollouts.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-12">
+                            <i data-lucide="inbox" class="w-12 h-12 mx-auto text-gray-300 mb-4"></i>
+                            <h3 class="text-lg font-bold text-gray-600 mb-2">No Active Rollouts</h3>
+                            <p class="text-sm text-gray-400 mb-4">Start a new elective rollout to allow students to select their electives.</p>
+                            <button onclick="openRolloutWizard()" class="px-4 py-2 bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700">
+                                <i data-lucide="rocket" class="w-4 h-4 inline mr-1"></i> Start New Rollout
+                            </button>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                    updateStats(0, 0, 0);
+                    return;
+                }
+                
+                let totalStudents = 0, totalSelected = 0, activeCount = 0;
+                
+                let html = '<div class="space-y-4">';
+                for (const rollout of data.rollouts) {
+                    activeCount++;
+                    totalStudents += rollout.total_students;
+                    totalSelected += rollout.total_selected;
+                    
+                    const deadlineDate = rollout.deadline ? new Date(rollout.deadline) : null;
+                    const deadlineStr = deadlineDate ? deadlineDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'No deadline';
+                    const isUrgent = deadlineDate && (deadlineDate - new Date()) < 86400000 * 2; // Less than 2 days
+                    
+                    html += `
+                        <div class="border border-gray-200 rounded-xl overflow-hidden">
+                            <div class="p-4 bg-gradient-to-r ${isUrgent ? 'from-orange-50 to-red-50 border-l-4 border-orange-500' : 'from-gray-50 to-white'} flex justify-between items-center">
+                                <div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="font-bold text-gray-800">${rollout.windows.length} Windows</span>
+                                        <span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">${rollout.overall_progress_pct}% Complete</span>
+                                    </div>
+                                    <p class="text-xs text-gray-500">
+                                        <i data-lucide="clock" class="w-3 h-3 inline"></i> Deadline: ${deadlineStr}
+                                        ${isUrgent ? '<span class="text-orange-600 font-bold ml-2">⚠️ Closing Soon</span>' : ''}
+                                    </p>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="sendReminders('${rollout.batch_id}')" class="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100">
+                                        <i data-lucide="bell" class="w-3 h-3 inline"></i> Remind
+                                    </button>
+                                    <button onclick="closeRollout('${rollout.batch_id}', false)" class="px-3 py-1.5 bg-yellow-50 text-yellow-700 rounded-lg text-xs font-bold hover:bg-yellow-100">Close</button>
+                                    <button onclick="closeRollout('${rollout.batch_id}', true)" class="px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs font-bold hover:bg-green-100">Finalize</button>
+                                </div>
                             </div>
-                            <p class="text-[10px] text-gray-500 font-mono">${s.code}</p>
+                            <div class="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    `;
+                    
+                    for (const win of rollout.windows) {
+                        const progressColor = win.progress_pct >= 80 ? 'bg-green-500' : win.progress_pct >= 50 ? 'bg-yellow-500' : 'bg-red-500';
+                        
+                        html += `
+                            <div class="bg-white border border-gray-100 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div>
+                                        <h4 class="font-bold text-gray-800 text-sm">${win.section_name}</h4>
+                                        <p class="text-[10px] text-gray-500">Sem ${win.target_semester} • ${win.bucket}</p>
+                                    </div>
+                                    <span class="text-xs font-bold ${win.status === 'Extension' ? 'text-orange-600 bg-orange-50' : 'text-green-600 bg-green-50'} px-2 py-0.5 rounded">${win.status}</span>
+                                </div>
+                                <div class="mb-2">
+                                    <div class="flex justify-between text-[10px] text-gray-500 mb-1">
+                                        <span>${win.selected_count}/${win.student_count} Selected</span>
+                                        <span class="font-bold">${win.progress_pct}%</span>
+                                    </div>
+                                    <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                        <div class="${progressColor} h-1.5 rounded-full transition-all" style="width: ${win.progress_pct}%"></div>
+                                    </div>
+                                </div>
+                                <div class="flex flex-wrap gap-1">
+                        `;
+                        
+                        for (const subj of win.subjects) {
+                            const isDanger = subj.is_danger;
+                            html += `
+                                <button onclick="viewSubjectDetail(${win.window_id}, ${subj.subject_id})" 
+                                    class="text-[10px] px-2 py-1 rounded ${isDanger ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-gray-50 text-gray-600 border border-gray-200'} hover:shadow-sm transition-shadow truncate max-w-[120px]" 
+                                    title="${subj.name}">
+                                    ${subj.name.length > 15 ? subj.name.substring(0, 15) + '...' : subj.name} (${subj.count})
+                                </button>
+                            `;
+                        }
+                        
+                        html += `
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    html += `</div></div>`;
+                }
+                html += '</div>';
+                
+                container.innerHTML = html;
+                lucide.createIcons();
+                updateStats(activeCount, totalStudents, totalSelected);
+                
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = `<div class="text-center py-8 text-red-500">Error loading dashboard</div>`;
+            }
+        }
+        
+        function updateStats(active, total, selected) {
+            document.getElementById('stat-active-rollouts').textContent = active;
+            document.getElementById('stat-total-students').textContent = total;
+            document.getElementById('stat-selected').textContent = selected;
+            document.getElementById('stat-pending').textContent = total - selected;
+        }
+
+        // =====================
+        // WIZARD
+        // =====================
+        function openRolloutWizard() {
+            wizardStep = 1;
+            wizardData = { classLevel: null, targetSemester: null, sectionIds: [], buckets: [], minBatchSize: 12, deadlineDays: 7 };
+            updateWizardUI();
+            document.getElementById('wizard-modal').classList.remove('hidden');
+        }
+        
+        function closeWizard() {
+            document.getElementById('wizard-modal').classList.add('hidden');
+        }
+        
+        function updateWizardUI() {
+            // Update step indicators
+            for (let i = 1; i <= 3; i++) {
+                const indicator = document.getElementById(`step-${i}-indicator`);
+                const circle = indicator.querySelector('div');
+                const text = indicator.querySelector('span');
+                if (i < wizardStep) {
+                    indicator.classList.remove('opacity-40');
+                    circle.className = 'w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center text-sm font-bold';
+                } else if (i === wizardStep) {
+                    indicator.classList.remove('opacity-40');
+                    circle.className = 'w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-sm font-bold';
+                    text.className = 'text-xs font-bold text-purple-600';
+                } else {
+                    indicator.classList.add('opacity-40');
+                    circle.className = 'w-8 h-8 rounded-full bg-gray-300 text-white flex items-center justify-center text-sm font-bold';
+                    text.className = 'text-xs font-bold text-gray-400';
+                }
+            }
+            
+            // Show/hide steps
+            document.getElementById('wizard-step-1').classList.toggle('hidden', wizardStep !== 1);
+            document.getElementById('wizard-step-2').classList.toggle('hidden', wizardStep !== 2);
+            document.getElementById('wizard-step-3').classList.toggle('hidden', wizardStep !== 3);
+            
+            // Back button
+            document.getElementById('wizard-back-btn').classList.toggle('hidden', wizardStep === 1);
+            
+            // Next button text
+            const nextBtn = document.getElementById('wizard-next-btn');
+            if (wizardStep === 3) {
+                nextBtn.innerHTML = '<i data-lucide="rocket" class="w-4 h-4 inline mr-1"></i> Launch Rollout';
+                nextBtn.className = 'px-6 py-2 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700';
+            } else {
+                nextBtn.innerHTML = 'Next <i data-lucide="arrow-right" class="w-4 h-4 inline ml-1"></i>';
+                nextBtn.className = 'px-6 py-2 bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700';
+            }
+            lucide.createIcons();
+        }
+        
+        function wizardBack() {
+            if (wizardStep > 1) {
+                wizardStep--;
+                updateWizardUI();
+            }
+        }
+        
+        async function wizardNext() {
+            if (wizardStep === 1) {
+                // Validate step 1
+                wizardData.sectionIds = Array.from(document.querySelectorAll('.section-check:checked')).map(cb => parseInt(cb.value));
+                wizardData.targetSemester = parseInt(document.getElementById('wizard-target-sem').value);
+                
+                if (!wizardData.classLevel) return showToast('Select a class level', 'error');
+                if (!wizardData.targetSemester) return showToast('Select target semester', 'error');
+                if (wizardData.sectionIds.length === 0) return showToast('Select at least one section', 'error');
+                
+                // Load electives for step 2
+                await loadCommonElectives();
+                wizardStep = 2;
+                updateWizardUI();
+                
+            } else if (wizardStep === 2) {
+                // Validate step 2
+                wizardData.minBatchSize = parseInt(document.getElementById('wizard-min-batch').value) || 12;
+                wizardData.deadlineDays = parseInt(document.getElementById('wizard-deadline-days').value) || 7;
+                
+                // Collect bucket configurations
+                wizardData.buckets = [];
+                document.querySelectorAll('.bucket-group').forEach(group => {
+                    const bucket = group.dataset.bucket;
+                    const subjectIds = Array.from(group.querySelectorAll('.subject-check:checked')).map(cb => parseInt(cb.value));
+                    if (subjectIds.length > 0) {
+                        wizardData.buckets.push({ bucket, subject_ids: subjectIds });
+                    }
+                });
+                
+                if (wizardData.buckets.length === 0) return showToast('Select at least one elective', 'error');
+                
+                // Build review summary
+                buildReviewSummary();
+                wizardStep = 3;
+                updateWizardUI();
+                
+            } else if (wizardStep === 3) {
+                // Launch rollout
+                await launchRollout();
+            }
+        }
+        
+        async function selectClassLevel(level) {
+            wizardData.classLevel = level;
+            document.querySelectorAll('.level-btn').forEach(btn => {
+                btn.classList.toggle('border-purple-500', btn.textContent.trim() === level);
+                btn.classList.toggle('bg-purple-50', btn.textContent.trim() === level);
+                btn.classList.toggle('text-purple-700', btn.textContent.trim() === level);
+            });
+            
+            // Auto-suggest target semester
+            const semMap = { 'FY': 2, 'SY': 4, 'TY': 6, 'LY': 8 };
+            document.getElementById('wizard-target-sem').value = semMap[level] || '';
+            
+            // Load sections
+            await loadSections(level);
+        }
+        
+        async function loadSections(level) {
+            const grid = document.getElementById('sections-grid');
+            grid.innerHTML = '<p class="col-span-3 text-center text-gray-400 text-sm py-4">Loading sections...</p>';
+            
+            try {
+                const res = await fetch(`/api/admin/elective_rollout/sections_by_level?class_level=${level}`);
+                const data = await res.json();
+                
+                if (!data.sections || data.sections.length === 0) {
+                    grid.innerHTML = '<p class="col-span-3 text-center text-gray-400 text-sm py-4">No sections found for this level</p>';
+                    return;
+                }
+                
+                grid.innerHTML = data.sections.map(sec => `
+                    <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-gray-200 cursor-pointer hover:border-purple-300 transition-all ${sec.has_active_windows ? 'ring-2 ring-yellow-200' : ''}">
+                        <input type="checkbox" class="section-check w-4 h-4 rounded text-purple-600" value="${sec.id}">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-bold text-sm text-gray-700 truncate">${sec.name}</p>
+                            <p class="text-[10px] text-gray-500">${sec.student_count} students ${sec.has_active_windows ? '• <span class="text-yellow-600">Active</span>' : ''}</p>
                         </div>
                     </label>
                 `).join('');
-
-                return `
-                    <div class="bg-white/60 rounded-lg border border-gray-200 overflow-hidden">
-                        <div class="px-3 py-2 bg-gray-100 border-b border-gray-200">
-                            <p class="text-xs font-bold text-gray-700">${bucket}</p>
-                        </div>
-                        <div class="p-2">
-                            ${list || `<div class="p-3 text-xs text-gray-500">No subjects</div>`}
-                        </div>
-                    </div>
-                `;
-            }).join('');
+            } catch (e) {
+                grid.innerHTML = '<p class="col-span-3 text-center text-red-500 text-sm py-4">Error loading sections</p>';
+            }
         }
-
-        async function loadLiveDashboard() {
-            const list = document.getElementById('live-dashboard-list');
+        
+        function toggleAllSections() {
+            const checkboxes = document.querySelectorAll('.section-check');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => cb.checked = !allChecked);
+        }
+        
+        function onTargetSemChange() {
+            // Could trigger elective reload if needed
+        }
+        
+        async function loadCommonElectives() {
+            const container = document.getElementById('buckets-config');
+            container.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Loading electives...</p>';
+            
             try {
-                const res = await fetch('/api/admin/elective_windows/live_dashboard');
+                const res = await fetch(`/api/admin/elective_rollout/common_electives?section_ids=${wizardData.sectionIds.join(',')}&target_semester_no=${wizardData.targetSemester}`);
                 const data = await res.json();
-                currentLiveStats = data.dashboard || [];
-
-                if(currentLiveStats.length === 0) {
-                    list.innerHTML = `<div class="p-8 text-center text-gray-400 border-2 border-dashed border-gray-200 rounded-xl"><p>No active elective cycles.</p><p class="text-xs mt-2">Use "Setup Choices" to start one.</p></div>`;
-                    return;
-                }
-
-                list.innerHTML = currentLiveStats.map(cls => {
-                    const windowsHTML = (cls.windows || []).map(w => {
-                        const badge = `<span class="text-[10px] font-bold uppercase tracking-wider text-white bg-gray-800 px-1.5 py-0.5 rounded">Sem ${w.target_semester_no} • ${w.bucket.replace('Elective-', 'E-')}</span>`;
-                        const items = (w.electives || []).map(e => `
-                            <div onclick="viewSubject(${cls.section_id}, ${w.window_id}, ${e.subject_id})" 
-                                 class="flex justify-between items-center p-3 bg-white border border-gray-100 rounded-lg hover:border-purple-300 cursor-pointer transition-all mb-2 group">
-                                <div class="flex-1 min-w-0 mr-2">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        ${badge}
-                                        ${e.is_danger ? '<i data-lucide="alert-triangle" class="w-3 h-3 text-red-500"></i>' : ''}
-                                    </div>
-                                    <h4 class="text-sm font-bold text-gray-800 truncate" title="${e.name}">${e.name}</h4>
-                                </div>
-                                <span class="text-xs font-bold ${e.is_danger ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'} px-2 py-1 rounded-full">
-                                    ${e.count}
-                                </span>
-                            </div>
-                        `).join('') || `<div class="p-3 text-xs text-gray-500">No offerings</div>`;
-                        return `<div class="mb-3">${items}</div>`;
-                    }).join('');
-
-                    return `
-                        <div class="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
-                            <div class="px-4 py-3 border-b border-gray-200 bg-gray-100">
-                                <h3 class="font-bold text-gray-700">${cls.class_name}</h3>
-                            </div>
-                            <div class="p-3">
-                                ${windowsHTML}
-                            </div>
+                
+                if (!data.buckets || Object.keys(data.buckets).length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-6">
+                            <i data-lucide="alert-circle" class="w-8 h-8 mx-auto text-yellow-500 mb-2"></i>
+                            <p class="text-sm text-gray-600 font-bold">No Electives Found</p>
+                            <p class="text-xs text-gray-400 mt-1">Upload electives using the "Upload Electives" button first.</p>
+                            <button onclick="closeWizard(); openPoolUpload();" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700">
+                                <i data-lucide="upload" class="w-3 h-3 inline mr-1"></i> Upload Electives Now
+                            </button>
                         </div>
                     `;
-                }).join('');
+                    lucide.createIcons();
+                    return;
+                }
+                
+                // Show source indicator
+                const sourceLabel = data.source === 'elective_pool' 
+                    ? `<span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold"><i data-lucide="database" class="w-3 h-3 inline"></i> From Elective Pool (${data.academic_year || 'current'})</span>`
+                    : `<span class="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold"><i data-lucide="file-spreadsheet" class="w-3 h-3 inline"></i> From Course Structure</span>`;
+                
+                let html = `<div class="mb-3 text-right">${sourceLabel}</div>`;
+                
+                for (const [bucket, subjects] of Object.entries(data.buckets)) {
+                    html += `
+                        <div class="bucket-group bg-white rounded-lg border border-gray-200 overflow-hidden mb-2" data-bucket="${bucket}">
+                            <div class="px-3 py-2 bg-purple-50 border-b border-purple-100 flex justify-between items-center">
+                                <span class="font-bold text-purple-700 text-sm">${bucket}</span>
+                                <button onclick="toggleBucket(this)" class="text-[10px] text-purple-600 hover:underline">Toggle All</button>
+                            </div>
+                            <div class="p-2 space-y-1 max-h-40 overflow-y-auto">
+                    `;
+                    
+                    for (const subj of subjects) {
+                        const commonBadge = subj.is_common 
+                            ? '<span class="text-[10px] bg-green-100 text-green-700 px-1 rounded">All Sections</span>'
+                            : `<span class="text-[10px] bg-yellow-100 text-yellow-700 px-1 rounded">${subj.section_count}/${data.total_sections} Sections</span>`;
+                        
+                        html += `
+                            <label class="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                <input type="checkbox" class="subject-check w-4 h-4 rounded text-purple-600" value="${subj.id}" ${subj.is_common ? 'checked' : ''}>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-sm text-gray-700 truncate" title="${subj.name}">${subj.name}</p>
+                                    <p class="text-[10px] text-gray-400">${subj.code} ${commonBadge}</p>
+                                </div>
+                            </label>
+                        `;
+                    }
+                    
+                    html += '</div></div>';
+                }
+                
+                container.innerHTML = html;
                 lucide.createIcons();
-            } catch(e) { console.error(e); }
+            } catch (e) {
+                container.innerHTML = '<p class="text-center text-red-500 text-sm py-4">Error loading electives</p>';
+            }
+        }
+        
+        function toggleBucket(btn) {
+            const group = btn.closest('.bucket-group');
+            const checkboxes = group.querySelectorAll('.subject-check');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => cb.checked = !allChecked);
+        }
+        
+        function buildReviewSummary() {
+            const summary = document.getElementById('review-summary');
+            const deadline = new Date();
+            deadline.setDate(deadline.getDate() + wizardData.deadlineDays);
+            
+            let bucketsHtml = wizardData.buckets.map(b => 
+                `<span class="inline-block bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold mr-1">${b.bucket} (${b.subject_ids.length})</span>`
+            ).join('');
+            
+            summary.innerHTML = `
+                <div class="flex justify-between"><span class="text-gray-600">Class Level:</span><span class="font-bold">${wizardData.classLevel}</span></div>
+                <div class="flex justify-between"><span class="text-gray-600">Target Semester:</span><span class="font-bold">Semester ${wizardData.targetSemester}</span></div>
+                <div class="flex justify-between"><span class="text-gray-600">Sections:</span><span class="font-bold">${wizardData.sectionIds.length} sections</span></div>
+                <div class="flex justify-between"><span class="text-gray-600">Min Batch Size:</span><span class="font-bold">${wizardData.minBatchSize}</span></div>
+                <div class="flex justify-between"><span class="text-gray-600">Deadline:</span><span class="font-bold">${deadline.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span></div>
+                <div class="mt-2"><span class="text-gray-600">Buckets:</span><div class="mt-1">${bucketsHtml}</div></div>
+            `;
+        }
+        
+        async function launchRollout() {
+            const saveTemplate = document.getElementById('wizard-save-template').checked;
+            const templateName = saveTemplate ? document.getElementById('wizard-template-name').value.trim() : '';
+            
+            if (saveTemplate && !templateName) {
+                return showToast('Enter a template name', 'error');
+            }
+            
+            try {
+                const res = await fetch('/api/admin/elective_rollout/bulk_launch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        section_ids: wizardData.sectionIds,
+                        target_semester_no: wizardData.targetSemester,
+                        buckets: wizardData.buckets,
+                        min_batch_size: wizardData.minBatchSize,
+                        deadline_days: wizardData.deadlineDays,
+                        save_as_template: templateName
+                    })
+                });
+                
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Launch failed');
+                
+                showToast(`Launched ${data.windows.length} windows successfully!`, 'success');
+                closeWizard();
+                loadDashboard();
+                
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
         }
 
-        async function viewSubject(sectionId, windowId, subId) {
-            currentSubId = subId;
-            currentSectionId = sectionId;
-            currentWindowId = windowId;
-
-            // Fetch detailed stats per window
-            const res = await fetch(`/api/elective_windows/live_stats?window_id=${windowId}`);
-            const detailedData = await res.json();
-            const detailedSub = (detailedData.stats || []).find(s => s.subject_id == subId);
-            const w = detailedData.window || {};
-            const subjectData = detailedSub || { subject_name: '...', type: w.bucket || '...' };
-
-            // 3. Update UI
-            document.getElementById('detail-panel').classList.remove('hidden');
-            document.getElementById('detail-title').innerText = subjectData.subject_name || subjectData.name || '...';
-            document.getElementById('detail-type').innerText = `Sem ${w.target_semester_no || '-'} • ${w.bucket || subjectData.type || '-'}`;
+        // =====================
+        // TEMPLATES
+        // =====================
+        async function loadTemplates() {
+            document.getElementById('templates-modal').classList.remove('hidden');
+            const list = document.getElementById('templates-list');
+            list.innerHTML = '<p class="text-center text-gray-400 py-8">Loading templates...</p>';
             
-            // Populate Move Dropdown (Show other electives in same class)
-            const moveSelect = document.getElementById('target-subject');
-            moveSelect.innerHTML = (detailedData.stats || [])
-                .filter(e => e.subject_id != subId)
-                .map(e => `<option value="${e.subject_id}">${e.subject_name} (${e.count})</option>`).join('');
-            
-            // Populate Table
-            const tbody = document.getElementById('student-list');
-            if (!detailedSub || detailedSub.students.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400">No students enrolled yet.</td></tr>`;
-            } else {
-                tbody.innerHTML = detailedSub.students.map(s => `
-                    <tr class="hover:bg-gray-50 border-b border-gray-50 last:border-0">
-                        <td class="p-4"><input type="checkbox" class="stu-check w-4 h-4 text-purple-600 rounded" value="${s.id}" onchange="updateCount()"></td>
-                        <td class="p-4 font-bold text-gray-800 text-sm">${s.name}</td>
-                        <td class="p-4 text-right font-mono text-xs text-gray-500">${s.roll}</td>
-                        <td class="p-4 text-center">
-                            <span class="px-2 py-1 rounded-full text-[10px] font-bold ${s.status === 'Approved' ? 'bg-green-100 text-green-700' : (s.status === 'Rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700')}">
-                                ${s.status}
-                            </span>
-                        </td>
-                    </tr>
+            try {
+                const res = await fetch('/api/admin/elective_rollout/templates');
+                const data = await res.json();
+                
+                if (!data.templates || data.templates.length === 0) {
+                    list.innerHTML = `
+                        <div class="text-center py-8">
+                            <i data-lucide="file-x" class="w-10 h-10 mx-auto text-gray-300 mb-2"></i>
+                            <p class="text-gray-500">No templates saved yet</p>
+                            <p class="text-xs text-gray-400 mt-1">Save a template when launching a rollout</p>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                    return;
+                }
+                
+                list.innerHTML = data.templates.map(t => `
+                    <div class="p-3 border border-gray-200 rounded-lg mb-2 hover:shadow-sm transition-shadow">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h4 class="font-bold text-gray-800">${t.name}</h4>
+                                <p class="text-xs text-gray-500">${t.class_level} • Sem ${t.target_semester_no} • ${t.bucket_count} buckets • ${t.default_duration_days} days</p>
+                            </div>
+                            <div class="flex gap-1">
+                                <button onclick="useTemplate(${t.id})" class="px-2 py-1 bg-purple-50 text-purple-600 rounded text-xs font-bold hover:bg-purple-100">Use</button>
+                                <button onclick="deleteTemplate(${t.id})" class="px-2 py-1 bg-red-50 text-red-600 rounded text-xs font-bold hover:bg-red-100">Delete</button>
+                            </div>
+                        </div>
+                    </div>
                 `).join('');
+            } catch (e) {
+                list.innerHTML = '<p class="text-center text-red-500 py-8">Error loading templates</p>';
             }
+        }
+        
+        async function useTemplate(templateId) {
+            try {
+                const res = await fetch(`/api/admin/elective_rollout/templates/${templateId}`);
+                const template = await res.json();
+                
+                document.getElementById('templates-modal').classList.add('hidden');
+                openRolloutWizard();
+                
+                // Pre-fill from template
+                wizardData.classLevel = template.class_level;
+                wizardData.targetSemester = template.target_semester_no;
+                wizardData.buckets = template.buckets_config || [];
+                wizardData.minBatchSize = template.min_batch_size;
+                wizardData.deadlineDays = template.default_duration_days;
+                
+                await selectClassLevel(template.class_level);
+                document.getElementById('wizard-target-sem').value = template.target_semester_no;
+                
+            } catch (e) {
+                showToast('Error loading template', 'error');
+            }
+        }
+        
+        async function deleteTemplate(templateId) {
+            if (!confirm('Delete this template?')) return;
+            try {
+                await fetch(`/api/admin/elective_rollout/templates/${templateId}`, { method: 'DELETE' });
+                loadTemplates();
+            } catch (e) {
+                showToast('Error deleting template', 'error');
+            }
+        }
+
+        // =====================
+        // ROLLOUT ACTIONS
+        // =====================
+        async function closeRollout(batchId, finalize) {
+            const action = finalize ? 'finalize (auto-balance and approve)' : 'close';
+            if (!confirm(`Are you sure you want to ${action} this rollout?`)) return;
+            
+            try {
+                const res = await fetch('/api/admin/elective_rollout/bulk_close', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batch_id: batchId, finalize })
+                });
+                const data = await res.json();
+                showToast(data.message, 'success');
+                loadDashboard();
+            } catch (e) {
+                showToast('Error closing rollout', 'error');
+            }
+        }
+        
+        async function sendReminders(batchId) {
+            if (!confirm('Send reminder notifications to all students who haven\'t selected yet?')) return;
+            
+            try {
+                const res = await fetch('/api/admin/elective_rollout/send_reminders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batch_id: batchId })
+                });
+                const data = await res.json();
+                showToast(data.message, 'success');
+            } catch (e) {
+                showToast('Error sending reminders', 'error');
+            }
+        }
+
+        // =====================
+        // DETAIL PANEL
+        // =====================
+        async function viewSubjectDetail(windowId, subjectId) {
+            currentWindowId = windowId;
+            currentSubjectId = subjectId;
+            
+            document.getElementById('detail-modal').classList.remove('hidden');
+            document.getElementById('student-list').innerHTML = '<tr><td colspan="4" class="p-8 text-center text-gray-400">Loading...</td></tr>';
+            
+            try {
+                const res = await fetch(`/api/elective_windows/live_stats?window_id=${windowId}`);
+                const data = await res.json();
+                
+                const subjectData = data.stats.find(s => s.subject_id === subjectId);
+                if (!subjectData) throw new Error('Subject not found');
+                
+                document.getElementById('detail-title').textContent = subjectData.subject_name;
+                document.getElementById('detail-subtitle').textContent = `Sem ${data.window.target_semester_no} • ${data.window.bucket} • ${subjectData.count} students`;
+                
+                // Populate move dropdown
+                const moveSelect = document.getElementById('target-subject');
+                moveSelect.innerHTML = data.stats
+                    .filter(s => s.subject_id !== subjectId)
+                    .map(s => `<option value="${s.subject_id}">${s.subject_name} (${s.count})</option>`)
+                    .join('');
+                
+                // Populate student table
+                const tbody = document.getElementById('student-list');
+                if (subjectData.students.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-gray-400">No students enrolled</td></tr>';
+                } else {
+                    tbody.innerHTML = subjectData.students.map(s => `
+                        <tr class="hover:bg-gray-50">
+                            <td class="p-4"><input type="checkbox" class="stu-check w-4 h-4 rounded" value="${s.id}" onchange="updateCount()"></td>
+                            <td class="p-4 font-bold text-gray-800">${s.name}</td>
+                            <td class="p-4 text-right font-mono text-gray-500">${s.roll}</td>
+                            <td class="p-4 text-center">
+                                <span class="px-2 py-1 rounded-full text-[10px] font-bold ${s.status === 'Approved' ? 'bg-green-100 text-green-700' : s.status === 'Rejected' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">${s.status}</span>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+                updateCount();
+            } catch (e) {
+                console.error(e);
+                document.getElementById('student-list').innerHTML = '<tr><td colspan="4" class="p-8 text-center text-red-500">Error loading data</td></tr>';
+            }
+        }
+        
+        function closeDetailModal() {
+            document.getElementById('detail-modal').classList.add('hidden');
+            currentWindowId = null;
+            currentSubjectId = null;
+        }
+        
+        function toggleAll(source) {
+            document.querySelectorAll('.stu-check').forEach(cb => cb.checked = source.checked);
             updateCount();
         }
-
-        function closeDetailPanel() {
-            document.getElementById('detail-panel').classList.add('hidden');
-            currentSubId = null;
+        
+        function updateCount() {
+            document.getElementById('selected-count').textContent = document.querySelectorAll('.stu-check:checked').length;
         }
-
-        // ... (Keep Setup Modal, Action Logic, etc. same as before) ...
-        async function openSetupModal() {
-            const sectionId = document.getElementById('class-select').value;
-            if(!sectionId) return showToast("Select a class to setup.", "error");
-            document.getElementById('setup-modal').classList.remove('hidden');
-
-            const className = (document.getElementById('class-select').options[document.getElementById('class-select').selectedIndex] || {}).text || '';
-            document.getElementById('setup-current-class').innerText = className || '--';
-            document.getElementById('setup-current-sem').innerText = '--';
-
-            const level = amsExtractClassLevelFromDisplay(className);
-
-            // Default target semester: current sem + 1 if available from /api/current_term
-            const term = await amsEnsureCurrentTermCached();
-            const programCur = amsComputeProgramCurrentSemester(level, term);
-            if (programCur) {
-                document.getElementById('setup-current-sem').innerText = `Sem ${programCur}`;
-                const next = Math.min(8, programCur + 1);
-                document.getElementById('target-semester-select').value = String(next);
-            } else if (term && term.semester) {
-                document.getElementById('setup-current-sem').innerText = String(term.semester);
-            }
-
-            await loadStructureElectives(sectionId);
-        }
-
-        async function submitSetup() {
-            const sectionId = document.getElementById('class-select').value;
-            const ids = Array.from(document.querySelectorAll('.setup-check:checked')).map(cb => cb.value);
-            const targetSemesterNo = document.getElementById('target-semester-select').value;
-            const minBatchSize = parseInt(document.getElementById('min-batch-size').value || '12', 10) || 12;
-            if (!targetSemesterNo) return showToast('Select target semester', 'error');
-            if (ids.length === 0) return showToast('Select at least one elective subject', 'error');
-
-            await fetch('/api/admin/elective_windows/open', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ section_id: sectionId, target_semester_no: parseInt(targetSemesterNo, 10), subject_ids: ids, min_batch_size: minBatchSize })
-            });
-            document.getElementById('setup-modal').classList.add('hidden');
-            loadLiveDashboard();
-        }
-
+        
         async function performAction(actionType) {
-            const checkboxes = document.querySelectorAll('.stu-check:checked');
-            if(checkboxes.length === 0) return showToast("Select students first", "error");
-            const studentIds = Array.from(checkboxes).map(cb => cb.value);
+            const studentIds = Array.from(document.querySelectorAll('.stu-check:checked')).map(cb => cb.value);
+            if (studentIds.length === 0) return showToast('Select students first', 'error');
             
-            const payload = { window_id: currentWindowId, student_ids: studentIds, subject_id: currentSubId, action: actionType };
+            const payload = {
+                window_id: currentWindowId,
+                student_ids: studentIds,
+                subject_id: currentSubjectId,
+                action: actionType
+            };
+            
             if (actionType === 'Move') {
                 const newSubId = document.getElementById('target-subject').value;
-                if(newSubId == currentSubId || !newSubId) return showToast("Select a different target subject", "error");
-                payload.new_subject_id = newSubId;
+                if (!newSubId || newSubId == currentSubjectId) return showToast('Select a different target', 'error');
+                payload.new_subject_id = parseInt(newSubId);
             }
-
-            return showConfirm(
-                "Confirm Action",
-                `${actionType} ${studentIds.length} students?`,
-                async () => {
-                    const res = await fetch('/api/elective_windows/manage_enrollment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    if (!res.ok) return showToast("Failed", "error");
-                    viewSubject(currentSectionId, currentWindowId, currentSubId); // Refresh table
-                    loadLiveDashboard(); // Refresh sidebar
-                },
-                "Electives"
-            );
+            
+            try {
+                const res = await fetch('/api/elective_windows/manage_enrollment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('Action failed');
+                
+                showToast(`${actionType} successful`, 'success');
+                viewSubjectDetail(currentWindowId, currentSubjectId);
+                loadDashboard();
+            } catch (e) {
+                showToast('Error performing action', 'error');
+            }
         }
 
         // --- UPLOAD STUDENTS FUNCTIONS ---

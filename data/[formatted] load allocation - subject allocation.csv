@@ -1,0 +1,89 @@
+Teaching Type,Course Code,Course Name,Pattern,Category,Abbreviation_course,Assigned Faculty,Faculty_Abbreviation,EMP_ID,Session Type,Program,Class level,Specialization,Batch,L,T,P
+Regular,23IT2005,Operating System,2023,PCC,OS,Prof. Pallavi Bhujbal,PB,1020446,L,Btech,SY,DA,-,3,0,0
+Regular,23IT2005,Operating System,2023,PCC,OS,Prof. Pallavi Bhujbal,PB,1020446,L,Btech,SY,SMAD,-,3,0,0
+,,Cyber Forensics Engineering,2023,-,CFE,Prof. Pallavi Bhujbal,PB,1020446,L,Mtech,FY,CS,-,3,1,0
+,,Cyber Forensics Engineering,2023,-,CFE,Prof. Pallavi Bhujbal,PB,1020446,T,Mtech,FY,CS,-,3,1,0
+,,Lab Practice II,2023,-,LP-II,Prof. Pallavi Bhujbal,PB,1020446,P,Mtech,FY,CS,-,0,0,2
+Regular,23IT2004,Software Engineering,2023,PCC,SE,Prof. Sachin Hiranwale,SH,1020748,L,Btech,SY,DA,-,3,0,0
+Regular,23IT2004,Software Engineering,2023,PCC,SE,Prof. Sachin Hiranwale,SH,1020748,L,Btech,SY,SMAD,-,3,0,0
+,,Intrusion Detection And Prevention System,2023,-,IDPS,Prof. Sachin Hiranwale,SH,1020748,L,Mtech,FY,CS,-,3,1,0
+Regular,23MIE5001,Entrepreneurship,2023,HSSM-ENT,Entrepreneurship,Mr. Sumit Chuttar,SC,TEMP123,L,BTech,SY,DA,-,2,0,0
+Regular,23MIE5001,Entrepreneurship,2023,HSSM-ENT,Entrepreneurship,Mr. Sumit Chuttar,SC,TEMP123,L,BTech,SY,SMAD,-,2,0,0
+Regular,23IT2002,Computer Network,2023,PCC,CN,Prof. Rahul Bhole,RHB,1020487,L,Btech,SY,SMAD,-,2,0,2
+Regular,23IT2002,Computer Network,2023,PCC,CN,Prof. Rahul Bhole,RHB,1020487,P,Btech,SY,SMAD,-,2,0,2
+Regular,23IT3317,Application Security,2023,Elective-IV,CN,Prof. Rahul Bhole,RHB,1020487,L,Btech,TY,CORE,-,2,0,2
+Regular,23IT3317,Application Security,2023,Elective-IV,CN,Prof. Rahul Bhole,RHB,1020487,P,Btech,TY,CORE,A,2,0,2
+Regular,23IT3317,Application Security,2023,Elective-IV,CN,Prof. Rahul Bhole,RHB,1020487,P,Btech,TY,CORE,B,2,0,2
+Regular,23IT3317,Application Security,2023,Elective-IV,CN,Prof. Rahul Bhole,RHB,1020487,P,Btech,TY,CORE,C,2,0,2
+Block,,Project Based Learning,2023,ELC,PBL,Prof. Rahul Bhole,RHB,1020487,P,Btech,,,,0,0,2
+,,Artificial Intelligence and Machine Learning (2021),2021,-,AIML,Prof. Rahul Bhole,RHB,1020487,L,Btech,TY,,,3,0,0
+Regular,23IT2010,Project Based Learning - II,2023,ELC,PBL-II,Respective Faculties,Respective Faculties,--,-,Btech,SY,,,0,0,4
+Regular,23IT2008,Web Programming,2023,VSEC,WP,Prof. Rahul Rathod,RR,1020750,P,Btech,SY,DA,B,0,0,4
+,,Wireless and Network Security,2023,-,WNS,Prof. Rahul Rathod,RR,1020750,L,Mtech,FY,CS,,3,0,0
+Block,,Project Based Learning,2023,ELC,PBL,Prof. Rahul Rathod,RR,1020750,P,Btech,,,,0,0,2
+,,Theory of Computing (2021),2021,-,TOC,Prof. Rahul Rathod,RR,1020750,L,Btech,TY,,,3,1,0
+,,Theory of Computing (2021),2021,-,TOC,Prof. Rahul Rathod,RR,1020750,T,Btech,TY,,,3,1,0
+Block,23CSE2016,Research Paper Writing and Literature Survey,2023,ELC,RW&LS,Prof.Jyoti Nandimath,JN,1020381,L,Btech,,,,,,
+Block,,Project Based Learning,2023,ELC,PBL,Prof.Jyoti Nandimath,JN,1020381,P,Btech,,,,0,0,2
+Regular,23IT3302,Artificial Intelligence & Machine Learning ,2023,PCC,AIML,Prof.Jyoti Nandimath,JN,1020381,L,Btech,TY,DA,,3,0,0
+Regular,23IT2002,Computer Network,2023,PCC,CNL,Prof. Jyoti Nandimath,JN,1020381,P,Btech,SY,DA,A,2,0,2
+Regular,23IT2002,Computer Network,2023,PCC,CNL,Prof. Jyoti Nandimath,JN,1020381,P,Btech,SY,DA,B,2,0,2
+Regular,23IT2002,Computer Network,2023,PCC,CN,Prof. Jyoti Nandimath,JN,1020381,L,Btech,SY,SMAD,,2,0,2
+,,Artificial Intelligence and Machine Learning (2021),2021,-,AIML,Prof. Jyoti Nandimath,JN,1020381,P,Btech,TY,,,0,0,2
+Block,,Basics of Data Visualization,2023,MDM,BDV,Prof. Dr.Ishwari Raskar,IR,1020709,L,Btech,TY,,,3,0,0
+Regular,23IT1106,Data Visualization,2023,Elective-I,DV,Prof. Dr.Ishwari Raskar,IR,1020709,L,Btech,SY,DA,,3,0,0
+,,DevOps (2021),2021,-,Dops,Prof. Dr.Ishwari Raskar,IR,1020709,P,Btech,TY,,,0,0,2
+Block,,Linux OS,2023,-,LOS,Prof. Dr.Ishwari Raskar,IR,1020709,L,Btech,TY,,,3,0,0
+Regular,23IT1107,Statistical Programming and Analysis,2023,Elective-I,SPA,Prof. Kalyani Lokhande,KL,1020447,L,Btech,SY,DA,,3,0,0
+Regular,23IT3307,Natural Language Processing,2023,Elective-III,NLP,Prof. Kalyani Lokhande,KL,1020447,L,Btech,TY,DA,,2,0,2
+Regular,23IT3307,Natural Language Processing,2023,Elective-III,NLP,Prof. Kalyani Lokhande,KL,1020447,P,Btech,TY,DA,,2,0,2
+Regular,23IT3303,Artificial Intelligence and machine Learning Laboratory,2023,PCC,AIMLL,Prof. Kalyani Lokhande,KL,1020447,P,Btech,TY,DA,A,0,0,2
+Regular,23IT3303,Artificial Intelligence and machine Learning Laboratory,2023,PCC,AIMLL,Prof. Kalyani Lokhande,KL,1020447,P,Btech,TY,DA,B,0,0,2
+Regular,23IT2008,Web Programming,2023,VSEC,WP,Prof. Rohini Bhosale,RB,1020316,P,Btech,SY,DA,,0,0,4
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Rohini Bhosale,RB,1020316,L,Btech,TY,DA,,2,0,2
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Rohini Bhosale,RB,1020316,P,Btech,TY,DA,A,2,0,2
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Rohini Bhosale,RB,1020316,P,Btech,TY,DA,B,2,0,2
+,,Elective-II (2021),2021,-,-,Prof. Rohini Bhosale,RB,1020316,L,Btech,TY,,,3,0,2
+Block,23CSE2016,Research Paper Writing and Literature Survey,2023,ELC,RW&LS,Prof. Reetika Kerketta,RK,1020022,L,Btech,,,,,,
+Regular,24IT1105,Android Application Development,2023,ELECTIVE-I,AAD,Prof. Reetika Kerketta,RK,1020022,L,Btech,SY,SMAD,,2,0,2
+Regular,24IT1105,Android Application Development,2023,ELECTIVE-I,AAD,Prof. Reetika Kerketta,RK,1020022,P,Btech,SY,SMAD,,2,0,2
+Regular,23IT3305,Full Stack Back-End Development,2023,PCC,FSBED,Prof. Reetika Kerketta,RK,1020022,L,Btech,TY,SMAD,,2,0,4
+Regular,23IT3305,Full Stack Back-End Development,2023,PCC,FSBED,Prof. Reetika Kerketta,RK,1020022,P,Btech,TY,SMAD,,2,0,4
+,,Aplication Security,2023,-,AS,Prof. Reetika Kerketta,RK,1020022,L,Mtech,FY,CS,,3,0,0
+Block,,Project Based Learning,2023,ELC,PBL,Prof. Reetika Kerketta,RK,1020022,P,Btech,,,,0,0,2
+Regular,23IT2008,Web Programming,2023,VSEC,WP,Prof. Pranjali Khadse,PK,1020737,P,Btech,SY,SMAD,,0,0,4
+Regular,23IT1108,User Experience Design,2023,Elective III,UED,Prof. Pranjali Khadse,PK,1020737,L,Btech,TY,SMAD,,3,0,0
+Regular,23IT1108,User Experience Design,2023,Elective III,UED,Prof. Pranjali Khadse,PK,1020737,L,Btech,TY,DA,,3,0,2
+Regular,23IT1108,User Experience Design,2023,Elective III,UED,Prof. Pranjali Khadse,PK,1020737,P,Btech,TY,DA,,3,0,2
+,,User Experience Design (2021),2021,-,UED,Prof. Pranjali Khadse,PK,1020737,L,Btech,TY,,,3,0,0
+Regular,23IT3311,Automation Testing,2023,Elective III,AT,Prof. Rupali Bhatkande,RBh,1020755,L,Btech,TY,CORE,,2,0,2
+Regular,23IT3311,Automation Testing,2023,Elective III,AT,Prof. Rupali Bhatkande,RBh,1020755,P,Btech,TY,CORE,A,2,0,2
+Regular,23IT3311,Automation Testing,2023,Elective III,AT,Prof. Rupali Bhatkande,RBh,1020755,P,Btech,TY,CORE,B,2,0,2
+Regular,23IT3311,Automation Testing,2023,Elective III,AT,Prof. Rupali Bhatkande,RBh,1020755,P,Btech,TY,CORE,C,2,0,2
+Regular,23IT3311,Automation Testing,2023,Elective III,AT,Prof. Rupali Bhatkande,RBh,1020755,L,Btech,TY,SMAD,,2,0,2
+Regular,23IT3311,Automation Testing,2023,Elective III,AT,Prof. Rupali Bhatkande,RBh,1020755,P,Btech,TY,SMAD,,2,0,2
+Block,,Project Based Learning,2023,ELC,PBL,Prof. Rupali Bhatkande,RBh,1020755,P,Btech,,,,0,0,2
+,,Design and Analysis of Algorithms (2021),2021,-,DAA,Prof. Palash Sontakke,PS,1020333,L,Btech,TY,,,3,1,0
+Regular,23IT3309,Soft Computing,2023,Elective IV,SC,Prof. Rashmi Nair,RN,1020123,L,Btech,TY,DA,,3,0,0
+Regular,23IT3302,Artificial Intelligence and Machine Learning,2023,PCC,AIML,Prof. Swati Singh,SS,1020493,L ,Btech,TY,CORE,,3,0,0
+Regular,23IT3303,Artificial Intelligence and Machine Learning- Laboratory,2023,PCC,AIMLL,Prof. Swati Singh,SS,1020493,P,Btech,TY,CORE,A,0,0,2
+Regular,23IT3303,Artificial Intelligence and Machine Learning- Laboratory,2023,PCC,AIMLL,Prof. Swati Singh,SS,1020493,P,Btech,TY,CORE,B,0,0,2
+Regular,23IT3303,Artificial Intelligence and Machine Learning- Laboratory,2023,PCC,AIMLL,Prof. Swati Singh,SS,1020493,P,Btech,TY,CORE,C,0,0,2
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Ashvini Jadhav,AJ,1020356,L,Btech,TY,CORE,,2,0,2
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Ashvini Jadhav,AJ,1020356,P,Btech,TY,CORE,A,2,0,2
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Ashvini Jadhav,AJ,1020356,P,Btech,TY,CORE,B,2,0,2
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Ashvini Jadhav,AJ,1020356,P,Btech,TY,CORE,C,2,0,2
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Ashvini Jadhav,AJ,1020356,L,Btech,TY,SMAD,,2,0,2
+Regular,23IT3300,DevOps Engineering,2023,PCC,DopsE,Prof. Ashvini Jadhav,AJ,1020356,P,Btech,TY,SMAD,,2,0,2
+,,DevOps (2021),2021,-,Dops,Prof. Ashvini Jadhav,AJ,1020356,L,Btech,TY,,,3,0,0
+Block,,Project Based Learning,2023,ELC,PBL,Prof. Ashvini Jadhav,AJ,1020356,P,Btech,,,,0,0,2
+Regular,23IT3304,Information Storage & Management,2023,Elective IV,ISM,Dr. Amit Gadekar,AG,1020808,L,Btech,TY,DA,,2,0,2
+Regular,23IT3304,Information Storage & Management,2023,Elective IV,ISM,Dr. Amit Gadekar,AG,1020808,P,Btech,TY,DA,,2,0,2
+Block,23CSE2016,Research Paper Writing and Literature Survey,2023,ELC,RW&LS,Dr. Amit Gadekar,AG,1020808,L,Btech,SY,DA,,2,0,0
+Block,23CSE2016,Research Paper Writing and Literature Survey,2023,ELC,RW&LS,Dr. Amit Gadekar,AG,1020808,L,Btech,SY,SMAD,,2,0,0
+,,Advanced Programming Laboratory-II (2021),2021,-,APL-III,Dr. Amit Gadekar,AG,1020808,P,Btech,TY,,,0,0,2
+Block,,Project Based Learning,2023,ELC,PBL,Dr. Amit Gadekar,AG,1020808,P,Btech,,,,0,0,2
+,,Embedded Security (Mtech),2023,-,ES,Dr. Amit Gadekar,AG,1020808,L,Mtech,SY,CS,,3,0,0
+Block,23CSE2016,Research Paper Writing and Literature Survey,2023,ELC,RW&LS,Dr. Prashant Dhotre,PD,1020346,L,Btech,SY,SMAD,,2,0,0
+Block,,Project Based Learning,2023,ELC,PBL,Dr. Prashant Dhotre,PD,1020346,P,Btech,,,,0,0,2
+Regular,23IT3310,Project Based Learning - IV,2023,ELC,PBL-IV,Respective Faculties,Respective Faculties,--,-,Btech,TY,,,0,0,4

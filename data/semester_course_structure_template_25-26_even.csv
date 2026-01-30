@@ -1,0 +1,52 @@
+Course Code,Course,Course Type,Section,SEM,Class Level,L,T,P,Credits
+23IT2002,Computer Networks,PCC,DA,IV,SY,2,0,2,3
+23IT2005,Operating System,PCC,DA,IV,SY,3,0,0,3
+23IT2004,Software Engineering,PCC,DA,IV,SY,3,0,0,3
+23MIE5001,Entrepreneurship,HSSM_ENT,DA,IV,SY,2,0,0,2
+23IT2008,Web Programming,VSEC,DA,IV,SY,0,0,4,2
+23IT1106,Data Visualization,Elective-I,DA,IV,SY,3,0,0,3
+23IT1107,Statistical Programming and Analysis,Elective-I,DA,IV,SY,3,0,0,3
+23IT2010,Project Based Learning - II,ELC,DA,IV,SY,0,0,4,2
+23CSE3082,Financial Literacy and Securities Market Primer,MDM-OE,DA,IV,SY,2,0,0,2
+23CSE3133,Emotional Intelligence,MDM-OE,DA,IV,SY,2,0,0,2
+23SCL2001,Aptitude and Professional Skills - Foundation,HSSM-VEC,DA,IV,SY,2,0,0,2
+23CSE2016,Research Writing and Scientific Communication,ELC,DA,IV,SY,2,0,0,2
+23IT2002,Computer Networks,PCC,SMAD,IV,SY,2,0,2,3
+23IT2005,Operating System,PCC,SMAD,IV,SY,3,0,0,3
+23IT2004,Software Engineering,PCC,SMAD,IV,SY,3,0,0,3
+23MIE5001,Entrepreneurship,HSSM-ENT,SMAD,IV,SY,2,0,0,2
+23IT2008,Web Programming,VSEC,SMAD,IV,SY,0,0,4,2
+24IT1105,Android Application Development,Elective-I ,SMAD,IV,SY,2,0,2,3
+23IT2010,Project Based Learning - II,ELC,SMAD,IV,SY,0,0,4,2
+23CSE3082,Financial Literacy and Securities Market Primer,MDM-OE,SMAD,IV,SY,2,0,0,2
+23CSE3133,Emotional Intelligence,MDM-OE,SMAD,IV,SY,2,0,0,2
+23CSE2016,Research Writing and Scientific Communications,ELC,SMAD,IV,SY,2,0,0,2
+23SCL2001,Aptitude and Professional Skills - Foundation,HSSM-VEC,SMAD,IV,SY,1,0,2,2
+23IT3300,DevOps Engineering,PCC,CORE,VI,TY,2,0,2,3
+23IT3302,Artificial Intelligence and Machine Learning,PCC,CORE,VI,TY,3,0,0,3
+23IT3311,Automation Testing,Elective-III,CORE,VI,TY,2,0,2,3
+23IT3317,Application Security,Elective-IV,CORE,VI,TY,2,0,2,3
+23IT3310,Project Based Learning - IV,ELC,CORE,VI,TY,0,0,4,2
+23IT3303,Artificial Intelligence and Machine Learning- Laboratory,PCC,CORE,VI,TY,0,0,2,1
+23SCL4003,Aptitude and Professional Skills - Industry Readiness,MDHDC,CORE,VI,TY,2,0,0,2
+25IT101,Foreign Language,AEC,CORE,VI,TY,2,0,0,2
+23IT___,Multi-disciplinary Minor Elective II,MDM-Minor,CORE,VI,TY,4,0,0,4
+23IT3300,DevOps Engineering,PCC,DA,VI,TY,2,0,2,3
+23IT3302,Artificial Intelligence and machine Learning,PCC,DA,VI,TY,3,0,0,3
+23IT1108,User Experience Design,Elective-III,DA,VI,TY,2,0,2,3
+23IT3307,Natural Language Processing,Elective-III,DA,VI,TY,2,0,2,3
+23IT3309,Soft Computing,Elective-IV,DA,VI,TY,2,0,2,3
+23IT3304,Information Storage & Management,Elective-IV,DA,VI,TY,2,0,2,3
+23IT3310,Project Based Learning - IV,ELC,DA,VI,TY,0,0,4,2
+23IT3303,Artificial Intelligence and machine Learning Laboratory,PCC,DA,VI,TY,0,0,2,1
+23SCL4003,Aptitude and Professional Skills - Industry Readiness,MDHDC,DA,VI,TY,2,0,0,2
+25IT101,Foriegn Language,AEC,DA,VI,TY,2,0,0,2
+23IT___,Multi-disciplinary Minor Elective II,MDM-Minor,DA,VI,TY,4,0,0,4
+23IT3300,DevOps Engineering,PCC,SMAD,VI,TY,2,0,2,3
+23IT3305,Full Stack Back-End Development,PCC,SMAD,VI,TY,2,0,4,4
+23IT1108,User Experience Design,Elective III ,SMAD,VI,TY,3,0,0,3
+23IT3311,Automation Testing,Elective IV,SMAD,VI,TY,2,0,2,3
+23IT3310,Project Based Learning - IV,ELC,SMAD,VI,TY,0,0,4,2
+25IT101,Foreign Languages,AEC,SMAD,VI,TY,2,0,0,2
+23IT___,Multidisciplinary Minor Elective II,MDM-Minor,SMAD,VI,TY,4,0,0,4
+23SCL4003,Aptitude and Professional Skills - Industry Readiness,MDHDC,SMAD,VI,TY,1,0,2,2
