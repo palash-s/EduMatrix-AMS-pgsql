@@ -92,6 +92,10 @@
         const urlParams = new URLSearchParams(window.location.search);
         const scheduleId = urlParams.get('schedule_id');
         const dateParam = urlParams.get('date');
+        // MDM sessions use subject_id + section_id instead of schedule_id
+        const mdmSubjectId = urlParams.get('subject_id');
+        const mdmSectionId = urlParams.get('section_id');
+        const isMDMSession = mdmSubjectId && mdmSectionId && !scheduleId;
 
         let currentStudentData = [];
         let isLocked = false;
@@ -114,7 +118,13 @@
 
         async function loadData() {
             try {
-                const res = await fetch(`/api/attendance/sheet?schedule_id=${scheduleId}&date=${dateParam}`);
+                let url;
+                if (isMDMSession) {
+                    url = `/api/attendance/sheet?subject_id=${mdmSubjectId}&section_id=${mdmSectionId}&date=${dateParam}`;
+                } else {
+                    url = `/api/attendance/sheet?schedule_id=${scheduleId}&date=${dateParam}`;
+                }
+                const res = await fetch(url);
                 const data = await res.json();
 
                 // ERROR CHECKING
@@ -144,9 +154,12 @@
                     btn.classList.remove('bg-mit-purple');
                 }
 
-                // Load Topics (skip for extra sessions - no lesson plans)
+                // Load Topics (skip for extra sessions, MDM/OE, and sessions without valid subject_id)
                 const lessonSection = document.getElementById('lesson-tracking-section');
-                if (data.is_extra_session) {
+                const isMDMOE = data.is_mdm_oe || false;
+                const hasValidSubject = data.subject_id && data.subject_id !== null && data.subject_id !== 'null';
+                
+                if (data.is_extra_session || isMDMOE || !hasValidSubject) {
                     lessonSection.style.display = 'none';
                 } else {
                     const topicCheckboxes = document.getElementById('topic-checkboxes');
@@ -313,12 +326,19 @@
             try {
                 const submittedBy = userId;
                 const payload = {
-                    schedule_id: scheduleId,
                     date: dateParam,
                     students: currentStudentData,
                     topic_ids: selectedTopicIds,  // Send array of topic IDs
                     submitted_by: submittedBy
                 };
+                
+                // MDM sessions use subject_id + section_id instead of schedule_id
+                if (isMDMSession) {
+                    payload.subject_id = mdmSubjectId;
+                    payload.section_id = mdmSectionId;
+                } else {
+                    payload.schedule_id = scheduleId;
+                }
 
                 const res = await fetch('/api/attendance/submit', {
                     method: 'POST',
