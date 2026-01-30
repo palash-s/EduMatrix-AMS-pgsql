@@ -120,103 +120,14 @@
                         <div class="w-8 h-8 rounded-full bg-gray-300 text-white flex items-center justify-center text-sm font-bold">3</div>
                         <span class="text-xs font-bold text-gray-400">Launch</span>
                     </div>
-                </div>
-            </div>
-            
-            <!-- Wizard Body -->
-            <div class="flex-1 overflow-y-auto p-6">
-                <!-- Step 1: Select Class Level & Sections -->
-                <div id="wizard-step-1">
-                    <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Class Level</label>
-                            <div class="flex gap-2">
-                                <button onclick="selectClassLevel('FY')" class="level-btn flex-1 py-3 rounded-lg border-2 border-gray-200 font-bold text-gray-600 hover:border-purple-400 transition-all">FY</button>
-                                <button onclick="selectClassLevel('SY')" class="level-btn flex-1 py-3 rounded-lg border-2 border-gray-200 font-bold text-gray-600 hover:border-purple-400 transition-all">SY</button>
-                                <button onclick="selectClassLevel('TY')" class="level-btn flex-1 py-3 rounded-lg border-2 border-gray-200 font-bold text-gray-600 hover:border-purple-400 transition-all">TY</button>
-                                <button onclick="selectClassLevel('LY')" class="level-btn flex-1 py-3 rounded-lg border-2 border-gray-200 font-bold text-gray-600 hover:border-purple-400 transition-all">LY</button>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Target Semester</label>
-                            <select id="wizard-target-sem" class="w-full p-3 border border-gray-300 rounded-lg bg-white font-bold" onchange="onTargetSemChange()">
-                                <option value="">-- Select --</option>
-                                <option value="1">Semester 1</option>
-                                <option value="2">Semester 2</option>
-                                <option value="3">Semester 3</option>
-                                <option value="4">Semester 4</option>
-                                <option value="5">Semester 5</option>
-                                <option value="6">Semester 6</option>
-                                <option value="7">Semester 7</option>
-                                <option value="8">Semester 8</option>
-                            </select>
-                        </div>
+                    <div class="flex gap-2 items-center">
+                        <button onclick="openUploadModal()" class="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 flex items-center gap-1.5 shadow-sm">
+                            <i data-lucide="upload" class="w-4 h-4"></i> Upload Students
+                        </button>
+                        <button onclick="closeDetailPanel()" class="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
                     </div>
-                    
-                    <div class="mb-4">
-                        <div class="flex justify-between items-center mb-2">
-                            <label class="text-xs font-bold text-gray-500 uppercase">Select Sections</label>
-                            <button onclick="toggleAllSections()" class="text-xs text-purple-600 hover:underline">Toggle All</button>
-                        </div>
-                        <div id="sections-grid" class="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
-                            <p class="col-span-3 text-center text-gray-400 text-sm py-4">Select a class level first</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Step 2: Configure Electives -->
-                <div id="wizard-step-2" class="hidden">
-                    <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Min Batch Size</label>
-                            <input type="number" id="wizard-min-batch" value="12" min="1" class="w-full p-3 border border-gray-300 rounded-lg font-bold">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Deadline (Days from now)</label>
-                            <input type="number" id="wizard-deadline-days" value="7" min="1" class="w-full p-3 border border-gray-300 rounded-lg font-bold">
-                        </div>
-                    </div>
-                    
-                    <div class="mb-4">
-                        <label class="text-xs font-bold text-gray-500 uppercase mb-2 block">Elective Buckets & Subjects</label>
-                        <div id="buckets-config" class="space-y-3 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
-                            <p class="text-center text-gray-400 text-sm py-4">Loading electives...</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Step 3: Review & Launch -->
-                <div id="wizard-step-3" class="hidden">
-                    <div class="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200 mb-4">
-                        <h3 class="font-bold text-green-800 flex items-center gap-2 mb-4">
-                            <i data-lucide="check-circle" class="w-5 h-5"></i> Review Configuration
-                        </h3>
-                        <div id="review-summary" class="space-y-2 text-sm"></div>
-                    </div>
-                    
-                    <div class="bg-white rounded-xl p-4 border border-gray-200">
-                        <label class="flex items-center gap-3 cursor-pointer">
-                            <input type="checkbox" id="wizard-save-template" class="w-5 h-5 rounded border-gray-300 text-purple-600">
-                            <div>
-                                <span class="font-bold text-gray-700">Save as Template</span>
-                                <p class="text-xs text-gray-500">Re-use this configuration for future rollouts</p>
-                            </div>
-                        </label>
-                        <input type="text" id="wizard-template-name" placeholder="Template name (e.g., SY Sem 4 Standard)" class="mt-2 w-full p-2 border border-gray-300 rounded-lg text-sm hidden">
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Wizard Footer -->
-            <div class="p-4 border-t border-gray-200 bg-gray-50 flex justify-between">
-                <button id="wizard-back-btn" onclick="wizardBack()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium hidden">
-                    <i data-lucide="arrow-left" class="w-4 h-4 inline mr-1"></i> Back
-                </button>
-                <div class="flex gap-2 ml-auto">
-                    <button onclick="closeWizard()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium">Cancel</button>
-                    <button id="wizard-next-btn" onclick="wizardNext()" class="px-6 py-2 bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700">
-                        Next <i data-lucide="arrow-right" class="w-4 h-4 inline ml-1"></i>
-                    </button>
                 </div>
             </div>
         </div>
@@ -386,6 +297,53 @@ CS401OE1,Data Analytics,Open Elective,3,3-0-0</pre>
                     <button onclick="performAction('Approve')" class="px-4 py-2 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 flex items-center gap-2">
                         <i data-lucide="check" class="w-4 h-4"></i> Approve
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UPLOAD STUDENTS MODAL -->
+    <div id="upload-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold mit-purple serif">Upload Students to Elective</h2>
+                <button onclick="closeUploadModal()" class="p-1 text-gray-400 hover:bg-gray-100 rounded-full">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <p class="text-sm text-gray-600 mb-3">
+                Upload a CSV file to directly assign students to electives in this window.
+            </p>
+
+            <div class="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4">
+                <p class="text-xs text-purple-700 font-bold mb-1">CSV Format:</p>
+                <code class="text-xs text-purple-600">admission_number,subject_code</code>
+                <p class="text-xs text-gray-500 mt-1">Each row assigns a student to an elective. Students already selected will be skipped.</p>
+            </div>
+
+            <a href="#" onclick="downloadUploadTemplate(); return false;" class="text-purple-600 text-sm font-medium underline hover:text-purple-800 mb-4 block">
+                <i data-lucide="download" class="w-4 h-4 inline"></i> Download Template (with valid subject codes)
+            </a>
+
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 mb-4 text-center hover:border-purple-400 transition-colors">
+                <input type="file" id="upload-file" accept=".csv" class="hidden" onchange="updateFileName(this)">
+                <label for="upload-file" class="cursor-pointer">
+                    <i data-lucide="file-up" class="w-8 h-8 text-gray-400 mx-auto mb-2"></i>
+                    <p class="text-sm text-gray-600" id="file-name-display">Click to select CSV file</p>
+                </label>
+            </div>
+
+            <div class="flex justify-end gap-2">
+                <button onclick="closeUploadModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium text-xs">Cancel</button>
+                <button onclick="submitUpload()" class="px-6 py-2 bg-purple-600 text-white rounded-lg font-bold text-xs hover:bg-purple-700 flex items-center gap-2">
+                    <i data-lucide="upload" class="w-4 h-4"></i> Upload
+                </button>
+            </div>
+
+            <div id="upload-result" class="mt-4 hidden">
+                <div class="border rounded-lg p-3 bg-gray-50">
+                    <p id="upload-result-text" class="text-sm"></p>
                 </div>
             </div>
         </div>
@@ -1237,6 +1195,98 @@ CS401OE1,Data Analytics,Open Elective,3,3-0-0</pre>
                 showToast('Error performing action', 'error');
             }
         }
+
+        // --- UPLOAD STUDENTS FUNCTIONS ---
+        function openUploadModal() {
+            if (!currentWindowId) {
+                amsToast('Please select a window first', 'warning');
+                return;
+            }
+            document.getElementById('upload-modal').classList.remove('hidden');
+            document.getElementById('upload-file').value = '';
+            document.getElementById('file-name-display').innerText = 'Click to select CSV file';
+            document.getElementById('upload-result').classList.add('hidden');
+            lucide.createIcons();
+        }
+
+        function closeUploadModal() {
+            document.getElementById('upload-modal').classList.add('hidden');
+        }
+
+        function updateFileName(input) {
+            const fileName = input.files[0]?.name || 'Click to select CSV file';
+            document.getElementById('file-name-display').innerText = fileName;
+        }
+
+        async function downloadUploadTemplate() {
+            if (!currentWindowId) {
+                amsToast('Please select a window first', 'warning');
+                return;
+            }
+            window.location.href = `/api/admin/elective_windows/${currentWindowId}/upload_template`;
+        }
+
+        async function submitUpload() {
+            const file = document.getElementById('upload-file').files[0];
+            if (!file) {
+                amsToast('Please select a CSV file', 'warning');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch(`/api/admin/elective_windows/${currentWindowId}/upload_students`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                const resultDiv = document.getElementById('upload-result');
+                const resultText = document.getElementById('upload-result-text');
+                resultDiv.classList.remove('hidden');
+
+                if (data.error) {
+                    resultText.innerHTML = `<span class="text-red-600">✗ Error: ${data.error}</span>`;
+                } else {
+                    resultText.innerHTML = `
+                        <span class="text-green-600 font-bold">✓ Created: ${data.created} students</span><br>
+                        <span class="text-yellow-600">⊘ Skipped: ${data.skipped}</span>
+                        ${data.skipped_reasons ? `
+                            <ul class="text-xs text-gray-500 mt-1 ml-4 list-disc">
+                                <li>Already selected: ${data.skipped_reasons.already_selected}</li>
+                                <li>Student not found: ${data.skipped_reasons.student_not_found}</li>
+                                <li>Subject not in window: ${data.skipped_reasons.subject_not_in_window}</li>
+                            </ul>
+                        ` : ''}
+                        ${data.errors && data.errors.length > 0 ? `
+                            <div class="mt-2 text-xs text-red-500">
+                                <strong>Errors:</strong>
+                                <ul class="ml-4 list-disc">${data.errors.map(e => `<li>${e}</li>`).join('')}</ul>
+                            </div>
+                        ` : ''}
+                    `;
+
+                    // Refresh the dashboard
+                    loadLiveDashboard();
+
+                    // Close modal after 2 seconds if successful
+                    if (data.created > 0) {
+                        setTimeout(() => {
+                            closeUploadModal();
+                            amsToast(`Successfully added ${data.created} students`, 'success');
+                        }, 2000);
+                    }
+                }
+            } catch (err) {
+                console.error('Upload error:', err);
+                amsToast('Upload failed: ' + err.message, 'danger');
+            }
+        }
+
+        function toggleAll(source) { document.querySelectorAll('.stu-check').forEach(cb => cb.checked = source.checked); updateCount(); }
+        function updateCount() { document.getElementById('selected-count').innerText = document.querySelectorAll('.stu-check:checked').length; }
     </script>
 </body>
 </html>
