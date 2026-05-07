@@ -12,7 +12,7 @@ services:
       - ams_network
 
   web:
-    image: ghcr.io/${GHCR_IMAGE_REPO}:${IMAGE_TAG}
+    image: ghcr.io/${GHCR_IMAGE_REPO}:latest
     restart: always
     depends_on:
       - db
@@ -26,6 +26,8 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       FLASK_ENV: production
       SESSION_COOKIE_SECURE: "true"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
     networks:
       - ams_network
 
@@ -42,13 +44,32 @@ services:
     networks:
       - ams_network
 
-  # Cloudflare Quick Tunnel - Free URL, no domain required
+  # Cloudflare Quick Tunnel - No token required; URL is stable while container runs
+  # Note: URL changes if the container is ever recreated. For a stable custom domain,
+  # replace with: tunnel --no-autoupdate run --protocol http2 --token ${CLOUDFLARE_TUNNEL_TOKEN}
   tunnel:
     image: cloudflare/cloudflared:latest
     restart: always
     command: tunnel --url http://nginx:80
     depends_on:
       - nginx
+    networks:
+      - ams_network
+
+  # Watchtower - Auto-pulls new images from GHCR and restarts the web container
+  # Replaces SSH-based deployment; no Tailscale or exposed SSH port needed
+  watchtower:
+    image: containrrr/watchtower:latest
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      REPO_USER: ${GHCR_USERNAME}
+      REPO_PASS: ${GHCR_TOKEN}
+      WATCHTOWER_POLL_INTERVAL: "300"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
     networks:
       - ams_network
 
