@@ -13501,7 +13501,8 @@ def get_version_schedule(version_id):
             "teacher_id": teacher.staff_id if teacher else None,
             "room": room.room_number if room else "TBD",
             "is_unassigned": slot.is_unassigned,
-            "is_special_slot": bool(slot.slot_label and not subj)
+            "is_special_slot": bool(slot.slot_label and not subj),
+            "slot_label": slot.slot_label
         })
 
     return jsonify({
@@ -13647,6 +13648,531 @@ def delete_timetable_version(version_id):
     db.session.commit()
 
     return jsonify({"message": "Version deleted successfully"}), 200
+
+
+# ==========================================
+# API: TIMETABLE SLOT EDITING (Manual Edit)
+# ==========================================
+
+def _get_active_version_ids():
+    """Get all active timetable version IDs for cross-section conflict checking."""
+    active_versions = TimetableVersion.query.filter_by(status='Active').all()
+    return [v.version_id for v in active_versions]
+
+
+def _check_faculty_conflict_global(teacher_id, day, start_time, end_time, exclude_schedule_id=None):
+    """Check if teacher has another class at this time across ALL active timetable versions."""
+    if not teacher_id:
+        return None
+
+    # Get all active version IDs
+    active_version_ids = _get_active_version_ids()
+    if not active_version_ids:
+        return None
+
+    query = WeeklySchedule.query.filter(
+        WeeklySchedule.version_id.in_(active_version_ids),
+        WeeklySchedule.teacher_id == teacher_id,
+        WeeklySchedule.day_of_week == day.upper(),
+        WeeklySchedule.start_time < end_time,
+        WeeklySchedule.end_time > start_time
+    )
+    if exclude_schedule_id:
+        query = query.filter(WeeklySchedule.schedule_id != exclude_schedule_id)
+    return query.first()
+
+
+def _check_room_conflict_global(room_id, day, start_time, end_time, exclude_schedule_id=None):
+    """Check if room is already booked at this time across ALL active timetable versions."""
+    if not room_id:
+        return None
+
+    # Get all active version IDs
+    active_version_ids = _get_active_version_ids()
+    if not active_version_ids:
+        return None
+
+    query = WeeklySchedule.query.filter(
+        WeeklySchedule.version_id.in_(active_version_ids),
+        WeeklySchedule.room_id == room_id,
+        WeeklySchedule.day_of_week == day.upper(),
+        WeeklySchedule.start_time < end_time,
+        WeeklySchedule.end_time > start_time
+    )
+    if exclude_schedule_id:
+        query = query.filter(WeeklySchedule.schedule_id != exclude_schedule_id)
+    return query.first()
+
+
+def _check_faculty_conflict(teacher_id, day, start_time, end_time, version_id, exclude_schedule_id=None):
+    """Check if teacher has another class at this time within the same version (for draft editing)."""
+    if not teacher_id:
+        return None
+    query = WeeklySchedule.query.filter(
+        WeeklySchedule.version_id == version_id,
+        WeeklySchedule.teacher_id == teacher_id,
+        WeeklySchedule.day_of_week == day.upper(),
+        WeeklySchedule.start_time < end_time,
+        WeeklySchedule.end_time > start_time
+    )
+    if exclude_schedule_id:
+        query = query.filter(WeeklySchedule.schedule_id != exclude_schedule_id)
+    return query.first()
+
+
+def _check_room_conflict(room_id, day, start_time, end_time, version_id, exclude_schedule_id=None):
+    """Check if room is already booked at this time within the same version (for draft editing)."""
+    if not room_id:
+        return None
+    query = WeeklySchedule.query.filter(
+        WeeklySchedule.version_id == version_id,
+        WeeklySchedule.room_id == room_id,
+        WeeklySchedule.day_of_week == day.upper(),
+        WeeklySchedule.start_time < end_time,
+        WeeklySchedule.end_time > start_time
+    )
+    if exclude_schedule_id:
+        query = query.filter(WeeklySchedule.schedule_id != exclude_schedule_id)
+    return query.first()
+
+
+@app.route('/api/admin/timetable_slots/<int:schedule_id>', methods=['GET'])
+@login_required
+@require_roles('Admin')
+def get_timetable_slot(schedule_id):
+    """Get detailed slot info with available faculty and rooms for editing."""
+    try:
+        slot = WeeklySchedule.query.get_or_404(schedule_id)
+        version = TimetableVersion.query.get(slot.version_id)
+
+        if not version:
+            return jsonify({"error": "Version not found"}), 404
+
+        deny = _ensure_section_in_scope(int(slot.section_id))
+        if deny:
+            return deny
+
+        # Get subject info
+        subject = Subject.query.get(slot.subject_id) if slot.subject_id else None
+
+        # Get current teacher info
+        current_teacher = StaffProfile.query.get(slot.teacher_id) if slot.teacher_id else None
+
+        # Get current room info
+        current_room = RoomMaster.query.get(slot.room_id) if slot.room_id else None
+
+        # Get all available faculty (teachers) - join with UserMaster for is_active check
+        all_faculty = (db.session.query(StaffProfile)
+                       .join(UserMaster, StaffProfile.staff_id == UserMaster.user_id)
+                       .filter(UserMaster.is_active == True)
+                       .order_by(StaffProfile.full_name)
+                       .all())
+
+        # Get all available rooms
+        all_rooms = RoomMaster.query.order_by(RoomMaster.room_number).all()
+
+        # Get subjects allocated to this section (for subject dropdown)
+        section = ClassSection.query.get(slot.section_id)
+        available_subjects = []
+        if section:
+            allocations = (db.session.query(SubjectAllocation, Subject)
+                          .join(Subject, SubjectAllocation.subject_id == Subject.subject_id)
+                          .filter(SubjectAllocation.section_id == slot.section_id)
+                          .order_by(Subject.name)
+                          .all())
+            for alloc, subj in allocations:
+                available_subjects.append({
+                    "subject_id": subj.subject_id,
+                    "name": subj.name,
+                    "code": subj.code,
+                    "subject_type": subj.subject_type,
+                    "is_current": subj.subject_id == slot.subject_id
+                })
+
+        # Check which faculty/rooms are free at this time (global check across all active versions)
+        available_faculty = []
+        for f in all_faculty:
+            # Use global conflict check to catch conflicts in other sections too
+            conflict = _check_faculty_conflict_global(
+                f.staff_id, slot.day_of_week, slot.start_time, slot.end_time,
+                schedule_id
+            )
+            # Also check within the same version for draft edits
+            version_conflict = _check_faculty_conflict(
+                f.staff_id, slot.day_of_week, slot.start_time, slot.end_time,
+                slot.version_id, schedule_id
+            ) if version.status == 'Draft' else None
+
+            has_conflict = conflict is not None or version_conflict is not None
+            conflict_info = conflict or version_conflict
+
+            available_faculty.append({
+                "staff_id": f.staff_id,
+                "name": f.full_name,
+                "employee_code": f.employee_code,
+                "is_current": f.staff_id == slot.teacher_id,
+                "has_conflict": has_conflict,
+                "conflict_subject": Subject.query.get(conflict_info.subject_id).name if conflict_info and conflict_info.subject_id else None,
+                "conflict_section": ClassSection.query.get(conflict_info.section_id).name if conflict_info and conflict_info.section_id else None
+            })
+
+        available_rooms = []
+        for r in all_rooms:
+            # Use global conflict check for rooms too
+            conflict = _check_room_conflict_global(
+                r.room_id, slot.day_of_week, slot.start_time, slot.end_time,
+                schedule_id
+            )
+            version_conflict = _check_room_conflict(
+                r.room_id, slot.day_of_week, slot.start_time, slot.end_time,
+                slot.version_id, schedule_id
+            ) if version.status == 'Draft' else None
+
+            has_conflict = conflict is not None or version_conflict is not None
+
+            available_rooms.append({
+                "room_id": r.room_id,
+                "room_number": r.room_number,
+                "room_type": r.room_type,
+                "capacity": r.capacity,
+                "is_current": r.room_id == slot.room_id,
+                "has_conflict": has_conflict
+            })
+
+        return jsonify({
+            "slot": {
+                "schedule_id": slot.schedule_id,
+                "section_id": slot.section_id,
+                "subject_id": slot.subject_id,
+                "subject_name": subject.name if subject else None,
+                "subject_code": subject.code if subject else None,
+                "teacher_id": slot.teacher_id,
+                "teacher_name": current_teacher.full_name if current_teacher else None,
+                "day_of_week": slot.day_of_week,
+                "start_time": slot.start_time.strftime("%H:%M") if slot.start_time else None,
+                "end_time": slot.end_time.strftime("%H:%M") if slot.end_time else None,
+                "session_type": slot.session_type,
+                "target_batch": slot.target_batch,
+                "room_id": slot.room_id,
+                "room_number": current_room.room_number if current_room else None,
+                "version_id": slot.version_id,
+                "is_unassigned": slot.is_unassigned,
+                "slot_label": slot.slot_label
+            },
+            "version_status": version.status,
+            "available_faculty": available_faculty,
+            "available_rooms": available_rooms,
+            "available_subjects": available_subjects
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _create_new_version_with_edit(version, original_slot, edit_data, edit_type='update'):
+    """
+    Create a new version from an active version, apply the edit, and publish it.
+    Returns (new_version, new_slot_id or (new_slot_a_id, new_slot_b_id) for swaps)
+    """
+    from datetime import datetime
+
+    # Get max version number for this section
+    max_version = db.session.query(db.func.max(TimetableVersion.version_number)).filter_by(
+        section_id=version.section_id
+    ).scalar() or 0
+
+    # Create new version
+    new_version = TimetableVersion(
+        section_id=version.section_id,
+        version_number=max_version + 1,
+        version_label=f"Edit v{max_version + 1}",
+        status='Active',  # Directly set as active
+        timetable_type=version.timetable_type,
+        period_id=version.period_id,
+        created_by_id=current_user.user_id,
+        created_at=datetime.utcnow(),
+        published_at=datetime.utcnow(),
+        source_type='manual',
+        notes=f"Created from edit on version {version.version_number}"
+    )
+    db.session.add(new_version)
+    db.session.flush()
+
+    # Clone all slots from old version to new version
+    old_slots = WeeklySchedule.query.filter_by(version_id=version.version_id).all()
+    slot_id_map = {}  # old_id -> new_slot
+
+    for old_slot in old_slots:
+        new_slot = WeeklySchedule(
+            section_id=old_slot.section_id,
+            subject_id=old_slot.subject_id,
+            teacher_id=old_slot.teacher_id,
+            day_of_week=old_slot.day_of_week,
+            start_time=old_slot.start_time,
+            end_time=old_slot.end_time,
+            session_type=old_slot.session_type,
+            target_batch=old_slot.target_batch,
+            room_id=old_slot.room_id,
+            version_id=new_version.version_id,
+            is_unassigned=old_slot.is_unassigned,
+            slot_label=old_slot.slot_label
+        )
+        db.session.add(new_slot)
+        db.session.flush()
+        slot_id_map[old_slot.schedule_id] = new_slot
+
+    # Archive the old active version
+    version.status = 'Archived'
+    version.archived_at = datetime.utcnow()
+
+    return new_version, slot_id_map
+
+
+@app.route('/api/admin/timetable_slots/<int:schedule_id>', methods=['PUT'])
+@login_required
+@require_roles('Admin')
+def update_timetable_slot(schedule_id):
+    """Update a single slot (faculty, room, etc). Creates new version if editing Active."""
+    try:
+        slot = WeeklySchedule.query.get_or_404(schedule_id)
+        version = TimetableVersion.query.get(slot.version_id)
+
+        if not version:
+            return jsonify({"error": "Version not found"}), 404
+
+        deny = _ensure_section_in_scope(int(slot.section_id))
+        if deny:
+            return deny
+
+        # Only allow editing Draft or Active versions (not Archived)
+        if version.status == 'Archived':
+            return jsonify({"error": "Cannot edit archived versions"}), 400
+
+        data = request.json or {}
+        conflicts = []
+
+        # Check for faculty conflict if changing teacher
+        new_teacher_id = data.get('teacher_id')
+        if new_teacher_id and new_teacher_id != slot.teacher_id:
+            # Use global conflict check to catch conflicts across all sections
+            conflict = _check_faculty_conflict_global(
+                new_teacher_id, slot.day_of_week, slot.start_time, slot.end_time,
+                schedule_id
+            )
+            # Also check within the same version for draft edits
+            if not conflict and version.status == 'Draft':
+                conflict = _check_faculty_conflict(
+                    new_teacher_id, slot.day_of_week, slot.start_time, slot.end_time,
+                    slot.version_id, schedule_id
+                )
+            if conflict:
+                conflict_subject = Subject.query.get(conflict.subject_id)
+                conflict_section = ClassSection.query.get(conflict.section_id)
+                section_info = f" in {conflict_section.name}" if conflict_section and conflict_section.section_id != slot.section_id else ""
+                conflicts.append({
+                    "type": "faculty",
+                    "message": f"Faculty already has {conflict_subject.name if conflict_subject else 'a class'}{section_info} at this time"
+                })
+
+        # Check for room conflict if changing room
+        new_room_id = data.get('room_id')
+        if new_room_id and new_room_id != slot.room_id:
+            # Use global conflict check for rooms too
+            conflict = _check_room_conflict_global(
+                new_room_id, slot.day_of_week, slot.start_time, slot.end_time,
+                schedule_id
+            )
+            if not conflict and version.status == 'Draft':
+                conflict = _check_room_conflict(
+                    new_room_id, slot.day_of_week, slot.start_time, slot.end_time,
+                    slot.version_id, schedule_id
+                )
+            if conflict:
+                conflict_subject = Subject.query.get(conflict.subject_id)
+                conflict_section = ClassSection.query.get(conflict.section_id)
+                section_info = f" ({conflict_section.name})" if conflict_section else ""
+                conflicts.append({
+                    "type": "room",
+                    "message": f"Room already booked for {conflict_subject.name if conflict_subject else 'another class'}{section_info} at this time"
+                })
+
+        # If conflicts and not forcing, return error
+        if conflicts and not data.get('force'):
+            return jsonify({"error": "Conflicts detected", "conflicts": conflicts}), 409
+
+        new_version_created = False
+        new_version_id = None
+        target_slot = slot
+
+        # If editing Active version, create a new version first
+        if version.status == 'Active':
+            new_version, slot_id_map = _create_new_version_with_edit(version, slot, data)
+            target_slot = slot_id_map.get(schedule_id)
+            new_version_created = True
+            new_version_id = new_version.version_id
+            if not target_slot:
+                return jsonify({"error": "Failed to create new version"}), 500
+
+        # Apply updates to the target slot
+        if 'subject_id' in data:
+            target_slot.subject_id = data['subject_id'] if data['subject_id'] else None
+            # Clear slot_label if setting a subject
+            if data['subject_id']:
+                target_slot.slot_label = None
+
+        if 'teacher_id' in data:
+            target_slot.teacher_id = data['teacher_id'] if data['teacher_id'] else None
+            target_slot.is_unassigned = not data['teacher_id']
+
+        if 'room_id' in data:
+            target_slot.room_id = data['room_id'] if data['room_id'] else None
+
+        if 'session_type' in data:
+            target_slot.session_type = data['session_type']
+
+        if 'target_batch' in data:
+            target_slot.target_batch = data['target_batch'] if data['target_batch'] else None
+
+        db.session.commit()
+
+        response = {
+            "message": "Slot updated successfully",
+            "schedule_id": target_slot.schedule_id,
+            "conflicts_overridden": len(conflicts) > 0
+        }
+
+        if new_version_created:
+            response["new_version_created"] = True
+            response["new_version_id"] = new_version_id
+            response["message"] = "Slot updated - new version created and published"
+
+        return jsonify(response)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/timetable_slots/swap', methods=['POST'])
+@login_required
+@require_roles('Admin')
+def swap_timetable_slots():
+    """Swap day/time between two slots. Creates new version if editing Active."""
+    try:
+        data = request.json or {}
+        slot_a_id = data.get('slot_a_id')
+        slot_b_id = data.get('slot_b_id')
+
+        if not slot_a_id or not slot_b_id:
+            return jsonify({"error": "Both slot_a_id and slot_b_id are required"}), 400
+
+        if slot_a_id == slot_b_id:
+            return jsonify({"error": "Cannot swap a slot with itself"}), 400
+
+        slot_a = WeeklySchedule.query.get_or_404(slot_a_id)
+        slot_b = WeeklySchedule.query.get_or_404(slot_b_id)
+
+        # Both must be in same version
+        if slot_a.version_id != slot_b.version_id:
+            return jsonify({"error": "Both slots must be in the same version"}), 400
+
+        version = TimetableVersion.query.get(slot_a.version_id)
+        if not version:
+            return jsonify({"error": "Version not found"}), 404
+
+        # Only allow editing Draft or Active versions (not Archived)
+        if version.status == 'Archived':
+            return jsonify({"error": "Cannot edit archived versions"}), 400
+
+        deny = _ensure_section_in_scope(int(slot_a.section_id))
+        if deny:
+            return deny
+
+        # Store original values
+        a_day, a_start, a_end = slot_a.day_of_week, slot_a.start_time, slot_a.end_time
+        b_day, b_start, b_end = slot_b.day_of_week, slot_b.start_time, slot_b.end_time
+
+        # Check conflicts after swap
+        conflicts = []
+
+        # Check slot_a's teacher at slot_b's time
+        if slot_a.teacher_id:
+            conflict = _check_faculty_conflict(
+                slot_a.teacher_id, b_day, b_start, b_end,
+                slot_a.version_id, slot_a.schedule_id
+            )
+            # Exclude slot_b since it's moving too
+            if conflict and conflict.schedule_id != slot_b.schedule_id:
+                conflicts.append(f"Faculty conflict for {slot_a.teacher_id} at new time")
+
+        # Check slot_b's teacher at slot_a's time
+        if slot_b.teacher_id:
+            conflict = _check_faculty_conflict(
+                slot_b.teacher_id, a_day, a_start, a_end,
+                slot_b.version_id, slot_b.schedule_id
+            )
+            if conflict and conflict.schedule_id != slot_a.schedule_id:
+                conflicts.append(f"Faculty conflict for {slot_b.teacher_id} at new time")
+
+        # Check room conflicts similarly
+        if slot_a.room_id:
+            conflict = _check_room_conflict(
+                slot_a.room_id, b_day, b_start, b_end,
+                slot_a.version_id, slot_a.schedule_id
+            )
+            if conflict and conflict.schedule_id != slot_b.schedule_id:
+                conflicts.append(f"Room conflict at new time")
+
+        if slot_b.room_id:
+            conflict = _check_room_conflict(
+                slot_b.room_id, a_day, a_start, a_end,
+                slot_b.version_id, slot_b.schedule_id
+            )
+            if conflict and conflict.schedule_id != slot_a.schedule_id:
+                conflicts.append(f"Room conflict at new time")
+
+        if conflicts and not data.get('force'):
+            return jsonify({"error": "Conflicts detected after swap", "conflicts": conflicts}), 409
+
+        new_version_created = False
+        new_version_id = None
+        target_slot_a = slot_a
+        target_slot_b = slot_b
+
+        # If editing Active version, create a new version first
+        if version.status == 'Active':
+            new_version, slot_id_map = _create_new_version_with_edit(version, slot_a, data)
+            target_slot_a = slot_id_map.get(slot_a_id)
+            target_slot_b = slot_id_map.get(slot_b_id)
+            new_version_created = True
+            new_version_id = new_version.version_id
+            if not target_slot_a or not target_slot_b:
+                return jsonify({"error": "Failed to create new version"}), 500
+
+        # Perform swap on target slots
+        target_slot_a.day_of_week = b_day
+        target_slot_a.start_time = b_start
+        target_slot_a.end_time = b_end
+
+        target_slot_b.day_of_week = a_day
+        target_slot_b.start_time = a_start
+        target_slot_b.end_time = a_end
+
+        db.session.commit()
+
+        response = {
+            "message": "Slots swapped successfully",
+            "slot_a": {"id": target_slot_a.schedule_id, "new_day": b_day, "new_time": f"{b_start}-{b_end}"},
+            "slot_b": {"id": target_slot_b.schedule_id, "new_day": a_day, "new_time": f"{a_start}-{a_end}"}
+        }
+
+        if new_version_created:
+            response["new_version_created"] = True
+            response["new_version_id"] = new_version_id
+            response["message"] = "Slots swapped - new version created and published"
+
+        return jsonify(response)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 def _notify_timetable_change(section_id, version_id):

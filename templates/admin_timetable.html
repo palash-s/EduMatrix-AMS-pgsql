@@ -109,6 +109,68 @@
             </div>
         </div>
 
+        <!-- SLOT EDIT MODAL -->
+        <div id="slot-edit-modal" class="fixed inset-0 z-[60] hidden">
+            <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="closeSlotEdit()"></div>
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden">
+                <div class="px-6 py-4 border-b bg-purple-50">
+                    <h3 class="font-bold text-lg text-purple-900">Edit Slot</h3>
+                    <p class="text-sm text-purple-600" id="edit-slot-label">Monday 08:45-09:40</p>
+                </div>
+                <div class="p-6 space-y-4">
+                    <!-- Subject Dropdown -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Subject</label>
+                        <select id="edit-slot-subject" class="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none">
+                            <option value="">-- Select Subject --</option>
+                        </select>
+                        <p id="edit-slot-type" class="text-xs text-gray-500 mt-1"></p>
+                    </div>
+
+                    <!-- Faculty Dropdown -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Faculty</label>
+                        <select id="edit-slot-faculty" class="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none">
+                            <option value="">-- No Faculty Assigned --</option>
+                        </select>
+                        <div id="faculty-conflict-warning" class="hidden mt-1 text-xs text-red-600 flex items-center gap-1">
+                            <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                            <span></span>
+                        </div>
+                    </div>
+
+                    <!-- Room Dropdown -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Room</label>
+                        <select id="edit-slot-room" class="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none">
+                            <option value="">-- No Room Assigned --</option>
+                        </select>
+                        <div id="room-conflict-warning" class="hidden mt-1 text-xs text-red-600 flex items-center gap-1">
+                            <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                            <span></span>
+                        </div>
+                    </div>
+
+                    <!-- Batch (for practicals) -->
+                    <div id="edit-batch-container" class="hidden">
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Batch</label>
+                        <select id="edit-slot-batch" class="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none">
+                            <option value="">-- Whole Class --</option>
+                            <option value="Batch A">Batch A</option>
+                            <option value="Batch B">Batch B</option>
+                            <option value="Batch C">Batch C</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
+                    <button onclick="closeSlotEdit()" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100">Cancel</button>
+                    <button onclick="saveSlotEdit()" id="save-slot-btn" class="px-4 py-2 bg-purple-600 text-white rounded-lg font-bold text-sm hover:bg-purple-700 flex items-center gap-2 disabled:opacity-50">
+                        <i data-lucide="save" class="w-4 h-4"></i> Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- 1. COURSE STRUCTURE TABLE (Main Static View) -->
         <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden mb-8">
             <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
@@ -173,6 +235,14 @@
         // --- VERSION MANAGEMENT STATE ---
         let currentVersions = [];
         let selectedVersionId = null;
+        let selectedVersionStatus = null;
+
+        // --- SLOT EDITING STATE ---
+        let editingSlotId = null;
+        let editingSlotData = null;
+        let swapMode = false;
+        let swapFirstSlotId = null;
+        let currentPreviewSchedule = [];
 
         // --- TIME SLOTS CONFIG (Used for Grid Rendering) ---
         const timeSlots = [
@@ -929,6 +999,9 @@
 
         async function previewVersion(versionId, status) {
             selectedVersionId = versionId;
+            selectedVersionStatus = status;
+            swapMode = false;
+            swapFirstSlotId = null;
 
             try {
                 const res = await fetch(`/api/admin/timetable_versions/${versionId}`);
@@ -937,12 +1010,17 @@
                 document.getElementById('preview-version-label').innerText =
                     `Version ${data.version.version_number} - ${data.version.status}`;
 
+                // Store schedule for later use
+                currentPreviewSchedule = data.schedule;
                 renderPreviewGrid(data.schedule);
 
                 // Show/hide action buttons based on status
                 const actionsDiv = document.getElementById('preview-actions');
                 if (status === 'Draft') {
                     actionsDiv.innerHTML = `
+                        <button onclick="toggleSwapMode()" id="btn-swap-mode" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100 flex items-center gap-2">
+                            <i data-lucide="repeat" class="w-4 h-4"></i> Swap Slots
+                        </button>
                         <button onclick="closeDraftPreview()" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100">Cancel</button>
                         <button onclick="deleteDraftFromPreview()" class="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold text-sm hover:bg-red-200 flex items-center gap-2">
                             <i data-lucide="trash-2" class="w-4 h-4"></i> Delete Draft
@@ -951,8 +1029,21 @@
                             <i data-lucide="check-circle" class="w-4 h-4"></i> Publish & Activate
                         </button>
                     `;
-                } else {
+                } else if (status === 'Active') {
                     actionsDiv.innerHTML = `
+                        <div class="flex-1 text-xs text-gray-500 flex items-center gap-1">
+                            <i data-lucide="info" class="w-3 h-3"></i>
+                            Click any slot to edit. Changes create a new version automatically.
+                        </div>
+                        <button onclick="toggleSwapMode()" id="btn-swap-mode" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100 flex items-center gap-2">
+                            <i data-lucide="repeat" class="w-4 h-4"></i> Swap Slots
+                        </button>
+                        <button onclick="closeDraftPreview()" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100">Close</button>
+                    `;
+                } else {
+                    // Archived - read only
+                    actionsDiv.innerHTML = `
+                        <div class="flex-1 text-xs text-gray-400">Archived version (read-only)</div>
                         <button onclick="closeDraftPreview()" class="px-4 py-2 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100">Close</button>
                     `;
                 }
@@ -988,24 +1079,38 @@
 
                     const batchBadge = slot.batch ? `<span class="text-[8px] font-bold uppercase bg-white/80 px-1 rounded">${slot.batch}</span>` : '';
 
+                    // Make clickable for Draft and Active versions (not Archived)
+                    const isEditable = selectedVersionStatus === 'Draft' || selectedVersionStatus === 'Active';
+                    const clickHandler = isEditable ? `onclick="handleSlotClick(${slot.schedule_id})"` : '';
+                    const hoverClass = isEditable ? 'cursor-pointer hover:ring-2 hover:ring-purple-400 hover:shadow-md transition-all' : '';
+                    const editIcon = isEditable ? `<i data-lucide="edit-2" class="w-3 h-3 absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-purple-600"></i>` : '';
+
                     const cardHTML = `
-                    <div class="p-1.5 rounded border ${bgColor} mb-1 text-[10px]">
-                        <div class="font-bold truncate">${slot.subject}</div>
-                        <div class="opacity-70 truncate">${slot.teacher}</div>
+                    <div class="p-1.5 rounded border ${bgColor} mb-1 text-[10px] relative group ${hoverClass}"
+                         id="slot-card-${slot.schedule_id}" data-schedule-id="${slot.schedule_id}" ${clickHandler}>
+                        ${editIcon}
+                        <div class="font-bold truncate">${slot.subject || slot.slot_label || 'Unassigned'}</div>
+                        <div class="opacity-70 truncate">${slot.teacher || 'No Faculty'}</div>
                         <div class="flex justify-between mt-1">
-                            <span class="font-mono opacity-60">${slot.code}</span>
+                            <span class="font-mono opacity-60">${slot.code || ''}</span>
                             ${batchBadge}
                         </div>
+                        ${slot.room ? `<div class="text-[8px] opacity-50 mt-0.5">${slot.room}</div>` : ''}
                     </div>`;
 
                     cell.innerHTML += cardHTML;
                 }
             });
+            lucide.createIcons();
         }
 
         function closeDraftPreview() {
             document.getElementById('draft-preview-modal').classList.add('hidden');
             selectedVersionId = null;
+            selectedVersionStatus = null;
+            swapMode = false;
+            swapFirstSlotId = null;
+            currentPreviewSchedule = [];
         }
 
         async function publishDraft() {
@@ -1120,6 +1225,265 @@
                     }
                 },
                 "Version Manager"
+            );
+        }
+
+        // ==========================================
+        // SLOT EDITING FUNCTIONS
+        // ==========================================
+
+        function handleSlotClick(scheduleId) {
+            if (swapMode) {
+                handleSwapSelection(scheduleId);
+            } else {
+                openSlotEdit(scheduleId);
+            }
+        }
+
+        async function openSlotEdit(scheduleId) {
+            if (!selectedVersionId) return;
+
+            try {
+                const res = await fetch(`/api/admin/timetable_slots/${scheduleId}`);
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showToast(data.error || 'Failed to load slot', 'error');
+                    return;
+                }
+
+                editingSlotId = scheduleId;
+                editingSlotData = data;
+
+                // Populate modal
+                document.getElementById('edit-slot-label').innerText =
+                    `${data.slot.day_of_week} ${data.slot.start_time} - ${data.slot.end_time}`;
+                document.getElementById('edit-slot-type').innerText =
+                    data.slot.session_type || '';
+
+                // Populate subject dropdown
+                const subjectSelect = document.getElementById('edit-slot-subject');
+                subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
+                if (data.available_subjects && data.available_subjects.length > 0) {
+                    data.available_subjects.forEach(s => {
+                        const selected = s.is_current ? 'selected' : '';
+                        subjectSelect.innerHTML += `<option value="${s.subject_id}" ${selected}>${s.code} - ${s.name} (${s.subject_type})</option>`;
+                    });
+                }
+                // Add special slot option if current slot has a label
+                if (data.slot.slot_label) {
+                    subjectSelect.innerHTML += `<option value="" selected>Special: ${data.slot.slot_label}</option>`;
+                }
+
+                // Populate faculty dropdown
+                const facultySelect = document.getElementById('edit-slot-faculty');
+                facultySelect.innerHTML = '<option value="">-- No Faculty Assigned --</option>';
+                data.available_faculty.forEach(f => {
+                    const conflictNote = f.has_conflict ? ` (Conflict: ${f.conflict_subject || 'Busy'}${f.conflict_section ? ' in ' + f.conflict_section : ''})` : '';
+                    const selected = f.is_current ? 'selected' : '';
+                    const disabled = f.has_conflict ? 'disabled' : '';
+                    facultySelect.innerHTML += `<option value="${f.staff_id}" ${selected} ${disabled}>${f.name} (${f.employee_code})${conflictNote}</option>`;
+                });
+
+                // Populate room dropdown
+                const roomSelect = document.getElementById('edit-slot-room');
+                roomSelect.innerHTML = '<option value="">-- No Room Assigned --</option>';
+                data.available_rooms.forEach(r => {
+                    const conflictNote = r.has_conflict ? ' (Occupied)' : '';
+                    const selected = r.is_current ? 'selected' : '';
+                    const disabled = r.has_conflict ? 'disabled' : '';
+                    roomSelect.innerHTML += `<option value="${r.room_id}" ${selected} ${disabled}>${r.room_number} (${r.room_type}, Cap: ${r.capacity})${conflictNote}</option>`;
+                });
+
+                // Show/hide batch selector for practicals
+                const batchContainer = document.getElementById('edit-batch-container');
+                if (data.slot.session_type === 'Practical') {
+                    batchContainer.classList.remove('hidden');
+                    document.getElementById('edit-slot-batch').value = data.slot.target_batch || '';
+                } else {
+                    batchContainer.classList.add('hidden');
+                }
+
+                // Clear warnings
+                document.getElementById('faculty-conflict-warning').classList.add('hidden');
+                document.getElementById('room-conflict-warning').classList.add('hidden');
+
+                document.getElementById('slot-edit-modal').classList.remove('hidden');
+                lucide.createIcons();
+            } catch (e) {
+                showToast('Network error', 'error');
+            }
+        }
+
+        function closeSlotEdit() {
+            document.getElementById('slot-edit-modal').classList.add('hidden');
+            editingSlotId = null;
+            editingSlotData = null;
+        }
+
+        async function saveSlotEdit() {
+            if (!editingSlotId) return;
+
+            const payload = {
+                subject_id: document.getElementById('edit-slot-subject').value ? parseInt(document.getElementById('edit-slot-subject').value) : null,
+                teacher_id: document.getElementById('edit-slot-faculty').value || null,
+                room_id: document.getElementById('edit-slot-room').value ? parseInt(document.getElementById('edit-slot-room').value) : null
+            };
+
+            // Add batch if visible
+            const batchContainer = document.getElementById('edit-batch-container');
+            if (!batchContainer.classList.contains('hidden')) {
+                payload.target_batch = document.getElementById('edit-slot-batch').value || null;
+            }
+
+            const saveBtn = document.getElementById('save-slot-btn');
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...';
+            lucide.createIcons();
+
+            try {
+                const res = await fetch(`/api/admin/timetable_slots/${editingSlotId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    if (data.new_version_created) {
+                        showToast('Slot updated - new version created!');
+                        closeSlotEdit();
+                        closeDraftPreview();
+                        // Reload versions to show the new version
+                        loadVersions();
+                    } else {
+                        showToast('Slot updated successfully');
+                        closeSlotEdit();
+                        // Refresh preview
+                        previewVersion(selectedVersionId, selectedVersionStatus);
+                    }
+                } else if (res.status === 409) {
+                    // Conflict detected
+                    if (data.conflicts) {
+                        data.conflicts.forEach(c => {
+                            if (c.type === 'faculty') {
+                                const warning = document.getElementById('faculty-conflict-warning');
+                                warning.querySelector('span').innerText = c.message;
+                                warning.classList.remove('hidden');
+                            } else if (c.type === 'room') {
+                                const warning = document.getElementById('room-conflict-warning');
+                                warning.querySelector('span').innerText = c.message;
+                                warning.classList.remove('hidden');
+                            }
+                        });
+                    }
+                    showToast('Conflicts detected - please resolve', 'error');
+                } else {
+                    showToast(data.error || 'Update failed', 'error');
+                }
+            } catch (e) {
+                showToast('Network error', 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i data-lucide="save" class="w-4 h-4"></i> Save Changes';
+                lucide.createIcons();
+            }
+        }
+
+        // ==========================================
+        // SWAP MODE FUNCTIONS
+        // ==========================================
+
+        function toggleSwapMode() {
+            swapMode = !swapMode;
+            swapFirstSlotId = null;
+
+            const btn = document.getElementById('btn-swap-mode');
+            if (swapMode) {
+                btn.classList.add('bg-orange-100', 'border-orange-300', 'text-orange-700');
+                btn.innerHTML = '<i data-lucide="x" class="w-4 h-4"></i> Cancel Swap';
+                showToast('Swap mode: Click on first slot to swap', 'info');
+            } else {
+                btn.classList.remove('bg-orange-100', 'border-orange-300', 'text-orange-700');
+                btn.innerHTML = '<i data-lucide="repeat" class="w-4 h-4"></i> Swap Slots';
+                // Clear any highlighting
+                document.querySelectorAll('.swap-selected').forEach(el => {
+                    el.classList.remove('swap-selected', 'ring-2', 'ring-orange-400');
+                });
+            }
+            lucide.createIcons();
+        }
+
+        function handleSwapSelection(scheduleId) {
+            if (!swapFirstSlotId) {
+                // First slot selection
+                swapFirstSlotId = scheduleId;
+                const card = document.getElementById(`slot-card-${scheduleId}`);
+                if (card) {
+                    card.classList.add('swap-selected', 'ring-2', 'ring-orange-400');
+                }
+                showToast('Now click on the second slot to swap with', 'info');
+            } else if (swapFirstSlotId === scheduleId) {
+                // Clicked same slot - deselect
+                const card = document.getElementById(`slot-card-${scheduleId}`);
+                if (card) {
+                    card.classList.remove('swap-selected', 'ring-2', 'ring-orange-400');
+                }
+                swapFirstSlotId = null;
+                showToast('Selection cleared', 'info');
+            } else {
+                // Second slot selected - perform swap
+                performSwap(swapFirstSlotId, scheduleId);
+            }
+        }
+
+        async function performSwap(slotAId, slotBId) {
+            // Find slot info for confirmation
+            const slotA = currentPreviewSchedule.find(s => s.schedule_id === slotAId);
+            const slotB = currentPreviewSchedule.find(s => s.schedule_id === slotBId);
+
+            const slotAInfo = slotA ? `${slotA.subject || 'Slot'} (${slotA.day} ${slotA.start_time})` : `Slot ${slotAId}`;
+            const slotBInfo = slotB ? `${slotB.subject || 'Slot'} (${slotB.day} ${slotB.start_time})` : `Slot ${slotBId}`;
+
+            return showConfirm(
+                "Swap Slots",
+                `Swap time slots between:\n\n• ${slotAInfo}\n• ${slotBInfo}\n\nThis will exchange their day and time.`,
+                async () => {
+                    try {
+                        const res = await fetch('/api/admin/timetable_slots/swap', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ slot_a_id: slotAId, slot_b_id: slotBId })
+                        });
+
+                        const data = await res.json();
+
+                        if (res.ok) {
+                            toggleSwapMode(); // Exit swap mode
+                            if (data.new_version_created) {
+                                showToast('Slots swapped - new version created!');
+                                closeDraftPreview();
+                                loadVersions(); // Reload to show new version
+                            } else {
+                                showToast('Slots swapped successfully');
+                                previewVersion(selectedVersionId, selectedVersionStatus); // Refresh
+                            }
+                        } else if (res.status === 409) {
+                            showToast('Conflict: ' + (data.conflicts ? data.conflicts.join(', ') : data.error), 'error');
+                            // Clear selection but stay in swap mode
+                            swapFirstSlotId = null;
+                            document.querySelectorAll('.swap-selected').forEach(el => {
+                                el.classList.remove('swap-selected', 'ring-2', 'ring-orange-400');
+                            });
+                        } else {
+                            showToast(data.error || 'Swap failed', 'error');
+                        }
+                    } catch (e) {
+                        showToast('Network error', 'error');
+                    }
+                },
+                "Timetable Editor"
             );
         }
     </script>
