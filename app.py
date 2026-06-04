@@ -18117,9 +18117,19 @@ def rollover_semester():
                 )
             )
 
+        # Detach historical session logs and clear dependent schedule records
+        # before wiping the active timetable for the new term.
+        db.session.query(SessionLog).filter(
+            SessionLog.schedule_id.is_not(None)
+        ).update({SessionLog.schedule_id: None}, synchronize_session=False)
+        db.session.query(LoadAdjustment).delete(synchronize_session=False)
+        db.session.query(ScheduleChange).filter(
+            ScheduleChange.original_schedule_id.is_not(None)
+        ).update({ScheduleChange.original_schedule_id: None}, synchronize_session=False)
+
         # FLUSH Active Tables (Schedule & Allocations - always cleared)
-        db.session.query(WeeklySchedule).delete()
-        db.session.query(SubjectAllocation).delete()
+        db.session.query(WeeklySchedule).delete(synchronize_session=False)
+        db.session.query(SubjectAllocation).delete(synchronize_session=False)
         
         # ============================================
         # SAFE ELECTIVE CLEANUP - Preserve Future Semester Elections
