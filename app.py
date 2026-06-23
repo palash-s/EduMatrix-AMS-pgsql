@@ -20928,3 +20928,97 @@ if __name__ == '__main__':
     app.run(debug=True, port=5000)
 
 
+# ============================================================
+# LMS INTEGRATION — Single Sign-On Launch
+# ============================================================
+
+def _build_lms_sso_token(ams_user_id, email, full_name, role, courses):
+    """Generate a short-lived HMAC-signed token for LMS SSO (5-minute expiry)."""
+    from itsdangerous import URLSafeTimedSerializer
+    secret = os.environ.get('LMS_SSO_SECRET', 'lms-sso-dev-secret-change-in-prod')
+    s = URLSafeTimedSerializer(secret)
+    return s.dumps({
+        'ams_user_id': ams_user_id,
+        'email': email,
+        'full_name': full_name,
+        'role': role,
+        'courses': courses,
+    })
+
+
+@app.route('/lms/launch')
+@login_required
+def lms_launch():
+    """Redirect the current user into the LMS via AMS SSO.
+
+    Builds a signed token containing the user's identity and their
+    subject list (derived from AMS subject_allocation), then sends
+    the browser to the LMS frontend which will provision the user
+    and log them in automatically.
+    """
+    user = current_user  # UserMaster instance
+    lms_url = os.environ.get('LMS_URL', 'http://localhost:8000')
+
+    try:
+        courses = []
+
+        if user.user_type == 'Student':
+            student = StudentProfile.query.filter_by(student_id=user.user_id).first()
+            if not student:
+                return jsonify({"error": "Student profile not found"}), 404
+
+            email = user.username if '@' in user.username else f"{user.username}@ams.local"
+            full_name = student.full_name
+            role = 'student'
+
+            if student.current_section_id:
+                allocations = SubjectAllocation.query.filter_by(
+                    section_id=student.current_section_id
+                ).all()
+                seen_codes = set()
+                for alloc in allocations:
+                    subj = Subject.query.get(alloc.subject_id)
+                    if not subj or subj.code in seen_codes:
+                        continue
+                    seen_codes.add(subj.code)
+                    faculty_email = None
+                    if alloc.teacher_id:
+                        fac = StaffProfile.query.get(alloc.teacher_id)
+                        if fac:
+                            faculty_email = fac.email_contact
+                    courses.append({
+                        'code': subj.code,
+                        'name': subj.name,
+                        'faculty_email': faculty_email,
+                    })
+
+        else:  # Staff / Admin
+            staff = StaffProfile.query.filter_by(staff_id=user.user_id).first()
+            if not staff:
+                return jsonify({"error": "Staff profile not found"}), 404
+
+            email = staff.email_contact or f"{user.username}@ams.local"
+            full_name = staff.full_name
+            role = 'faculty'
+
+            allocations = SubjectAllocation.query.filter_by(
+                teacher_id=user.user_id
+            ).all()
+            seen_codes = set()
+            for alloc in allocations:
+                subj = Subject.query.get(alloc.subject_id)
+                if not subj or subj.code in seen_codes:
+                    continue
+                seen_codes.add(subj.code)
+                courses.append({
+                    'code': subj.code,
+                    'name': subj.name,
+                    'faculty_email': email,
+                })
+
+        token = _build_lms_sso_token(user.user_id, email, full_name, role, courses)
+        return redirect(f"{lms_url}/auth/ams-sso?token={token}")
+
+    except Exception as e:
+        return jsonify({"error": f"LMS launch failed: {str(e)}"}), 500
+
