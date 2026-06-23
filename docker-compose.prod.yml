@@ -11,11 +11,18 @@ services:
     networks:
       - ams_network
 
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: always
+    networks:
+      - ams_network
+
   web:
     image: ghcr.io/${GHCR_IMAGE_REPO}:latest
     restart: always
     depends_on:
       - db
+      - valkey
     command: gunicorn -w 4 -b 0.0.0.0:5000 app:app
     environment:
       POSTGRES_HOST: db
@@ -26,6 +33,7 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       FLASK_ENV: production
       SESSION_COOKIE_SECURE: "true"
+      RATE_LIMIT_STORAGE_URI: redis://valkey:6379
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     networks:
