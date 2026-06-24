@@ -23,5 +23,5 @@ firebase-admin>=6.5.0
 pytest==8.3.4
 pytest-cov==4.1.0
 
-# For rate limiter storage (optional, use memory for dev)
-# redis==5.0.4
+# For rate limiter storage (Valkey/Redis backend for distributed workers)
+redis==5.0.4
